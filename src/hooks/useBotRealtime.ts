@@ -3,11 +3,14 @@ import { DEFAULT_REACTIONS, DEFAULT_TEMPLATES } from '../shared/commands.ts';
 import type {
   BotConfig,
   CommandExecutionLog,
+  GatewayJob,
+  GatewayStats,
   GroupSimulatorState,
   ServerStateSnapshot,
   SimulatorMember,
   SimulatorMessage,
   WAConnectionState,
+  WebhookDeliveryLog,
 } from '../shared/types.ts';
 
 const INITIAL_WA_STATE: WAConnectionState = {
@@ -38,6 +41,55 @@ const INITIAL_CONFIG: BotConfig = {
     goodbye: true,
   },
   groupOverrides: {},
+  antiBan: {
+    enabled: true,
+    warmUpMode: true,
+    humanizeTyping: true,
+    minTypingDelayMs: 1800,
+    maxTypingDelayMs: 3800,
+    userCooldownSeconds: 6,
+    maxCommandsPerMinutePerUser: 4,
+    hidetagCooldownSeconds: 45,
+    hidetagAdminOnly: true,
+    maxMentionsLimit: 40,
+    autoRejectCalls: true,
+    callRejectNotice:
+      'Maaf, bot ini berjalan secara otomatis dan tidak menerima panggilan telepon atau video WhatsApp.',
+    ownerOnlyMode: false,
+    ownerNumber: '',
+    browserProfile: 'windows_chrome',
+  },
+  lockSettingsManualOnly: true,
+  webhook: {
+    enabled: false,
+    url: '',
+    secret: '',
+    events: ['message.received', 'message.sent', 'session.status'],
+  },
+  autoResponder: [
+    {
+      id: 'rule-halo',
+      trigger: 'halo',
+      matchType: 'contains',
+      replyText:
+        'Halo {sender}! Ada yang bisa {botName} bantu hari ini? Ketik *{prefix}menu* untuk melihat seluruh fitur.',
+      scope: 'all',
+      enabled: true,
+      hitCount: 0,
+      createdAt: 1714500000000,
+    },
+    {
+      id: 'rule-web',
+      trigger: 'website',
+      matchType: 'contains',
+      replyText:
+        'Kunjungi website resmi kreator kami di https://gepacorner.my.id untuk artikel, panduan, dan update terbaru!',
+      scope: 'all',
+      enabled: true,
+      hitCount: 0,
+      createdAt: 1714500000000,
+    },
+  ],
 };
 
 const INITIAL_GROUP_STATE: GroupSimulatorState = {
@@ -75,6 +127,14 @@ export function useBotRealtime() {
     mediaDownloaded: 0,
     linksModerated: 0,
   });
+  const [webhookLogs, setWebhookLogs] = useState<WebhookDeliveryLog[]>([]);
+  const [gatewayJobs, setGatewayJobs] = useState<GatewayJob[]>([]);
+  const [gatewayStats, setGatewayStats] = useState<GatewayStats>({
+    totalSent: 0,
+    queuedNow: 0,
+    failedCount: 0,
+    webhooksDelivered: 0,
+  });
   const [socketConnected, setSocketConnected] = useState(false);
   const [isLoadingInitial, setIsLoadingInitial] = useState(true);
 
@@ -100,6 +160,15 @@ export function useBotRealtime() {
       setGroupState(snap.groupState);
     }
     setStats(snap.stats);
+    if (snap.webhookLogs) {
+      setWebhookLogs(snap.webhookLogs);
+    }
+    if (snap.gatewayJobs) {
+      setGatewayJobs(snap.gatewayJobs);
+    }
+    if (snap.gatewayStats) {
+      setGatewayStats(snap.gatewayStats);
+    }
     setIsLoadingInitial(false);
   }, []);
 
@@ -209,6 +278,15 @@ export function useBotRealtime() {
             case 'stats:update':
               setStats(parsed.payload as typeof stats);
               break;
+            case 'webhook:logs':
+              setWebhookLogs(parsed.payload as WebhookDeliveryLog[]);
+              break;
+            case 'gateway:jobs':
+              setGatewayJobs(parsed.payload as GatewayJob[]);
+              break;
+            case 'gateway:stats':
+              setGatewayStats(parsed.payload as GatewayStats);
+              break;
           }
         } catch {
           // Ignore malformed event
@@ -307,6 +385,9 @@ export function useBotRealtime() {
     groupMembers,
     groupState,
     stats,
+    webhookLogs,
+    gatewayJobs,
+    gatewayStats,
     socketConnected,
     isLoadingInitial,
     connectQR,

@@ -25,6 +25,9 @@ import {
 } from './commandEngine.ts';
 import { fetchRemoteBuffer } from './mediaDownloader.ts';
 import { botStore } from './stateStore.ts';
+import { groupCache } from './groupCache.ts';
+import { queueEngine } from './queueEngine.ts';
+import { webhookDispatcher } from './webhookDispatcher.ts';
 
 const AUTH_DIR = path.join(process.cwd(), '.baileys_auth');
 const silentLogger = pino({ level: 'silent' });
@@ -55,6 +58,8 @@ class WhatsAppSessionManager {
   >();
   private pendingGroupMeta = new Map<string, Promise<GroupMetadata>>();
   private groupGreetingLastSent = new Map<string, number>();
+  private userCommandTimestamps = new Map<string, number[]>();
+  private lastHidetagPerGroup = new Map<string, number>();
   private outboundQueue: Promise<void> = Promise.resolve();
   private lastOutboundSentAt = 0;
 
@@ -66,8 +71,11 @@ class WhatsAppSessionManager {
 
   private enqueueOutboundSend<T>(task: () => Promise<T>): Promise<T> {
     const run = async (): Promise<T> => {
-      const minGap =
-        Math.floor(Math.random() * (2900 - 1600 + 1)) + 1600;
+      const isWarmUp =
+        botStore.config.antiBan.enabled && botStore.config.antiBan.warmUpMode;
+      const minGap = isWarmUp
+        ? Math.floor(Math.random() * (4500 - 2800 + 1)) + 2800
+        : Math.floor(Math.random() * (2900 - 1600 + 1)) + 1600;
       const elapsed = Date.now() - this.lastOutboundSentAt;
       if (this.lastOutboundSentAt > 0 && elapsed < minGap) {
         await new Promise((r) => setTimeout(r, minGap - elapsed));
@@ -126,14 +134,47 @@ class WhatsAppSessionManager {
     return promise;
   }
 
+  private resolveBrowserProfile(): [string, string, string] {
+    const profile =
+      botStore.config.antiBan?.browserProfile || 'windows_chrome';
+    switch (profile) {
+      case 'macos_safari':
+        return ['macOS', 'Safari', '18.1'];
+      case 'windows_edge':
+        return ['Windows', 'Edge', '131.0.2903.112'];
+      case 'ubuntu_chrome':
+        return Browsers.ubuntu('Chrome');
+      case 'windows_chrome':
+      default:
+        return ['Windows', 'Chrome', '131.0.6778.205'];
+    }
+  }
+
   private async simulateHumanTyping(
     sock: WASocket,
     jid: string,
-    isGroup: boolean
+    isGroup: boolean,
+    type: 'text' | 'audio' = 'text'
   ): Promise<void> {
+    const { antiBan } = botStore.config;
+    if (antiBan && !antiBan.humanizeTyping && !antiBan.enabled) {
+      return;
+    }
     try {
-      await sock.sendPresenceUpdate('composing', jid);
-      await this.sleepRandom(isGroup ? 650 : 350, isGroup ? 1450 : 750);
+      const presenceState = type === 'audio' ? 'recording' : 'composing';
+      await sock.sendPresenceUpdate(presenceState, jid);
+
+      const warmUpExtra =
+        antiBan && antiBan.enabled && antiBan.warmUpMode ? 1400 : 0;
+      const baseMin = antiBan?.minTypingDelayMs || 1800;
+      const baseMax = antiBan?.maxTypingDelayMs || 3800;
+      const minD = Math.max(800, baseMin + (isGroup ? 400 : 0) + warmUpExtra);
+      const maxD = Math.max(
+        minD + 500,
+        baseMax + (isGroup ? 800 : 0) + warmUpExtra
+      );
+
+      await this.sleepRandom(minD, maxD);
       await sock.sendPresenceUpdate('paused', jid);
     } catch {
       // Non-fatal presence error
@@ -337,14 +378,18 @@ class WhatsAppSessionManager {
         logger: silentLogger as never,
         auth: state,
         printQRInTerminal: false,
-        browser: Browsers.ubuntu('Chrome'),
+        browser: this.resolveBrowserProfile(),
         syncFullHistory: false,
         markOnlineOnConnect: false,
         qrTimeout: 60000,
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
         keepAliveIntervalMs: 25000,
-        cachedGroupMetadata: async (jid) => this.getCachedGroupMetadata(jid),
+        cachedGroupMetadata: async (jid) => {
+          const cached = groupCache.get(jid);
+          if (cached) return cached;
+          return this.getCachedGroupMetadata(jid);
+        },
         getMessage: async () => undefined,
       });
 
@@ -359,10 +404,40 @@ class WhatsAppSessionManager {
       }
 
       this.sock = sock;
+      (global as any).__BAILEYS_SOCKET__ = sock;
+      queueEngine.setSocketProvider(() => this.sock);
       this.isStarting = false;
 
       sock.ev.on('creds.update', () => {
         void queueSaveCreds();
+      });
+
+      sock.ev.on('call', async (callEvents) => {
+        if (!botStore.config.antiBan?.autoRejectCalls) return;
+        for (const call of callEvents) {
+          if (call.status === 'offer') {
+            try {
+              await sock.rejectCall(call.id, call.from);
+              botStore.incrementAntiBanStat('callsDeclined');
+
+              if (botStore.config.antiBan?.callRejectNotice) {
+                const noticeText = botStore.config.antiBan.callRejectNotice;
+                const callerJid = call.from;
+                setTimeout(async () => {
+                  try {
+                    await sock.sendMessage(callerJid, {
+                      text: `🛡️ *Perlindungan Anti-Ban GepaBot*\n\n${noticeText}`,
+                    });
+                  } catch {
+                    // Ignore notice failure
+                  }
+                }, 2500);
+              }
+            } catch {
+              // Ignore call reject error
+            }
+          }
+        }
       });
 
       const triggerPairingCode = async () => {
@@ -472,6 +547,10 @@ class WhatsAppSessionManager {
             connectedAt: Date.now(),
             statusMessage: null,
             lastError: null,
+          });
+          void webhookDispatcher.dispatch('session.status', {
+            status: 'connected',
+            user: { id: rawId, name, phone },
           });
         } else if (connection === 'close') {
           await queueSaveCreds();
@@ -609,6 +688,8 @@ class WhatsAppSessionManager {
       sock.ev.on('group-participants.update', async (event) => {
         // Invalidate cached participant roster so admin/member checks stay fresh
         this.groupMetaCache.delete(event.id);
+        groupCache.updateParticipants(event.id, event.action, event.participants);
+        void webhookDispatcher.dispatch('group.participant_update', event);
 
         if (
           (event.action !== 'add' && event.action !== 'remove') ||
@@ -690,6 +771,15 @@ class WhatsAppSessionManager {
         if (type !== 'notify') return;
         for (const msg of messages) {
           void this.handleIncomingMessage(sock, msg);
+          if (!msg.key.fromMe) {
+            void webhookDispatcher.dispatch('message.received', {
+              id: msg.key.id,
+              from: msg.key.remoteJid,
+              participant: msg.key.participant,
+              pushName: msg.pushName,
+              timestamp: msg.messageTimestamp,
+            });
+          }
         }
       });
     } catch (err) {
@@ -984,6 +1074,71 @@ class WhatsAppSessionManager {
       .toLowerCase()
       .startsWith(botStore.config.prefix.toLowerCase());
 
+    // Anti-Ban: Owner-Only Mode check
+    if (
+      botStore.config.antiBan?.enabled &&
+      botStore.config.antiBan?.ownerOnlyMode
+    ) {
+      const ownerNumberDigits = (
+        botStore.config.antiBan.ownerNumber || ''
+      ).replace(/[^0-9]/g, '');
+      const isFromMe = Boolean(msg.key.fromMe);
+      const isOwner =
+        isFromMe || (ownerNumberDigits && senderPhone === ownerNumberDigits);
+      if (!isOwner) {
+        return; // Silently ignore non-owner messages to keep bot completely stealthy
+      }
+    }
+
+    // Anti-Ban: User & Group Command Rate Limiter
+    if (
+      botStore.config.antiBan?.enabled &&
+      isPrefixCommand &&
+      !msg.key.fromMe
+    ) {
+      const now = Date.now();
+      const userKey = senderPhone || senderJid;
+      const history = this.userCommandTimestamps.get(userKey) || [];
+      const windowStart = now - 60000;
+      const recent = history.filter((ts) => ts > windowStart);
+
+      const maxPerMin = botStore.config.antiBan.warmUpMode
+        ? Math.min(botStore.config.antiBan.maxCommandsPerMinutePerUser || 3, 3)
+        : botStore.config.antiBan.maxCommandsPerMinutePerUser || 5;
+      const cooldownSec = botStore.config.antiBan.warmUpMode
+        ? Math.max(botStore.config.antiBan.userCooldownSeconds || 8, 8)
+        : botStore.config.antiBan.userCooldownSeconds || 5;
+
+      const lastTs = recent.length > 0 ? recent[recent.length - 1] : 0;
+      const elapsedSec = (now - lastTs) / 1000;
+
+      if (elapsedSec < cooldownSec || recent.length >= maxPerMin) {
+        botStore.incrementAntiBanStat('throttledSpams');
+        recent.push(now);
+        this.userCommandTimestamps.set(userKey, recent);
+
+        // Only send warning on the exact moment limit is hit to avoid bot flood
+        if (recent.length === maxPerMin + 1) {
+          const waitTime = Math.ceil(Math.max(cooldownSec - elapsedSec, 5));
+          try {
+            await sock.sendMessage(
+              remoteJid,
+              {
+                text: `🛡️ *Anti-Ban Guard*: Mohon santai sejenak (*${waitTime} detik*).\nBatas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam WhatsApp.`,
+              },
+              { quoted: msg }
+            );
+          } catch {
+            // Ignore
+          }
+        }
+        return;
+      }
+
+      recent.push(now);
+      this.userCommandTimestamps.set(userKey, recent);
+    }
+
     // Anti-ban: ONLY send read receipt on actual bot commands (never on every ordinary group chat!)
     if (
       isPrefixCommand &&
@@ -1277,7 +1432,7 @@ class WhatsAppSessionManager {
           );
         } else if (result.audioRemoteUrl) {
           const { buffer } = await fetchRemoteBuffer(result.audioRemoteUrl);
-          await this.simulateHumanTyping(sock, remoteJid, isGroup);
+          await this.simulateHumanTyping(sock, remoteJid, isGroup, 'audio');
           await sock.sendMessage(
             remoteJid,
             {

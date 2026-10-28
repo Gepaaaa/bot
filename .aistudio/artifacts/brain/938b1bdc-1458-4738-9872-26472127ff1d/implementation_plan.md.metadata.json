@@ -1,0 +1,6 @@
+{
+  "summary":  "Revisi rencana implementasi adopsi fitur lengkap OpenWA (rmyndharis/OpenWA) ke GepaBot: selain sistem keamanan anti-ban (Paced Queue, Jitter, Group Cache), ditambahkan REST API Gateway Lengkap (Text, Media, Poll, Number Checker), Real-Time Webhook Dispatcher dengan HMAC, Auto-Responder Rule Engine, dan Tab Dashboard Gateway & Webhook interaktif.",
+  "updatedAt":  "2026-10-28T13:05:38.789448474Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

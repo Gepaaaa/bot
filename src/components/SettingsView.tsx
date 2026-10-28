@@ -205,6 +205,34 @@ export function SettingsView({
               </div>
             </div>
 
+            {/* Kunci Pengaturan Hanya Manual (Manual Only Mode) */}
+            <div className="py-3.5 flex items-start justify-between gap-4 bg-emerald-500/5 -mx-2 px-3 rounded-xl border border-emerald-500/20 my-1">
+              <div>
+                <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  Kunci Pengaturan: Hanya Manual via Web Panel
+                </div>
+                <div className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5 leading-relaxed">
+                  Mencegah bot mengubah setelan grup (buka/tutup chat grup, ganti nama/deskripsi, ubah link, antilink, welcome, template) via chat WhatsApp. Semua setelan HANYA dapat diubah secara manual dari Dashboard ini demi keamanan grup.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  void onUpdateConfig({
+                    lockSettingsManualOnly: !config.lockSettingsManualOnly,
+                  })
+                }
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap shrink-0 mt-0.5 ${
+                  config.lockSettingsManualOnly
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                    : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
+                }`}
+              >
+                {config.lockSettingsManualOnly ? 'Terkunci (Aman)' : 'Bebas'}
+              </button>
+            </div>
+
             <div className="py-3 flex items-center justify-between gap-4">
               <div>
                 <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100">

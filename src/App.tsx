@@ -7,10 +7,14 @@ import { ConnectionView } from './components/ConnectionView.tsx';
 import { CommandCatalogView } from './components/CommandCatalogView.tsx';
 import { ReplyTemplateEditorView } from './components/ReplyTemplateEditorView.tsx';
 import { SettingsView } from './components/SettingsView.tsx';
+import { AntiBanView } from './components/AntiBanView.tsx';
+import { GatewayWebhookView } from './components/GatewayWebhookView.tsx';
 
 type ActiveTab =
   | 'simulator'
   | 'connection'
+  | 'antiban'
+  | 'gateway'
   | 'catalog'
   | 'templates'
   | 'settings';
@@ -24,6 +28,9 @@ export default function App() {
     groupMembers,
     groupState,
     stats,
+    webhookLogs,
+    gatewayJobs,
+    gatewayStats,
     socketConnected,
     connectQR,
     connectPairing,
@@ -64,6 +71,8 @@ export default function App() {
   const navItems: Array<{ id: ActiveTab; label: string }> = [
     { id: 'simulator', label: 'Simulator Chat' },
     { id: 'connection', label: 'Koneksi WA' },
+    { id: 'antiban', label: 'Keamanan & Anti-Ban' },
+    { id: 'gateway', label: 'Gateway & Webhook' },
     { id: 'catalog', label: 'Katalog Command' },
     { id: 'templates', label: 'Template Chat' },
     { id: 'settings', label: 'Pengaturan' },
@@ -256,6 +265,25 @@ export default function App() {
             onConnectQR={connectQR}
             onConnectPairing={connectPairing}
             onDisconnect={disconnectWA}
+            onUpdateConfig={updateConfig}
+          />
+        )}
+
+        {activeTab === 'antiban' && (
+          <AntiBanView
+            config={config}
+            stats={stats}
+            onUpdateConfig={updateConfig}
+          />
+        )}
+
+        {activeTab === 'gateway' && (
+          <GatewayWebhookView
+            config={config}
+            stats={stats}
+            gatewayStats={gatewayStats}
+            gatewayJobs={gatewayJobs}
+            webhookLogs={webhookLogs}
             onUpdateConfig={updateConfig}
           />
         )}

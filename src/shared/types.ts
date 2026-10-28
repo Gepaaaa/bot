@@ -66,6 +66,30 @@ export interface GroupCustomConfig {
   templates?: Partial<Record<GroupEditableTemplateKey, string>>;
 }
 
+export type BrowserProfileType =
+  | 'windows_chrome'
+  | 'macos_safari'
+  | 'windows_edge'
+  | 'ubuntu_chrome';
+
+export interface AntiBanConfig {
+  enabled: boolean;
+  warmUpMode: boolean;
+  humanizeTyping: boolean;
+  minTypingDelayMs: number;
+  maxTypingDelayMs: number;
+  userCooldownSeconds: number;
+  maxCommandsPerMinutePerUser: number;
+  hidetagCooldownSeconds: number;
+  hidetagAdminOnly: boolean;
+  maxMentionsLimit: number;
+  autoRejectCalls: boolean;
+  callRejectNotice: string;
+  ownerOnlyMode: boolean;
+  ownerNumber: string;
+  browserProfile: BrowserProfileType;
+}
+
 export interface BotConfig {
   prefix: string;
   botName: string;
@@ -84,6 +108,60 @@ export interface BotConfig {
     goodbye: boolean;
   };
   groupOverrides?: Record<string, GroupCustomConfig>;
+  antiBan: AntiBanConfig;
+  lockSettingsManualOnly: boolean;
+  webhook: WebhookConfig;
+  autoResponder: AutoResponderRule[];
+}
+
+export interface AutoResponderRule {
+  id: string;
+  trigger: string;
+  matchType: 'exact' | 'contains' | 'regex';
+  replyText: string;
+  scope: 'all' | 'private_only' | 'group_only';
+  enabled: boolean;
+  hitCount: number;
+  createdAt: number;
+}
+
+export interface WebhookConfig {
+  enabled: boolean;
+  url: string;
+  secret: string;
+  events: string[];
+  lastPingAt?: number;
+  lastStatus?: 'success' | 'failed';
+  lastStatusCode?: number;
+}
+
+export interface WebhookDeliveryLog {
+  id: string;
+  timestamp: number;
+  event: string;
+  url: string;
+  statusCode: number;
+  success: boolean;
+  durationMs: number;
+  error?: string;
+}
+
+export interface GatewayJob {
+  id: string;
+  to: string;
+  type: 'text' | 'image' | 'video' | 'audio' | 'document' | 'poll';
+  text?: string;
+  status: 'queued' | 'composing' | 'sent' | 'failed';
+  createdAt: number;
+  sentAt?: number;
+  error?: string;
+}
+
+export interface GatewayStats {
+  totalSent: number;
+  queuedNow: number;
+  failedCount: number;
+  webhooksDelivered: number;
 }
 
 export type CommandCategory =
@@ -187,5 +265,13 @@ export interface ServerStateSnapshot {
     stickersCreated: number;
     mediaDownloaded: number;
     linksModerated: number;
+    antiBan?: {
+      throttledSpams: number;
+      callsDeclined: number;
+      hidetagProtected: number;
+    };
   };
+  webhookLogs?: WebhookDeliveryLog[];
+  gatewayJobs?: GatewayJob[];
+  gatewayStats?: GatewayStats;
 }

@@ -6,6 +6,8 @@ import {
   DEFAULT_TEMPLATES,
 } from '../src/shared/commands.ts';
 import type {
+  AntiBanConfig,
+  AutoResponderRule,
   BotConfig,
   BotReplyTemplates,
   CommandExecutionLog,
@@ -16,9 +18,63 @@ import type {
   SimulatorMember,
   SimulatorMessage,
   WAConnectionState,
+  WebhookConfig,
 } from '../src/shared/types.ts';
+import { queueEngine } from './queueEngine.ts';
+import { webhookDispatcher } from './webhookDispatcher.ts';
 
 const STATE_FILE = path.join(process.cwd(), '.bot-state.json');
+
+export const DEFAULT_WEBHOOK_CONFIG: WebhookConfig = {
+  enabled: false,
+  url: '',
+  secret: '',
+  events: ['message.received', 'message.sent', 'session.status'],
+};
+
+export const DEFAULT_AUTORESPONDER_RULES: AutoResponderRule[] = [
+  {
+    id: 'rule-halo',
+    trigger: 'halo',
+    matchType: 'contains',
+    replyText:
+      'Halo {sender}! Ada yang bisa {botName} bantu hari ini? Ketik *{prefix}menu* untuk melihat seluruh fitur.',
+    scope: 'all',
+    enabled: true,
+    hitCount: 0,
+    createdAt: 1714500000000,
+  },
+  {
+    id: 'rule-web',
+    trigger: 'website',
+    matchType: 'contains',
+    replyText:
+      'Kunjungi website resmi kreator kami di https://gepacorner.my.id untuk artikel, panduan, dan update terbaru!',
+    scope: 'all',
+    enabled: true,
+    hitCount: 0,
+    createdAt: 1714500000000,
+  },
+];
+
+export const DEFAULT_ANTIBAN_CONFIG: AntiBanConfig = {
+  enabled: true,
+  warmUpMode: true,
+  humanizeTyping: true,
+  minTypingDelayMs: 1800,
+  maxTypingDelayMs: 3800,
+  userCooldownSeconds: 6,
+  maxCommandsPerMinutePerUser: 4,
+  hidetagCooldownSeconds: 45,
+  hidetagAdminOnly: true,
+  maxMentionsLimit: 40,
+  autoRejectCalls: true,
+  callRejectNotice:
+    'Maaf, bot ini berjalan secara otomatis dan tidak menerima panggilan telepon atau video WhatsApp.',
+  ownerOnlyMode: false,
+  ownerNumber: '',
+  browserProfile: 'windows_chrome',
+};
 
 const DEFAULT_CONFIG: BotConfig = {
   prefix: '.',
@@ -38,6 +94,10 @@ const DEFAULT_CONFIG: BotConfig = {
     goodbye: true,
   },
   groupOverrides: {},
+  antiBan: { ...DEFAULT_ANTIBAN_CONFIG },
+  lockSettingsManualOnly: true,
+  webhook: { ...DEFAULT_WEBHOOK_CONFIG },
+  autoResponder: [...DEFAULT_AUTORESPONDER_RULES],
 };
 
 const INITIAL_GROUP_MEMBERS: SimulatorMember[] = [
@@ -120,6 +180,10 @@ class BotStateStore {
     templates: { ...DEFAULT_TEMPLATES },
     groupSettings: { ...DEFAULT_CONFIG.groupSettings },
     groupOverrides: {},
+    antiBan: { ...DEFAULT_ANTIBAN_CONFIG },
+    lockSettingsManualOnly: true,
+    webhook: { ...DEFAULT_WEBHOOK_CONFIG },
+    autoResponder: [...DEFAULT_AUTORESPONDER_RULES],
   };
   public simulatorMessages: SimulatorMessage[] = [...INITIAL_MESSAGES];
   public logs: CommandExecutionLog[] = [];
@@ -130,6 +194,11 @@ class BotStateStore {
     stickersCreated: 0,
     mediaDownloaded: 0,
     linksModerated: 0,
+    antiBan: {
+      throttledSpams: 0,
+      callsDeclined: 0,
+      hidetagProtected: 0,
+    },
   };
 
   public stickerCache = new Map<string, Buffer>();
@@ -164,10 +233,32 @@ class BotStateStore {
               ...(raw.config.groupSettings || {}),
             },
             groupOverrides: raw.config.groupOverrides || {},
+            antiBan: {
+              ...DEFAULT_ANTIBAN_CONFIG,
+              ...(raw.config.antiBan || {}),
+            },
+            lockSettingsManualOnly:
+              raw.config.lockSettingsManualOnly !== undefined
+                ? Boolean(raw.config.lockSettingsManualOnly)
+                : true,
+            webhook: {
+              ...DEFAULT_WEBHOOK_CONFIG,
+              ...(raw.config.webhook || {}),
+            },
+            autoResponder: Array.isArray(raw.config.autoResponder)
+              ? raw.config.autoResponder
+              : [...DEFAULT_AUTORESPONDER_RULES],
           };
         }
         if (raw.stats) {
-          this.stats = { ...this.stats, ...raw.stats };
+          this.stats = {
+            ...this.stats,
+            ...raw.stats,
+            antiBan: {
+              ...this.stats.antiBan,
+              ...(raw.stats.antiBan || {}),
+            },
+          };
         }
         if (Array.isArray(raw.logs)) {
           this.logs = raw.logs.slice(0, 60);
@@ -176,6 +267,21 @@ class BotStateStore {
     } catch {
       // Ignore invalid local cache
     }
+  }
+
+  public incrementAntiBanStat(
+    key: 'throttledSpams' | 'callsDeclined' | 'hidetagProtected'
+  ) {
+    if (!this.stats.antiBan) {
+      this.stats.antiBan = {
+        throttledSpams: 0,
+        callsDeclined: 0,
+        hidetagProtected: 0,
+      };
+    }
+    this.stats.antiBan[key] = (this.stats.antiBan[key] || 0) + 1;
+    this.broadcast('stats:update', this.stats);
+    this.saveToDisk();
   }
 
   public saveToDisk() {
@@ -229,6 +335,9 @@ class BotStateStore {
       groupMembers: this.groupMembers,
       groupState: this.groupState,
       stats: this.stats,
+      webhookLogs: webhookDispatcher.getDeliveryLogs(),
+      gatewayJobs: queueEngine.getRecentJobs(),
+      gatewayStats: queueEngine.getStats(),
     };
   }
 
@@ -255,10 +364,65 @@ class BotStateStore {
         ...(patch.groupSettings || {}),
       },
       groupOverrides: patch.groupOverrides ?? this.config.groupOverrides ?? {},
+      antiBan: {
+        ...this.config.antiBan,
+        ...(patch.antiBan || {}),
+      },
+      lockSettingsManualOnly:
+        patch.lockSettingsManualOnly !== undefined
+          ? patch.lockSettingsManualOnly
+          : this.config.lockSettingsManualOnly,
+      webhook: {
+        ...this.config.webhook,
+        ...(patch.webhook || {}),
+      },
+      autoResponder:
+        patch.autoResponder !== undefined
+          ? patch.autoResponder
+          : this.config.autoResponder,
     };
     this.saveToDisk();
     this.broadcast('config:update', this.config);
     return this.config;
+  }
+
+  public addAutoResponderRule(
+    rule: Omit<AutoResponderRule, 'id' | 'hitCount' | 'createdAt'>
+  ): AutoResponderRule {
+    const newRule: AutoResponderRule = {
+      ...rule,
+      id: `rule-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      hitCount: 0,
+      createdAt: Date.now(),
+    };
+    this.config.autoResponder = [newRule, ...(this.config.autoResponder || [])];
+    this.saveToDisk();
+    this.broadcast('config:update', this.config);
+    return newRule;
+  }
+
+  public updateAutoResponderRule(
+    id: string,
+    patch: Partial<AutoResponderRule>
+  ): AutoResponderRule | null {
+    const list = this.config.autoResponder || [];
+    const idx = list.findIndex((r) => r.id === id);
+    if (idx === -1) return null;
+    list[idx] = { ...list[idx], ...patch };
+    this.config.autoResponder = [...list];
+    this.saveToDisk();
+    this.broadcast('config:update', this.config);
+    return list[idx];
+  }
+
+  public deleteAutoResponderRule(id: string): boolean {
+    const list = this.config.autoResponder || [];
+    const nextList = list.filter((r) => r.id !== id);
+    if (nextList.length === list.length) return false;
+    this.config.autoResponder = nextList;
+    this.saveToDisk();
+    this.broadcast('config:update', this.config);
+    return true;
   }
 
   public getEffectiveGroupSettings(groupId?: string): {
@@ -409,7 +573,13 @@ class BotStateStore {
     this.broadcast('log:new', entry);
   }
 
-  public incrementStat(key: keyof BotStateStore['stats']) {
+  public incrementStat(
+    key:
+      | 'totalCommands'
+      | 'stickersCreated'
+      | 'mediaDownloaded'
+      | 'linksModerated'
+  ) {
     this.stats[key] += 1;
     this.saveToDisk();
     this.broadcast('stats:update', this.stats);

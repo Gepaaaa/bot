@@ -20,6 +20,7 @@ import {
   createMemeSticker,
   imageToStickerWebp,
 } from './stickerStudio.ts';
+import { evaluateAutoResponder } from './autoResponder.ts';
 
 export interface WAGroupOperations {
   removeParticipant: (targetJid: string) => Promise<void>;
@@ -119,7 +120,7 @@ function checkSenderRateLimit(ctx: IncomingBotContext): boolean {
 
 function checkGroupActionCooldown(
   ctx: IncomingBotContext,
-  bucket: 'mutation' | 'invite_link' | 'revoke_link',
+  bucket: 'mutation' | 'invite_link' | 'revoke_link' | 'hidetag',
   cooldownMs: number
 ): string | null {
   if (ctx.source !== 'whatsapp' || !ctx.isGroup || !ctx.groupId) {
@@ -332,6 +333,19 @@ export async function processBotMessage(
 
   // 3. Prefix check
   if (!trimmed.startsWith(config.prefix)) {
+    const autoReply = evaluateAutoResponder(trimmed, {
+      isGroup: Boolean(ctx.isGroup),
+      senderPhone: ctx.senderPhone,
+      senderName: ctx.senderName,
+      groupName: ctx.groupName || botStore.groupState.subject,
+    });
+    if (autoReply.matched && autoReply.replyText) {
+      return {
+        handled: true,
+        reactionStatus: 'success',
+        replyText: autoReply.replyText,
+      };
+    }
     return { handled: false };
   }
 
@@ -440,13 +454,31 @@ export async function processBotMessage(
     return null;
   };
 
+  const checkManualOnlySettingsGuard = (): BotCommandResult | null => {
+    if (config.lockSettingsManualOnly ?? true) {
+      return {
+        handled: true,
+        reactionStatus: 'error',
+        replyText:
+          '🔒 *Perubahan Pengaturan Dinonaktifkan via Chat*\n\nBot ini telah dikonfigurasi agar *tidak dapat* mengubah setelan grup maupun preferensi bot melalui perintah chat WhatsApp.\n\nSemua perubahan setelan (buka/tutup chat grup, nama grup, deskripsi, tautan undangan, antilink, welcome, dan template) hanya dapat diubah secara *MANUAL* melalui Dashboard Web Panel oleh pemilik bot.',
+      };
+    }
+    return null;
+  };
+
   const handleGroupTemplateSetter = (
     templateKey: GroupEditableTemplateKey,
     titleLabel: string,
     sampleHint: string
   ): BotCommandResult => {
+    if (argsText) {
+      const manualGuard = checkManualOnlySettingsGuard();
+      if (manualGuard) return manualGuard;
+    }
+
     const guard = ensureSenderGroupAdmin();
     if (guard) return guard;
+
     const gid = effectiveGroupId || 'simulator-group';
 
     if (!argsText) {
@@ -1068,6 +1100,9 @@ export async function processBotMessage(
       }
 
       case 'group': {
+        const manualGuard = checkManualOnlySettingsGuard();
+        if (manualGuard) return manualGuard;
+
         const guard = ensureFullGroupAdminWithBot();
         if (guard) return guard;
 
@@ -1110,6 +1145,9 @@ export async function processBotMessage(
       }
 
       case 'setname': {
+        const manualGuard = checkManualOnlySettingsGuard();
+        if (manualGuard) return manualGuard;
+
         const guard = ensureFullGroupAdminWithBot();
         if (guard) return guard;
 
@@ -1138,6 +1176,9 @@ export async function processBotMessage(
       }
 
       case 'setdesc': {
+        const manualGuard = checkManualOnlySettingsGuard();
+        if (manualGuard) return manualGuard;
+
         const guard = ensureFullGroupAdminWithBot();
         if (guard) return guard;
 
@@ -1191,6 +1232,9 @@ export async function processBotMessage(
       }
 
       case 'revoke': {
+        const manualGuard = checkManualOnlySettingsGuard();
+        if (manualGuard) return manualGuard;
+
         const guard = ensureFullGroupAdminWithBot();
         if (guard) return guard;
 
@@ -1223,17 +1267,41 @@ export async function processBotMessage(
       }
 
       case 'hidetag': {
+        const { antiBan } = botStore.config;
+
         const guard = ensureSenderGroupAdmin();
         if (guard) return guard;
 
+        const cooldownSec = antiBan?.enabled
+          ? antiBan.hidetagCooldownSeconds || 45
+          : 15;
+        const hidetagCooldown = checkGroupActionCooldown(
+          ctx,
+          'hidetag',
+          cooldownSec * 1000
+        );
+        if (hidetagCooldown) {
+          return failReply(
+            `🛡️ *Anti-Ban Shield Aktif*: Perintah hidetag dibatasi jeda *${cooldownSec} detik* per grup untuk melindungi nomor bot dari deteksi spam WhatsApp. ${hidetagCooldown}`
+          );
+        }
+
         const members = ctx.groupMembers || botStore.groupMembers;
+        const maxLimit = antiBan?.enabled
+          ? antiBan.maxMentionsLimit || 40
+          : 50;
+
+        const targetMentions = members.slice(0, maxLimit).map((m) => m.jid);
         const announcement =
           argsText || 'Perhatian untuk seluruh anggota grup!';
+
+        botStore.incrementAntiBanStat('hidetagProtected');
+
         result = {
           handled: true,
           reactionStatus: 'success',
           replyText: announcement,
-          hiddenMentions: members.map((m) => m.jid),
+          hiddenMentions: targetMentions,
         };
         break;
       }
@@ -1257,23 +1325,25 @@ export async function processBotMessage(
       }
 
       case 'antilink': {
+        const mode = argsText.toLowerCase();
+        if (mode === 'on' || mode === 'off') {
+          const manualGuard = checkManualOnlySettingsGuard();
+          if (manualGuard) return manualGuard;
+        }
+
         const guard = ensureSenderGroupAdmin();
         if (guard) return guard;
 
-        const mode = argsText.toLowerCase();
         if (mode !== 'on' && mode !== 'off') {
           return {
             handled: true,
             reactionStatus: 'success',
             replyText: `Status Antilink grup ini: *${
               effectiveGroupSettings.antilink ? 'AKTIF' : 'NONAKTIF'
-            }*.\nKetik *${config.prefix}antilink on* atau *${
-              config.prefix
-            }antilink off* untuk mengubah, atau *${
-              config.prefix
-            }setantilink <teks>* untuk mengganti pesan peringatannya.`,
+            }*.\nCatatan: Pengubahan setelan antilink dikelola secara manual melalui Dashboard Web Panel demi menjaga keamanan grup.`,
           };
         }
+
         const nextVal = mode === 'on';
         if (effectiveGroupId) {
           botStore.updateGroupCustomConfig(effectiveGroupId, {
@@ -1299,21 +1369,25 @@ export async function processBotMessage(
       }
 
       case 'welcome': {
+        const mode = argsText.toLowerCase();
+        if (mode === 'on' || mode === 'off') {
+          const manualGuard = checkManualOnlySettingsGuard();
+          if (manualGuard) return manualGuard;
+        }
+
         const guard = ensureSenderGroupAdmin();
         if (guard) return guard;
 
-        const mode = argsText.toLowerCase();
         if (mode !== 'on' && mode !== 'off') {
           return {
             handled: true,
             reactionStatus: 'success',
             replyText: `Sambutan member baru di grup ini: *${
               effectiveGroupSettings.welcome ? 'AKTIF' : 'NONAKTIF'
-            }*.\nKetik *${config.prefix}welcome on/off* atau ubah teksnya dengan *${
-              config.prefix
-            }setwelcome <teks>*.`,
+            }*.\nCatatan: Pengubahan setelan sambutan dikelola secara manual melalui Dashboard Web Panel demi ketertiban grup.`,
           };
         }
+
         const nextVal = mode === 'on';
         if (effectiveGroupId) {
           botStore.updateGroupCustomConfig(effectiveGroupId, {
@@ -1339,21 +1413,25 @@ export async function processBotMessage(
       }
 
       case 'out': {
+        const mode = argsText.toLowerCase();
+        if (mode === 'on' || mode === 'off') {
+          const manualGuard = checkManualOnlySettingsGuard();
+          if (manualGuard) return manualGuard;
+        }
+
         const guard = ensureSenderGroupAdmin();
         if (guard) return guard;
 
-        const mode = argsText.toLowerCase();
         if (mode !== 'on' && mode !== 'off') {
           return {
             handled: true,
             reactionStatus: 'success',
             replyText: `Pesan keluar grup (*out/leave*) saat ini: *${
               effectiveGroupSettings.goodbye ? 'AKTIF' : 'NONAKTIF'
-            }*.\nKetik *${config.prefix}out on/off* atau ubah teksnya dengan *${
-              config.prefix
-            }setout <teks>*.`,
+            }*.\nCatatan: Pengubahan setelan pesan keluar dikelola secara manual melalui Dashboard Web Panel.`,
           };
         }
+
         const nextVal = mode === 'on';
         if (effectiveGroupId) {
           botStore.updateGroupCustomConfig(effectiveGroupId, {

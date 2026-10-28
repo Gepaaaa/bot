@@ -9,6 +9,7 @@ import {
   processBotMessage,
   shouldSendPendingReaction,
 } from './server/commandEngine.ts';
+import { gatewayRouter } from './server/gatewayRouter.ts';
 import { botStore } from './server/stateStore.ts';
 import { waManager } from './server/waManager.ts';
 import { renderBotTemplate } from './src/shared/commands.ts';
@@ -81,6 +82,7 @@ async function startServer() {
   });
 
   // --- REST API ROUTES ---
+  app.use('/api/gateway', gatewayRouter);
 
   app.get('/api/state', (_req, res) => {
     res.json(botStore.getSnapshot());
