@@ -166,10 +166,19 @@ export interface GatewayStats {
 
 export type CommandCategory =
   | 'downloader'
-  | 'audio'
   | 'sticker'
+  | 'media'
+  | 'audio'
   | 'group'
   | 'utility';
+
+export type MediaAttachmentKind =
+  | 'image'
+  | 'video'
+  | 'audio'
+  | 'sticker'
+  | 'document'
+  | 'viewonce';
 
 export interface CommandDefinition {
   id: string;
@@ -179,6 +188,7 @@ export interface CommandDefinition {
   description: string;
   example: string;
   requiresMedia?: boolean;
+  mediaKindHint?: MediaAttachmentKind;
   groupOnly?: boolean;
   suspensionRisk?: boolean;
 }
@@ -199,8 +209,17 @@ export interface GroupSimulatorState {
 }
 
 export interface MessageMedia {
-  type: 'video' | 'audio' | 'sticker' | 'image' | 'document';
+  type:
+    | 'video'
+    | 'audio'
+    | 'sticker'
+    | 'image'
+    | 'document'
+    | 'ptv'
+    | 'vn'
+    | 'gallery';
   url: string;
+  galleryUrls?: string[];
   mimeType: string;
   fileName?: string;
   fileSizeLabel?: string;
@@ -208,6 +227,8 @@ export interface MessageMedia {
   title?: string;
   author?: string;
   duration?: number;
+  isAnimated?: boolean;
+  isViewOnce?: boolean;
   packInfo?: {
     pack: string;
     author: string;
@@ -229,6 +250,9 @@ export interface SimulatorMessage {
     senderName: string;
     senderPhone?: string;
     text: string;
+    mediaType?: MessageMedia['type'];
+    mediaUrl?: string;
+    isViewOnce?: boolean;
     hasImage?: boolean;
     imageUrl?: string;
     hasDocument?: boolean;

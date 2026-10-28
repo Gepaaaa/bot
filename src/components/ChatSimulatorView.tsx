@@ -2,8 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   CheckCheck,
   Download,
+  Eye,
   FileUp,
+  Film,
   ImagePlus,
+  Mic,
   Music,
   Reply,
   RotateCcw,
@@ -22,6 +25,7 @@ import type {
   SimulatorMessage,
 } from '../shared/types.ts';
 import type { SendSimulatorPayload } from '../hooks/useBotRealtime.ts';
+import { resolveBackendMediaUrl } from '../lib/apiBase.ts';
 import { ResilientImage, SAMPLE_CAT_IMAGE_URL } from './GepaAvatar.tsx';
 
 interface ChatSimulatorViewProps {
@@ -33,12 +37,14 @@ interface ChatSimulatorViewProps {
   prefillCommand: string | null;
   onConsumePrefill: () => void;
   onSendMessage: (payload: SendSimulatorPayload) => Promise<void>;
+  onInjectViewOnce: (
+    chatMode: 'private' | 'group'
+  ) => Promise<SimulatorMessage | null>;
   onTriggerGroupEvent: (action: 'welcome' | 'goodbye') => Promise<void>;
   onClearMessages: (chatMode: 'private' | 'group') => Promise<void>;
 }
 
 function formatWaFormattedText(raw: string): React.ReactNode {
-  // Simple WhatsApp *bold*, _italic_, and @mention inline parser
   const lines = raw.split('\n');
   return lines.map((line, lineIdx) => {
     const parts = line.split(/(\*[^*\n]+\*|_[^_\n]+_|@[0-9]{6,16})/g);
@@ -132,6 +138,43 @@ const GROUP_CMD_KEYWORDS = [
 ];
 
 const HDSW_KEYWORDS = ['hdsw', 'sw', 'tosw', 'hdstatus', 'swori'];
+const SAMPLE_IMAGE_KEYWORDS = [
+  's',
+  'sticker',
+  'stiker',
+  'meme',
+  'smeme',
+  'hd',
+  'remini',
+  'enhance',
+  'hitamkan',
+  'grayscale',
+  'hitamputih',
+  'imgedit',
+  'blur',
+  'invert',
+  'mirror',
+  'flip',
+  'sepia',
+  'tourl',
+  'upload',
+];
+const SAMPLE_VIDEO_KEYWORDS = ['toptv', 'ptv', 'videobulat', 'tomp3', 'toaudio'];
+const SAMPLE_AUDIO_KEYWORDS = [
+  'tovn',
+  'toptt',
+  'vn',
+  'bass',
+  'bassboost',
+  'nightcore',
+  'nc',
+  'slow',
+  'slowed',
+  'fast',
+  'speedup',
+  'robot',
+  'reverse',
+];
 
 export function ChatSimulatorView({
   config,
@@ -142,6 +185,7 @@ export function ChatSimulatorView({
   prefillCommand,
   onConsumePrefill,
   onSendMessage,
+  onInjectViewOnce,
   onTriggerGroupEvent,
   onClearMessages,
 }: ChatSimulatorViewProps) {
@@ -151,6 +195,8 @@ export function ChatSimulatorView({
     null
   );
   const [useSampleCat, setUseSampleCat] = useState(false);
+  const [useSampleVideo, setUseSampleVideo] = useState(false);
+  const [useSampleAudio, setUseSampleAudio] = useState(false);
   const [uploadedDoc, setUploadedDoc] = useState<{
     base64: string;
     mimeType: string;
@@ -158,7 +204,6 @@ export function ChatSimulatorView({
     sizeLabel: string;
   } | null>(null);
   const [useSampleHdDoc, setUseSampleHdDoc] = useState(false);
-  const [hdswSentToPrivateNotice, setHdswSentToPrivateNotice] = useState(false);
   const [replyTarget, setReplyTarget] = useState<SimulatorMessage | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -173,6 +218,15 @@ export function ChatSimulatorView({
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const textInputRef = useRef<HTMLInputElement | null>(null);
 
+  const clearAllAttachments = () => {
+    setUploadedImageBase64(null);
+    setUseSampleCat(false);
+    setUseSampleVideo(false);
+    setUseSampleAudio(false);
+    setUploadedDoc(null);
+    setUseSampleHdDoc(false);
+  };
+
   useEffect(() => {
     if (prefillCommand) {
       const normalized = prefillCommand
@@ -183,16 +237,18 @@ export function ChatSimulatorView({
       if (normalized && GROUP_CMD_KEYWORDS.includes(normalized)) {
         setChatMode('group');
       }
-      if (
-        prefillCommand.trim() === `${config.prefix}s` ||
-        prefillCommand.includes(`${config.prefix}meme`)
-      ) {
-        setUseSampleCat(true);
-        setUseSampleHdDoc(false);
-      } else if (normalized && HDSW_KEYWORDS.includes(normalized)) {
+
+      clearAllAttachments();
+      if (normalized && HDSW_KEYWORDS.includes(normalized)) {
         setUseSampleHdDoc(true);
-        setUseSampleCat(false);
+      } else if (normalized && SAMPLE_VIDEO_KEYWORDS.includes(normalized)) {
+        setUseSampleVideo(true);
+      } else if (normalized && SAMPLE_AUDIO_KEYWORDS.includes(normalized)) {
+        setUseSampleAudio(true);
+      } else if (normalized && SAMPLE_IMAGE_KEYWORDS.includes(normalized)) {
+        setUseSampleCat(true);
       }
+
       setInputText(prefillCommand);
       onConsumePrefill();
       setTimeout(() => textInputRef.current?.focus(), 60);
@@ -211,15 +267,13 @@ export function ChatSimulatorView({
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      setSendError('Pilih file gambar (JPG, PNG, atau WebP) untuk stiker.');
+      setSendError('Pilih file gambar (JPG, PNG, atau WebP).');
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
+      clearAllAttachments();
       setUploadedImageBase64(String(reader.result || ''));
-      setUseSampleCat(false);
-      setUploadedDoc(null);
-      setUseSampleHdDoc(false);
       if (!inputText.trim()) {
         setInputText(`${config.prefix}s`);
       }
@@ -238,15 +292,13 @@ export function ChatSimulatorView({
     }
     const reader = new FileReader();
     reader.onload = () => {
+      clearAllAttachments();
       setUploadedDoc({
         base64: String(reader.result || ''),
         mimeType: file.type || 'application/octet-stream',
         fileName: file.name,
         sizeLabel: formatBytesLabel(file.size),
       });
-      setUseSampleHdDoc(false);
-      setUploadedImageBase64(null);
-      setUseSampleCat(false);
       if (!inputText.trim()) {
         setInputText(`${config.prefix}hdsw`);
       }
@@ -262,8 +314,16 @@ export function ChatSimulatorView({
       override?.imageBase64 !== undefined
         ? override.imageBase64
         : uploadedImageBase64;
-    const finalSample =
+    const finalSampleCat =
       override?.useSampleCat !== undefined ? override.useSampleCat : useSampleCat;
+    const finalSampleVideo =
+      override?.useSampleVideo !== undefined
+        ? override.useSampleVideo
+        : useSampleVideo;
+    const finalSampleAudio =
+      override?.useSampleAudio !== undefined
+        ? override.useSampleAudio
+        : useSampleAudio;
     const finalDocBase64 =
       override?.documentBase64 !== undefined
         ? override.documentBase64
@@ -280,11 +340,17 @@ export function ChatSimulatorView({
       override?.useSampleHdDoc !== undefined
         ? override.useSampleHdDoc
         : useSampleHdDoc;
+    const finalReplyId =
+      override?.replyToId !== undefined
+        ? override.replyToId
+        : replyTarget?.id ?? null;
 
     if (
       !finalText &&
       !finalImage &&
-      !finalSample &&
+      !finalSampleCat &&
+      !finalSampleVideo &&
+      !finalSampleAudio &&
       !finalDocBase64 &&
       !finalSampleHdDoc
     ) {
@@ -293,7 +359,6 @@ export function ChatSimulatorView({
 
     setIsSending(true);
     setSendError(null);
-    setHdswSentToPrivateNotice(false);
 
     try {
       await onSendMessage({
@@ -301,32 +366,43 @@ export function ChatSimulatorView({
         text: finalText,
         senderRole: override?.senderRole ?? 'admin',
         imageBase64: finalImage,
-        useSampleCat: finalSample,
+        useSampleCat: finalSampleCat,
+        useSampleVideo: finalSampleVideo,
+        useSampleAudio: finalSampleAudio,
         documentBase64: finalDocBase64,
         documentMimeType: finalDocMime ?? undefined,
         documentFileName: finalDocName ?? undefined,
         useSampleHdDoc: finalSampleHdDoc,
-        replyToId: replyTarget?.id ?? null,
+        replyToId: finalReplyId,
       });
-
-      const cmdToken = finalText.startsWith(config.prefix)
-        ? finalText.slice(config.prefix.length).trim().split(/\s+/)[0]?.toLowerCase()
-        : '';
-      if (activeMode === 'group' && cmdToken && HDSW_KEYWORDS.includes(cmdToken)) {
-        setHdswSentToPrivateNotice(true);
-      }
 
       if (!override) {
         setInputText('');
-        setUploadedImageBase64(null);
-        setUseSampleCat(false);
-        setUploadedDoc(null);
-        setUseSampleHdDoc(false);
+        clearAllAttachments();
         setReplyTarget(null);
       }
     } catch (err) {
       setSendError(
         err instanceof Error ? err.message : 'Gagal mengirim perintah ke bot.'
+      );
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleInjectAndPrepareRvo = async () => {
+    setIsSending(true);
+    setSendError(null);
+    try {
+      const injected = await onInjectViewOnce(chatMode);
+      if (injected) {
+        setReplyTarget(injected);
+        setInputText(`${config.prefix}rvo`);
+        setTimeout(() => textInputRef.current?.focus(), 60);
+      }
+    } catch (err) {
+      setSendError(
+        err instanceof Error ? err.message : 'Gagal membuat pesan View Once.'
       );
     } finally {
       setIsSending(false);
@@ -361,24 +437,44 @@ export function ChatSimulatorView({
               }),
           },
           {
-            label: `${p}tt (Contoh TikTok)`,
-            run: () => void executeSend({ text: `${p}tt ${SAMPLE_TIKTOK_URL}` }),
-          },
-          {
-            label: `${p}brat santai dulu`,
-            run: () => void executeSend({ text: `${p}brat santai dulu ga sih` }),
-          },
-          {
-            label: `${p}s (Foto ke Stiker)`,
+            label: `${p}qc (Bubble Chat)`,
             run: () =>
               void executeSend({
-                text: `${p}s`,
-                useSampleCat: true,
+                text: `${p}qc info ngopi malam ini gas ga?`,
               }),
           },
           {
-            label: `${p}mp3 (Audio TikTok)`,
-            run: () => void executeSend({ text: `${p}mp3 ${SAMPLE_TIKTOK_URL}` }),
+            label: `${p}iqc (iPhone Chat)`,
+            run: () =>
+              void executeSend({
+                text: `${p}iqc santai dulu kawan`,
+              }),
+          },
+          {
+            label: `${p}bratvid (Brat Animasi)`,
+            run: () =>
+              void executeSend({
+                text: `${p}bratvid lagi sibuk ngoding bot`,
+              }),
+          },
+          {
+            label: `${p}emojimix 😀+😎`,
+            run: () =>
+              void executeSend({
+                text: `${p}emojimix 😀+😎`,
+              }),
+          },
+          {
+            label: `${p}toptv (Video Bulat)`,
+            run: () =>
+              void executeSend({
+                text: `${p}toptv`,
+                useSampleVideo: true,
+              }),
+          },
+          {
+            label: `${p}tt (TikTok HD)`,
+            run: () => void executeSend({ text: `${p}tt ${SAMPLE_TIKTOK_URL}` }),
           },
           {
             label: `${p}menu`,
@@ -387,31 +483,7 @@ export function ChatSimulatorView({
         ]
       : [
           {
-            label: `${p}setwelcome (Kustom)`,
-            run: () =>
-              void executeSend({
-                chatMode: 'group',
-                text: `${p}setwelcome Halo @user! Selamat bergabung di *{groupName}*, jangan lupa kenalan ya.`,
-              }),
-          },
-          {
-            label: `${p}setout (Kustom)`,
-            run: () =>
-              void executeSend({
-                chatMode: 'group',
-                text: `${p}setout Sampai jumpa @user dari *{groupName}*, sukses terus di luar sana!`,
-              }),
-          },
-          {
-            label: `${p}cekset`,
-            run: () =>
-              void executeSend({
-                chatMode: 'group',
-                text: `${p}cekset`,
-              }),
-          },
-          {
-            label: `${p}hdsw (Dari Grup -> Japri)`,
+            label: `${p}hdsw (Langsung di Grup!)`,
             run: () =>
               void executeSend({
                 chatMode: 'group',
@@ -420,11 +492,36 @@ export function ChatSimulatorView({
               }),
           },
           {
-            label: `${p}hidetag Pengumuman`,
+            label: `${p}qc (Stiker Quote Grup)`,
             run: () =>
               void executeSend({
                 chatMode: 'group',
-                text: `${p}hidetag Kumpul rutin Gepa Corner malam ini pukul 20.00 WIB!`,
+                text: `${p}qc rapat komunitas jam 8 malam ya`,
+              }),
+          },
+          {
+            label: `${p}s (Video -> Stiker Gerak)`,
+            run: () =>
+              void executeSend({
+                chatMode: 'group',
+                text: `${p}s`,
+                useSampleVideo: true,
+              }),
+          },
+          {
+            label: `${p}setwelcome`,
+            run: () =>
+              void executeSend({
+                chatMode: 'group',
+                text: `${p}setwelcome Halo @user! Selamat bergabung di *{groupName}*, jangan lupa kenalan ya.`,
+              }),
+          },
+          {
+            label: `${p}cekset`,
+            run: () =>
+              void executeSend({
+                chatMode: 'group',
+                text: `${p}cekset`,
               }),
           },
           {
@@ -479,9 +576,7 @@ export function ChatSimulatorView({
                         groupState.isAnnouncementOnly
                           ? 'Dikunci Admin'
                           : 'Chat Terbuka'
-                      } · Antilink ${
-                        config.groupSettings.antilink ? 'Aktif' : 'Nonaktif'
-                      }`}
+                      } · .hdsw Grup Aktif`}
                 </span>
               </div>
             </div>
@@ -551,6 +646,7 @@ export function ChatSimulatorView({
           {filteredMessages.map((msg) => {
             const isUser = msg.sender === 'user';
             const isBot = msg.sender === 'bot';
+            const mediaUrl = resolveBackendMediaUrl(msg.media?.url);
 
             return (
               <div
@@ -579,7 +675,13 @@ export function ChatSimulatorView({
                           : 'text-zinc-500 dark:text-zinc-400'
                       }`}
                     >
-                      <span className="font-medium text-zinc-800 dark:text-zinc-200">
+                      <span
+                        className={`font-medium ${
+                          isUser
+                            ? 'text-white'
+                            : 'text-zinc-800 dark:text-zinc-200'
+                        }`}
+                      >
                         {isUser ? 'Kamu (Admin)' : msg.senderName}
                       </span>
                       {!msg.deletedByAntilink && (
@@ -612,7 +714,7 @@ export function ChatSimulatorView({
                     </button>
                   )}
 
-                  {/* Quoted Reply Box (no thick left border; clean surface container) */}
+                  {/* Quoted Reply Box */}
                   {msg.replyTo && (
                     <div
                       className={`mb-2 rounded-xl px-3 py-2 text-xs border ${
@@ -640,7 +742,7 @@ export function ChatSimulatorView({
                     </div>
                   ) : (
                     <>
-                      {/* Uncompressed Document Attachment (for .hdsw) */}
+                      {/* Uncompressed Document Attachment (for .hdsw or MediaFire) */}
                       {msg.media?.type === 'document' && (
                         <div
                           className={`mb-2.5 rounded-xl px-3.5 py-2.5 border flex items-center justify-between gap-3 ${
@@ -661,51 +763,122 @@ export function ChatSimulatorView({
                               }`}
                             >
                               {msg.media.docMediaKind === 'video'
-                                ? 'DOKUMEN VIDEO'
+                                ? 'Dokumen Video'
                                 : msg.media.docMediaKind === 'image'
-                                ? 'DOKUMEN FOTO'
-                                : 'DOKUMEN'}{' '}
+                                ? 'Dokumen Foto'
+                                : 'Dokumen'}{' '}
                               · {msg.media.fileSizeLabel || 'Ukuran Asli'} · Tanpa Kompresi
                             </div>
                           </div>
-                          <FileUp className="w-4 h-4 shrink-0 opacity-85" />
-                        </div>
-                      )}
-
-                      {/* Attached Image (Standard or WA Web Uncompressed HD from .hdsw) */}
-                      {msg.media?.type === 'image' && (
-                        <div className="mb-2.5 space-y-1.5">
-                          <div className="rounded-xl overflow-hidden border border-black/10 max-w-[260px]">
-                            <ResilientImage
-                              src={msg.media.url}
-                              alt="Lampiran foto"
-                              className="w-full h-auto max-h-64 object-cover"
-                            />
-                          </div>
-                          {msg.media.url.startsWith('/api/hd-media/') && (
-                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-                              <span>
-                                Tampilan WA Web ({msg.media.fileSizeLabel || 'Ukuran Asli'})
-                              </span>
-                              <span aria-hidden="true">·</span>
-                              <a
-                                href={
-                                  msg.media.url.includes('?')
-                                    ? `${msg.media.url}&download=1`
-                                    : `${msg.media.url}?download=1`
-                                }
-                                download={msg.media.fileName || 'hd-status.jpg'}
-                                className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 hover:underline font-medium whitespace-nowrap"
-                              >
-                                <Download className="w-3 h-3" />
-                                Simpan File Asli
-                              </a>
-                            </div>
+                          {mediaUrl ? (
+                            <a
+                              href={
+                                mediaUrl.includes('?')
+                                  ? `${mediaUrl}&download=1`
+                                  : `${mediaUrl}?download=1`
+                              }
+                              download={msg.media.fileName || 'dokumen'}
+                              className="p-1.5 rounded-lg hover:bg-black/10 shrink-0"
+                              title="Unduh dokumen"
+                            >
+                              <Download className="w-4 h-4" />
+                            </a>
+                          ) : (
+                            <FileUp className="w-4 h-4 shrink-0 opacity-85" />
                           )}
                         </div>
                       )}
 
-                      {/* Generated WebP Sticker */}
+                      {/* View Once Locked Card */}
+                      {msg.media?.isViewOnce ? (
+                        <div className="mb-2.5 p-3 rounded-xl bg-zinc-900 text-zinc-100 border border-zinc-700 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <Eye className="w-4 h-4 text-emerald-400 shrink-0" />
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold truncate">
+                                Media Sekali Lihat (View Once)
+                              </div>
+                              <div className="text-[11px] text-zinc-400 truncate">
+                                Balas dengan {p}rvo untuk membuka ke ruang chat
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={isSending}
+                            onClick={() =>
+                              void executeSend({
+                                chatMode,
+                                text: `${p}rvo`,
+                                replyToId: msg.id,
+                              })
+                            }
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:opacity-90 whitespace-nowrap shrink-0"
+                          >
+                            Buka ({p}rvo)
+                          </button>
+                        </div>
+                      ) : (
+                        /* Standard Image / HD Status Image */
+                        msg.media?.type === 'image' && (
+                          <div className="mb-2.5 space-y-1.5">
+                            <div className="rounded-xl overflow-hidden border border-black/10 max-w-[270px]">
+                              <ResilientImage
+                                src={msg.media.url}
+                                alt="Lampiran foto"
+                                className="w-full h-auto max-h-64 object-cover"
+                              />
+                            </div>
+                            {msg.media.url.includes('/api/hd-media/') && (
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+                                <span>
+                                  Kualitas Asli ({msg.media.fileSizeLabel || 'HD'})
+                                </span>
+                                <span aria-hidden="true">·</span>
+                                <a
+                                  href={
+                                    mediaUrl.includes('?')
+                                      ? `${mediaUrl}&download=1`
+                                      : `${mediaUrl}?download=1`
+                                  }
+                                  download={msg.media.fileName || 'hd-media.png'}
+                                  className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 hover:underline font-medium whitespace-nowrap"
+                                >
+                                  <Download className="w-3 h-3" />
+                                  Simpan File
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      )}
+
+                      {/* Photo Carousel Gallery (.ttslide) */}
+                      {msg.media?.type === 'gallery' &&
+                        msg.media.galleryUrls &&
+                        msg.media.galleryUrls.length > 0 && (
+                          <div className="mb-2.5 space-y-1.5">
+                            <div className="grid grid-cols-2 gap-1.5 max-w-[300px]">
+                              {msg.media.galleryUrls.slice(0, 6).map((gUrl, idx) => (
+                                <div
+                                  key={`${msg.id}-slide-${idx}`}
+                                  className="aspect-square rounded-lg overflow-hidden border border-zinc-200/80 dark:border-zinc-800"
+                                >
+                                  <ResilientImage
+                                    src={gUrl}
+                                    alt={`Slide ${idx + 1}`}
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                            <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                              {msg.media.galleryUrls.length} slide foto berhasil diekstrak
+                            </div>
+                          </div>
+                        )}
+
+                      {/* Generated WebP Sticker (Static or Animated) */}
                       {msg.media?.type === 'sticker' && (
                         <div className="my-1 flex flex-col items-start gap-2">
                           <button
@@ -731,10 +904,14 @@ export function ChatSimulatorView({
                             />
                           </button>
                           <div className="flex items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-                            <span>{msg.media.packInfo?.pack}</span>
+                            <span>
+                              {msg.media.isAnimated
+                                ? 'Stiker Animasi'
+                                : msg.media.packInfo?.pack}
+                            </span>
                             <span aria-hidden="true">·</span>
                             <a
-                              href={msg.media.url}
+                              href={mediaUrl}
                               download={msg.media.fileName || 'gepa-sticker.webp'}
                               className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 hover:underline font-medium whitespace-nowrap"
                             >
@@ -745,12 +922,44 @@ export function ChatSimulatorView({
                         </div>
                       )}
 
+                      {/* Circular Video Note / PTV (.toptv) */}
+                      {msg.media?.type === 'ptv' && (
+                        <div className="my-1.5 flex flex-col items-center gap-2">
+                          <div className="w-48 h-48 rounded-full overflow-hidden border-2 border-emerald-500/60 bg-zinc-950 shrink-0">
+                            <video
+                              src={mediaUrl}
+                              controls
+                              loop
+                              playsInline
+                              preload="metadata"
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+                            <span>Video Note Bulat (PTV)</span>
+                            <span aria-hidden="true">·</span>
+                            <a
+                              href={
+                                mediaUrl.includes('?')
+                                  ? `${mediaUrl}&download=1`
+                                  : `${mediaUrl}?download=1`
+                              }
+                              download={msg.media.fileName || 'ptv-note.mp4'}
+                              className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 hover:underline font-medium whitespace-nowrap"
+                            >
+                              <Download className="w-3 h-3" />
+                              Unduh .mp4
+                            </a>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Downloaded Video MP4 or Uncompressed .hdsw Video */}
-                      {msg.media?.type === 'video' && (
+                      {msg.media?.type === 'video' && !msg.media.isViewOnce && (
                         <div className="mb-2.5 space-y-2">
                           <div className="rounded-xl overflow-hidden bg-zinc-950 border border-zinc-800 max-w-[300px]">
                             <video
-                              src={msg.media.url}
+                              src={mediaUrl}
                               controls
                               playsInline
                               preload="metadata"
@@ -759,47 +968,65 @@ export function ChatSimulatorView({
                           </div>
                           <a
                             href={
-                              msg.media.url.includes('?')
-                                ? `${msg.media.url}&download=1`
-                                : `${msg.media.url}?download=1`
+                              mediaUrl.includes('?')
+                                ? `${mediaUrl}&download=1`
+                                : `${mediaUrl}?download=1`
                             }
                             download={msg.media.fileName || 'video-hd.mp4'}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-medium hover:opacity-90 transition-opacity whitespace-nowrap"
                           >
                             <Download className="w-3.5 h-3.5" />
-                            {msg.media.url.startsWith('/api/hd-media/')
-                              ? `Simpan Video Asli (${msg.media.fileSizeLabel || 'HD'})`
-                              : 'Download Video Tanpa Watermark (.mp4)'}
+                            {msg.media.url.includes('/api/hd-media/')
+                              ? `Simpan Video (${msg.media.fileSizeLabel || 'HD'})`
+                              : 'Download Video (.mp4)'}
                           </a>
                         </div>
                       )}
 
-                      {/* Extracted Audio MP3 */}
+                      {/* Voice Note PTT (.tovn) */}
+                      {msg.media?.type === 'vn' && (
+                        <div className="mb-2 p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/25 border border-emerald-200/80 dark:border-emerald-800/60 space-y-2 min-w-[250px]">
+                          <div className="flex items-center gap-2 text-xs font-medium text-emerald-900 dark:text-emerald-200">
+                            <Mic className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span className="truncate">
+                              Voice Note WhatsApp (PTT)
+                            </span>
+                          </div>
+                          <audio
+                            src={mediaUrl}
+                            controls
+                            preload="metadata"
+                            className="w-full h-9"
+                          />
+                        </div>
+                      )}
+
+                      {/* Extracted / Filtered Audio MP3 */}
                       {msg.media?.type === 'audio' && (
                         <div className="mb-2.5 p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 space-y-2.5 min-w-[250px]">
                           <div className="flex items-center gap-2 text-xs font-medium text-zinc-800 dark:text-zinc-200">
                             <Music className="w-4 h-4 text-emerald-600 shrink-0" />
                             <span className="truncate">
-                              {msg.media.title || 'Audio Ekstraksi MP3'}
+                              {msg.media.title || 'Audio MP3'}
                             </span>
                           </div>
                           <audio
-                            src={msg.media.url}
+                            src={mediaUrl}
                             controls
                             preload="metadata"
                             className="w-full h-9"
                           />
                           <a
                             href={
-                              msg.media.url.includes('?')
-                                ? `${msg.media.url}&download=1`
-                                : `${msg.media.url}?download=1`
+                              mediaUrl.includes('?')
+                                ? `${mediaUrl}&download=1`
+                                : `${mediaUrl}?download=1`
                             }
                             download={msg.media.fileName || 'audio.mp3'}
                             className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400 hover:underline whitespace-nowrap"
                           >
                             <Download className="w-3.5 h-3.5" />
-                            Simpan File Audio (.mp3)
+                            Simpan Audio (.mp3)
                           </a>
                         </div>
                       )}
@@ -817,7 +1044,6 @@ export function ChatSimulatorView({
                           <Users className="w-3.5 h-3.5 shrink-0" />
                           <span>
                             Hidetag terkirim ke {msg.hiddenMentions.length} anggota
-                            tanpa teks mention terlihat
                           </span>
                         </div>
                       )}
@@ -836,7 +1062,7 @@ export function ChatSimulatorView({
                     {isUser && <CheckCheck className="w-3.5 h-3.5" />}
                   </div>
 
-                  {/* Floating Emoji Reaction Badge (⏳ / ✔️ / ❌) */}
+                  {/* Floating Emoji Reaction Badge */}
                   {msg.reaction && (
                     <div
                       title="Reaksi dari GepaBot"
@@ -862,13 +1088,14 @@ export function ChatSimulatorView({
           )}
         </div>
 
-        {/* Attachment / Reply / Private Delivery Preview Strip */}
+        {/* Attachment / Reply Preview Strip */}
         {(replyTarget ||
           uploadedImageBase64 ||
           useSampleCat ||
+          useSampleVideo ||
+          useSampleAudio ||
           uploadedDoc ||
           useSampleHdDoc ||
-          hdswSentToPrivateNotice ||
           sendError) && (
           <div className="px-5 py-2.5 bg-zinc-50 dark:bg-zinc-900/90 border-t border-zinc-200/80 dark:border-zinc-800 space-y-2">
             {sendError && (
@@ -884,24 +1111,6 @@ export function ChatSimulatorView({
               </div>
             )}
 
-            {hdswSentToPrivateNotice && chatMode === 'group' && (
-              <div className="flex items-center justify-between gap-3 text-xs bg-emerald-50 dark:bg-emerald-950/40 px-3 py-2 rounded-xl border border-emerald-200 dark:border-emerald-800/70 text-emerald-900 dark:text-emerald-200">
-                <span>
-                  Media HD ukuran asli sudah dikirim ke <strong>Chat Pribadi</strong> agar siap diteruskan ke Status WA!
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setChatMode('private');
-                    setHdswSentToPrivateNotice(false);
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-medium hover:opacity-90 whitespace-nowrap shrink-0"
-                >
-                  Buka Chat Pribadi
-                </button>
-              </div>
-            )}
-
             {replyTarget && (
               <div className="flex items-center justify-between gap-3 text-xs bg-white dark:bg-zinc-800 px-3 py-2 rounded-xl border border-zinc-200/80 dark:border-zinc-700">
                 <div className="min-w-0">
@@ -909,10 +1118,12 @@ export function ChatSimulatorView({
                     Membalas {replyTarget.senderName}:
                   </span>{' '}
                   <span className="text-zinc-500 dark:text-zinc-400 truncate">
-                    {replyTarget.text ||
-                      (replyTarget.media?.type === 'document'
-                        ? `[Dokumen Asli: ${replyTarget.media.fileName || 'media'}]`
-                        : '[Gambar/Media]')}
+                    {replyTarget.media?.isViewOnce
+                      ? '[Media Sekali Lihat — siap dibuka dengan .rvo]'
+                      : replyTarget.text ||
+                        (replyTarget.media?.type === 'document'
+                          ? `[Dokumen Asli: ${replyTarget.media.fileName || 'media'}]`
+                          : '[Media]')}
                   </span>
                 </div>
                 <button
@@ -938,7 +1149,7 @@ export function ChatSimulatorView({
                         : '[Dokumen Contoh] gepacorner-story-hd-asli.jpg (Ukuran Asli)'}
                     </div>
                     <div className="text-zinc-500 dark:text-zinc-400 truncate">
-                      Tanpa kompresi WA · Kirim dengan caption {p}hdsw untuk dikirim ke Chat Pribadi
+                      Tanpa kompresi WA · Kirim dengan {p}hdsw (bisa langsung di Grup &amp; Chat Pribadi)
                     </div>
                   </div>
                 </div>
@@ -960,17 +1171,17 @@ export function ChatSimulatorView({
                 <div className="flex items-center gap-3 min-w-0">
                   <ResilientImage
                     src={uploadedImageBase64 || SAMPLE_CAT_IMAGE_URL}
-                    alt="Lampiran siap stiker"
+                    alt="Lampiran foto"
                     className="w-10 h-10 rounded-lg object-cover shrink-0"
                   />
                   <div className="min-w-0">
                     <div className="font-medium text-zinc-900 dark:text-zinc-100 truncate">
                       {uploadedImageBase64
-                        ? 'Foto unggahan siap dijadikan stiker'
-                        : 'Foto contoh studio siap dijadikan stiker'}
+                        ? 'Foto unggahan siap diproses'
+                        : 'Foto contoh studio siap diproses'}
                     </div>
                     <div className="text-zinc-500 dark:text-zinc-400 truncate">
-                      Kirim caption {p}s atau {p}meme atas | bawah
+                      Gunakan {p}s, {p}hd, {p}hitamkan, {p}meme atas|bawah, atau {p}tourl
                     </div>
                   </div>
                 </div>
@@ -986,8 +1197,151 @@ export function ChatSimulatorView({
                 </button>
               </div>
             )}
+
+            {useSampleVideo && (
+              <div className="flex items-center justify-between gap-3 text-xs bg-white dark:bg-zinc-800 px-3 py-2 rounded-xl border border-zinc-200/80 dark:border-zinc-700">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-600/15 text-emerald-700 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                    <Film className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                      [Video Contoh] sample-clip.mp4 (Klip Pendek Uji Coba)
+                    </div>
+                    <div className="text-zinc-500 dark:text-zinc-400 truncate">
+                      Cocok untuk {p}s (stiker bergerak), {p}toptv (video bulat), atau {p}tomp3
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setUseSampleVideo(false)}
+                  className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {useSampleAudio && (
+              <div className="flex items-center justify-between gap-3 text-xs bg-white dark:bg-zinc-800 px-3 py-2 rounded-xl border border-zinc-200/80 dark:border-zinc-700">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-600/15 text-emerald-700 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                    <Music className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                      [Audio Contoh] sample-audio.mp3 (Sampel Musik)
+                    </div>
+                    <div className="text-zinc-500 dark:text-zinc-400 truncate">
+                      Cocok untuk {p}tovn, {p}bass, {p}nightcore, {p}slow, {p}fast, {p}robot, {p}reverse
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setUseSampleAudio(false)}
+                  className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         )}
+
+        {/* Sample Media Quick Toolbar */}
+        <div className="px-4 py-2 bg-[#FAF9F6] dark:bg-[#111114] border-t border-zinc-200/70 dark:border-zinc-800/80 flex items-center gap-1.5 overflow-x-auto">
+          <span className="text-[11px] text-zinc-500 dark:text-zinc-400 whitespace-nowrap shrink-0 mr-1">
+            Lampirkan media uji:
+          </span>
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="px-2.5 py-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-zinc-700 dark:text-zinc-300 hover:border-emerald-500/60 inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+          >
+            <ImagePlus className="w-3.5 h-3.5" />
+            Upload Foto
+          </button>
+
+          <button
+            type="button"
+            onClick={() => docInputRef.current?.click()}
+            className={`px-2.5 py-1 rounded-lg border text-xs inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              uploadedDoc || useSampleHdDoc
+                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-medium'
+                : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:border-emerald-500/60'
+            }`}
+          >
+            <FileUp className="w-3.5 h-3.5" />
+            Dokumen HD ({p}hdsw)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              const next = !useSampleCat;
+              clearAllAttachments();
+              setUseSampleCat(next);
+              if (next && !inputText.trim()) setInputText(`${p}s`);
+            }}
+            className={`px-2.5 py-1 rounded-lg border text-xs inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              useSampleCat
+                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-medium'
+                : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:border-emerald-500/60'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            Foto Contoh
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              const next = !useSampleVideo;
+              clearAllAttachments();
+              setUseSampleVideo(next);
+              if (next && !inputText.trim()) setInputText(`${p}toptv`);
+            }}
+            className={`px-2.5 py-1 rounded-lg border text-xs inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              useSampleVideo
+                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-medium'
+                : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:border-emerald-500/60'
+            }`}
+          >
+            <Film className="w-3.5 h-3.5" />
+            Video Contoh
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              const next = !useSampleAudio;
+              clearAllAttachments();
+              setUseSampleAudio(next);
+              if (next && !inputText.trim()) setInputText(`${p}bass`);
+            }}
+            className={`px-2.5 py-1 rounded-lg border text-xs inline-flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              useSampleAudio
+                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-medium'
+                : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:border-emerald-500/60'
+            }`}
+          >
+            <Music className="w-3.5 h-3.5" />
+            Audio Contoh
+          </button>
+
+          <button
+            type="button"
+            disabled={isSending}
+            onClick={() => void handleInjectAndPrepareRvo()}
+            className="px-2.5 py-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-zinc-700 dark:text-zinc-300 hover:border-emerald-500/60 inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            Simulasi ViewOnce ({p}rvo)
+          </button>
+        </div>
 
         {/* Composer Input Bar */}
         <form
@@ -1013,49 +1367,6 @@ export function ChatSimulatorView({
             className="hidden"
           />
 
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            title="Unggah foto biasa (untuk .s atau .meme)"
-            className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors shrink-0"
-          >
-            <ImagePlus className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => docInputRef.current?.click()}
-            title="Kirim sebagai Dokumen Foto/Video Ukuran Asli (untuk .hdsw ke Status WA)"
-            className={`px-3 py-2.5 rounded-xl border text-xs font-medium transition-colors whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 ${
-              uploadedDoc || useSampleHdDoc
-                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
-                : 'border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-            }`}
-          >
-            <FileUp className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Dokumen HD</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setUseSampleCat((prev) => !prev);
-              setUploadedImageBase64(null);
-              setUploadedDoc(null);
-              setUseSampleHdDoc(false);
-              if (!inputText.trim()) setInputText(`${p}s`);
-            }}
-            title="Lampirkan foto contoh studio untuk tes cepat .s / .meme"
-            className={`px-3 py-2.5 rounded-xl border text-xs font-medium transition-colors whitespace-nowrap shrink-0 hidden md:inline-flex items-center gap-1.5 ${
-              useSampleCat
-                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
-                : 'border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            Foto Contoh
-          </button>
-
           <input
             ref={textInputRef}
             type="text"
@@ -1063,8 +1374,8 @@ export function ChatSimulatorView({
             onChange={(e) => setInputText(e.target.value)}
             placeholder={
               chatMode === 'group'
-                ? `Ketik ${p}setwelcome, ${p}setout, ${p}kick, ${p}promote, ${p}hdsw...`
-                : `Ketik ${p}hdsw, ${p}tt <link>, ${p}brat <teks>, ${p}s, atau ${p}menu...`
+                ? `Ketik ${p}hdsw, ${p}qc, ${p}setwelcome, ${p}kick, ${p}promote...`
+                : `Ketik ${p}hdsw, ${p}qc <teks>, ${p}tt <link>, ${p}play <lagu>, atau ${p}menu...`
             }
             className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900 border border-zinc-200/90 dark:border-zinc-800 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500"
           />
@@ -1076,6 +1387,8 @@ export function ChatSimulatorView({
               (!inputText.trim() &&
                 !uploadedImageBase64 &&
                 !useSampleCat &&
+                !useSampleVideo &&
+                !useSampleAudio &&
                 !uploadedDoc &&
                 !useSampleHdDoc)
             }
@@ -1089,7 +1402,6 @@ export function ChatSimulatorView({
 
       {/* Right 4 Columns: Group Context / Quick Guide & Real-Time Execution Log */}
       <div className="lg:col-span-4 space-y-6">
-        {/* Contextual Helper Panel */}
         {chatMode === 'group' ? (
           <div className="bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 space-y-4">
             <div className="space-y-1">
@@ -1175,7 +1487,6 @@ export function ChatSimulatorView({
               })}
             </div>
 
-            {/* Simulasi Event Member Masuk / Keluar (untuk tes .setwelcome & .setout) */}
             <div className="space-y-1.5 pt-1">
               <div className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                 Uji Event Sambutan &amp; Keluar Grup ({p}setwelcome / {p}setout):
@@ -1248,11 +1559,10 @@ export function ChatSimulatorView({
         ) : (
           <div className="bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-5 space-y-3.5">
             <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              Panduan Cepat Command Titik
+              Ringkasan Fitur Unggulan ({p})
             </h3>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-              Semua perintah yang kamu coba di sini diproses oleh mesin server yang
-              sama dengan koneksi WhatsApp asli.
+              Seluruh command di bawah berjalan pada engine FFmpeg &amp; Sharp yang sama dengan koneksi WhatsApp asli.
             </p>
             <div className="divide-y divide-zinc-200/70 dark:divide-zinc-800/80 text-xs">
               <div className="py-2 flex items-baseline justify-between gap-3">
@@ -1260,47 +1570,47 @@ export function ChatSimulatorView({
                   {p}hdsw
                 </code>
                 <span className="text-zinc-500 text-right">
-                  Dokumen foto/video asli siap Teruskan ke SW
+                  Dokumen asli siap SW (Grup &amp; PC)
                 </span>
               </div>
               <div className="py-2 flex items-baseline justify-between gap-3">
                 <code className="font-mono text-emerald-700 dark:text-emerald-400 shrink-0">
-                  {p}tt &lt;link&gt;
+                  {p}qc / {p}iqc
                 </code>
                 <span className="text-zinc-500 text-right">
-                  Video TikTok HD tanpa watermark
+                  Stiker bubble chat WA &amp; iPhone
                 </span>
               </div>
               <div className="py-2 flex items-baseline justify-between gap-3">
                 <code className="font-mono text-emerald-700 dark:text-emerald-400 shrink-0">
-                  {p}mp3 &lt;link&gt;
+                  {p}s / {p}bratvid
                 </code>
                 <span className="text-zinc-500 text-right">
-                  Ambil musik MP3 dari video
+                  Foto/video ke stiker &amp; Brat animasi
                 </span>
               </div>
               <div className="py-2 flex items-baseline justify-between gap-3">
                 <code className="font-mono text-emerald-700 dark:text-emerald-400 shrink-0">
-                  {p}s
+                  {p}toptv / {p}rvo
                 </code>
                 <span className="text-zinc-500 text-right">
-                  Ubah foto/reply jadi stiker
+                  Video bulat WA &amp; buka ViewOnce
                 </span>
               </div>
               <div className="py-2 flex items-baseline justify-between gap-3">
                 <code className="font-mono text-emerald-700 dark:text-emerald-400 shrink-0">
-                  {p}brat &lt;teks&gt;
+                  {p}tt / {p}ig / {p}fb / {p}pin
                 </code>
                 <span className="text-zinc-500 text-right">
-                  Stiker teks hijau ala Brat
+                  Multi-platform downloader HD
                 </span>
               </div>
               <div className="py-2 flex items-baseline justify-between gap-3">
                 <code className="font-mono text-emerald-700 dark:text-emerald-400 shrink-0">
-                  {p}meme a | b
+                  {p}play / {p}bass / {p}nc
                 </code>
                 <span className="text-zinc-500 text-right">
-                  Stiker meme teks atas-bawah
+                  Cari lagu MP3 &amp; efek audio studio
                 </span>
               </div>
             </div>
@@ -1325,10 +1635,10 @@ export function ChatSimulatorView({
               </p>
               <button
                 type="button"
-                onClick={() => void executeSend({ text: `${p}brat halo gepa corner` })}
+                onClick={() => void executeSend({ text: `${p}qc halo gepa corner` })}
                 className="px-3 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:opacity-85 transition-opacity whitespace-nowrap"
               >
-                Jalankan Contoh {p}brat
+                Jalankan Contoh {p}qc
               </button>
             </div>
           ) : (
@@ -1411,7 +1721,7 @@ export function ChatSimulatorView({
                 <span>{lightboxSticker.author}</span>
               </div>
               <a
-                href={lightboxSticker.url}
+                href={resolveBackendMediaUrl(lightboxSticker.url)}
                 download="gepa-corner-sticker.webp"
                 className="px-3.5 py-2 rounded-xl bg-zinc-900 dark:bg-emerald-600 text-white font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
               >

@@ -1,30 +1,29 @@
-# GepaBot — WhatsApp Multi-Feature Bot & Control Corner
+# Adaptasi Ekosistem Stiker, Media & Downloader Komplit + Dukungan `.hdsw` Grup & Solusi Hosting 24/7
 
-Aplikasi bot WhatsApp serbaguna berbasis perintah awalan titik (`.`) yang menggabungkan mesin koneksi WhatsApp Multi-Device nyata (Scan QR & Pairing Code), simulator ruang chat interaktif di web, serta panel kontrol minimalis yang mengadaptasi estetika personal bersih ala **Gepa — Personal Corner (`gepacorner.my.id`)**.
+Memperluas kemampuan **GepaBot** dengan rangkaian perkakas stiker statis/animasi, konverter gambar-video-audio, serta pengunduh media lintas platform ala **RYO-YAMADA-MD**, membuka fitur **`.hdsw` agar bisa dipakai langsung di dalam Grup** secara aman, merapikan Web Dashboard, serta menyediakan solusi arsitektur **Deployment Vercel (Split Backend) & Server 24/7**.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> Berikut adalah keputusan utama yang telah dikonfirmasi dari jawaban kamu dan siap dibangun:
+> Rencana ini telah diperbarui untuk menjawab dua poin terbaru Anda sekaligus mempertahankan seluruh pilihan sebelumnya:
 
-- **Metode Koneksi Ganda (Real WA + Simulator Web)**: Bot dapat langsung ditautkan ke nomor WhatsApp asli menggunakan **Scan QR Code** maupun **8-Digit Pairing Code** secara real-time, sekaligus menyediakan **Simulator Chat Web** agar semua fitur command `.` bisa langsung dicoba di browser bahkan sebelum nomor ditautkan.
-- **Cakupan Fitur Command Titik (`.`)**:
-  - **Downloader Video Sosmed**: `.tt <link>` (TikTok tanpa watermark), `.ig <link>` (Instagram Reels/Post), dan `.yt <link>` (YouTube Shorts/Video).
-  - **Ekstraktor Audio MP3**: `.mp3 <link>` atau `.ttmp3 <link>` untuk mengambil jalur suara MP3 langsung dari tautan video sosmed.
-  - **Pembuat Stiker Gambar & Teks**: `.s` / `.stiker` (ubah gambar/foto menjadi stiker WebP 512×512 ber-metadata), `.brat <teks>` (stiker teks otomatis gaya Brat hijau limau atau putih klasik), dan `.meme <atas> | <bawah>` (stiker meme teks atas-bawah).
-  - **Menu Admin Grup**: `.hidetag <pesan>` (mention tersembunyi seluruh anggota grup), `.tagall <pesan>` (mention terbuka seluruh anggota), dan `.antilink on/off` (moderasi otomatis hapus pesan berisi tautan dari non-admin).
-- **Gaya Visual Ala `gepacorner.my.id`**: Mengusung nuansa *personal creator corner* yang bersih, tenang, minim distraksi, dengan kartu berbatas garis tipis (*hairline border*), tipografi modern yang rapi, serta profil identitas pembuat bot ("Gepa Corner").
-
-> [!NOTE]
-> Saat dijalankan di lingkungan server bersama, sesi tautan WhatsApp disimpan di penyimpanan server aktif agar bot tetap merespons pesan masuk selama aplikasi berjalan, dan dapat diputus atau ditautkan ulang kapan saja dari panel.
+- **`.hdsw` Kini Aktif di Grup Maupun Chat Pribadi (Aman Anti-Ban)**: Pembatasan `.hdsw` khusus chat pribadi dihapus. Saat anggota atau admin mengirim/membalas *Dokumen* foto atau video ukuran asli dengan `.hdsw` di dalam grup, bot akan membalas media ukuran asli (gaya unggahan WA Web jernih tanpa kompresi) **langsung di ruang grup tersebut** (me-reply pesan pengirim), bukan mengirim pesan pribadi (*cold DM*) ke nomor anggota yang belum dikenal. Dengan begitu, anggota tinggal meneruskan (*Forward*) media jernih tersebut ke Status WA mereka tanpa memicu deteksi spam DM dari Meta.
+- **Mengapa Deploy di Vercel Belum Jalan & Solusi Arsitekturnya**:
+  > [!WARNING]
+  > **Penyebab Teknis di Vercel**: Vercel adalah platform *Stateless / Serverless* yang hanya menayangkan tampilan web statis dan mematikan fungsi server dalam hitungan detik setelah halaman dimuat. Padahal, mesin WhatsApp Multi-Device membutuhkan **koneksi soket terus-menerus 24 jam**, saluran *WebSocket real-time* untuk kode QR/Pairing, ruang simpan sesi permanen, dan pemroses video/audio aktif. Akibatnya, di Vercel tampilan depan bisa terbuka tetapi mesin belakang bot tidak pernah hidup untuk menautkan WhatsApp.
+  - **Solusi Ganda yang Diterapkan**:
+    1. **Mode Hybrid (Tampilan Web di Vercel + Mesin Bot di Server 24/7)**: Menambahkan pengaturan **Alamat Server Bot Eksternal** langsung di Dashboard beserta izin koneksi lintas domain (*CORS & Remote WebSocket*), serta aturan *routing* halaman agar web di Vercel tidak error saat dimuat ulang dan bisa langsung terhubung ke mesin bot Anda.
+    2. **Paket Siap Deploy Utuh 24/7 (Cloud Run / Railway / Render / VPS)**: Menyediakan konfigurasi kontainer produksi lengkap dengan mesin pengolah media sehingga seluruh aplikasi (Dashboard + Mesin Bot WA) bisa dijalankan 24/7 dalam satu klik di platform server persisten (termasuk fitur Deploy bawaan AI Studio Cloud Run, Railway, Render, atau VPS), lengkap dengan panel **Diagnostik & Panduan Hosting** di dalam aplikasi.
+- **Paket Fitur Komplit (Stiker, Media & Downloader)**: Mengadaptasi pembuatan stiker komplit (`.s` foto & video/GIF bergerak, Quote Chat `.qc` & `.iqc`, `.brat`/`.bratcolor`/`.bratvid`, `.ttp`/`.attp`, `.emojimix`, `.wm`, `.toimg`, `.tovid`), perkakas media & audio (`.hdsw` grup/pribadi, `.hd`, filter gambar, pembuka *View Once* `.rvo`, video bulat `.toptv`, `.tomp3`, `.tovn`, efek suara `.bass`/`.nightcore`/`.slow`/`.fast`/`.robot`/`.reverse`, `.tourl`, `.qrcode`), serta pengunduh lintas platform (`.aio`, TikTok Video & Slide Foto `.ttslide`, Instagram, Facebook, X/Twitter, Pinterest, CapCut, MediaFire, dan `.play`/YouTube).
+- **Prefix Tunggal (`.`) & Perisai Anti-Ban Penuh**: Mempertahankan awalan tunggal konsisten dan mewajibkan setiap perintah baru melewati *cooldown* pengguna, simulasi mengetik/merekam suara natural, antrean kirim berjeda, serta batas ukuran berkas aman.
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **Apa yang Dilakukan Aplikasi Ini**: Menyediakan mesin bot WhatsApp otomatis yang merespons pesan berawalan `.` baik di chat pribadi maupun grup WhatsApp, lengkap dengan antarmuka web untuk menautkan perangkat, mencoba semua perintah secara instan di ruang simulasi, serta mengatur konfigurasi bot (seperti nama paket stiker, awalan perintah, dan aturan grup).
-- **Target Pengguna**: Kreator dan pemilik komunitas (khususnya ekosistem Gepa Corner) yang membutuhkan bot utilitas harian serba cepat di WhatsApp tanpa harus mengetik perintah panjang atau membuka aplikasi pihak ketiga.
-- **Nilai Utama**: Cukup ketik satu perintah singkat seperti `.tt https://vt.tiktok.com/...` atau `.brat santai dulu` di ruang chat, dan bot langsung mengirimkan media siap simpan atau stiker siap pakai dalam hitungan detik.
+- **Apa yang Dihadirkan Pembaruan Ini**: Menjadikan GepaBot asisten kreatif dan pengunduh media serba lengkap cukup dengan satu titik (`.`) di grup maupun chat pribadi — mulai dari konversi dokumen ke media Status WA jernih (`.hdsw`) langsung di grup, pembuatan stiker gelembung percakapan (`.qc`) dan stiker bergerak, pengubah suara & pembuka pesan sekali lihat (`.rvo`), hingga pengunduh video dan slide foto sosial media, didukung arsitektur hosting yang jelas untuk pemakaian 24/7.
+- **Target Pengguna**: Pemilik bot, admin komunitas, dan anggota grup WhatsApp yang membutuhkan perkakas harian cepat dan tajam tanpa mengorbankan keamanan akun.
+- **Nilai Utama**: Pemrosesan stiker, video, gambar, dan efek audio dilakukan mandiri di mesin server sehingga responsif dan tidak bergantung pada layanan konverter luar yang sering gangguan, sementara antarmuka web dapat dijalankan fleksibel baik secara utuh di server kontainer maupun terpisah melalui Vercel.
 
 ---
 
@@ -32,104 +31,98 @@ Aplikasi bot WhatsApp serbaguna berbasis perintah awalan titik (`.`) yang mengga
 
 ### Alur Penggunaan Utama (Key User Flows)
 
-1. **Menautkan Nomor WhatsApp (QR & Pairing Code)**:
-   - Pengguna membuka tampilan **Koneksi WA**, memilih metode **Scan QR** atau **Pairing Code Nomor HP**.
-   - Untuk Pairing Code, pengguna memasukkan nomor berformat kode negara (misal `62812xxxx`), lalu panel menampilkan kode 8 karakter yang siap dimasukkan ke menu *Perangkat Tertaut* di aplikasi WhatsApp.
-   - Begitu terhubung, indikator status berubah menjadi aktif secara langsung melalui koneksi waktu nyata (*real-time*).
-2. **Mencoba Command di Simulator Chat Interaktif**:
-   - Tanpa perlu menunggu tautan nomor, pengguna dapat langsung beralih ke **Simulator Chat**, memilih mode **Chat Pribadi** atau **Grup Komunitas (Simulasi Admin & Antilink)**, lalu mengetik `.menu`, `.tt <link>`, `.mp3 <link>`, `.brat <teks>`, atau mengunggah gambar dengan caption `.s`.
-   - Di mode Grup, terdapat tombol uji coba untuk mengirim tautan sebagai "Anggota Biasa" guna membuktikan fitur `.antilink on` otomatis menolak dan menghapus pesan bertautan.
-3. **Mengelola Katalog Command & Identitas Stiker**:
-   - Pada bagian **Katalog Command**, pengguna dapat mencari perintah berdasarkan kategori (Downloader, Stiker, Audio, Grup), menyalin contoh pemakaian sekali klik ke simulator, atau menonaktifkan perintah tertentu sementara waktu.
-   - Pada bagian **Pengaturan Bot**, pengguna dapat mengubah awalan perintah (default `.`), nama paket stiker (*Sticker Pack Name*: `Gepa Corner`), serta nama pembuat stiker (*Author*) yang tertanam di info stiker WhatsApp.
+1. **Menggunakan `.hdsw` Langsung di Grup maupun Chat Pribadi**:
+   - Anggota grup mengirim berkas Foto/Video lewat menu **Dokumen** (agar byte asli tidak dikompresi WhatsApp) dengan caption `.hdsw`, atau membalas dokumen yang sudah dikirim di grup dengan `.hdsw` (opsional `.hdsw nocaption` untuk hasil bersih tanpa teks).
+   - Bot memberi reaksi `⏳`, memproses metadata dimensi asli dan pratinjau jernih, lalu membalas langsung di ruang grup tersebut sebagai pesan Foto/Video standar berkualitas asli (reaksi berubah menjadi `✔️`). Pengirim maupun anggota grup lain cukup menekan **Teruskan (Forward) → Status Saya**.
+2. **Membuat & Memodifikasi Stiker Komplit**:
+   - Mengirim/membalas foto atau video pendek dengan `.s` untuk menghasilkan stiker statis maupun bergerak; mengetik `.qc <teks>` atau me-reply pesan anggota grup dengan `.qc` untuk membuat stiker gelembung chat lengkap dengan nama dan warna pengirim; serta memakai `.iqc`, `.bratcolor`, `.bratvid`, `.attp`, dan `.emojimix`.
+   - Membalas stiker dengan `.wm Nama Pack | Author` untuk mengganti identitas hak cipta stiker, atau `.toimg` dan `.tovid` untuk mengembalikan stiker menjadi foto PNG maupun video MP4.
+3. **Mengolah Media, View Once & Efek Audio**:
+   - Membalas pesan *View Once* dengan `.rvo` untuk menampilkan ulang media di chat, membalas video dengan `.toptv` untuk mengubahnya menjadi Video Note bulat, atau menggunakan `.hd`, `.hitamkan`, `.grayscale`, `.blur`, `.mirror`, `.qrcode`, dan `.tourl`.
+   - Membalas video/audio dengan `.tomp3`, `.tovn`, atau efek suara (`.bass`, `.nightcore`, `.slow`, `.fast`, `.robot`, `.reverse`) yang otomatis menampilkan indikator *"sedang merekam audio"* sebelum dikirim.
+4. **Mengunduh Video & Album Slide Lintas Platform**:
+   - Menggunakan `.aio <link>` untuk deteksi otomatis, `.tt` / `.ttslide <link>` untuk mengunduh video TikTok tanpa watermark maupun rangkaian slide foto beserta audionya secara berjeda aman, serta `.ig`, `.fb`, `.tw`, `.pin`, `.capcut`, `.mf`, dan `.play <judul lagu>`.
+5. **Menghubungkan Hosting & Menjelajahi Dashboard 5-Ruang Kerja**:
+   - Bilah navigasi atas dirapikan menjadi 5 menu satu baris: **Simulator Chat**, **Katalog & Studio**, **Koneksi WA**, **Keamanan & Gateway**, serta **Pengaturan & Template**.
+   - Apabila pengguna membuka Dashboard dari domain statis seperti Vercel, aplikasi otomatis mendeteksi ketiadaan soket lokal dan menampilkan kotak **Koneksi Server Bot 24/7 & Panduan Deploy** yang jelas agar pengguna dapat menempelkan URL mesin bot aktif mereka atau men-deploy server kontainer penuh dengan mudah.
 
-### Identitas Visual & Tema (Terinspirasi `gepacorner.my.id`)
+### Identitas Visual & Tata Letak Dashboard
 
-- **Arah Estetika**: *Minimalist Personal Creator Corner* — memadukan ketenangan halaman profil kreator independen (`Gepa — Personal Corner`) dengan kerapian konsol utilitas modern. Fokus pada ruang lega (*generous whitespace*), kartu permukaan datar tanpa tumpukan bayangan berlapis, serta aksen personal yang hangat namun fungsional.
+- **Arah Estetika**: Konsol SaaS minimalis dan tenang dengan hirarki informasi tajam serta bebas dekorasi berlebihan.
 - **Palet Warna (60-30-10)**:
-  - **60% Kanvas Utama (`--background`)**: Putih hangat bersih (`#FAF9F6`) yang nyaman di mata dengan opsi sakelar tema gelap tenang (`#0C0C0E`) di area profil kerja.
-  - **30% Permukaan Struktural (`--surface` & `--border`)**: Kartu putih murni (`#FFFFFF` / `#141417` pada mode gelap) dengan garis tepi tipis 1px (`#E4E4E7` / `#27272A`) dan teks sekunder abu netral (`#71717A`).
-  - **10% Aksen Fokus (`--primary` & `--accent`)**: Hijau zamrud segar (`#10B981` / `#059669`) khusus untuk tombol aksi utama, indikator koneksi aktif, serta gelembung balasan di simulator chat; kuning amber (`#D97706`) dan merah koral (`#E11D48`) khusus untuk peringatan moderasi grup (`.antilink`).
-- **Tipografi & Hierarki**:
-  - *Heading & Brand*: **Plus Jakarta Sans** (SemiBold/Bold, *tight tracking*) untuk judul halaman dan identitas brand Gepa Corner.
-  - *Body & Ruang Chat*: **DM Sans** (Regular/Medium, 14px–15px) untuk keterbacaan percakapan, deskripsi fitur, dan panduan tautan.
-  - *Command, Kode Pairing & Angka*: **JetBrains Mono** (`tabular-nums`) untuk penulisan sintaks perintah (`.tt`, `.brat`, `.hidetag`), kode tautan 8 digit, penghitung pesan, dan waktu pemrosesan.
-- **Tata Letak & Struktur Navigasi**:
-  - **Bilah Atas (3-Zone Top Bar)**: Zona kiri menampilkan identitas tunggal `GepaBot`, zona tengah menampilkan 4 tautan navigasi teks satu baris (`Koneksi WA`, `Simulator Chat`, `Katalog Command`, `Pengaturan`), dan zona kanan menampilkan 1 tombol aksi utama (`Hubungkan WA` atau status sesi).
-  - **Header Personal Corner**: Bagian pembuka menampilkan kartu ringkas profil bot ala `gepacorner.my.id` (avatar kreator/bot, sapaan singkat, awalan aktif `.`, serta metrik ringkas jumlah perintah diproses dalam teks bersih berpemisah `·` tanpa lencana kapsul berlebihan).
-- **Umpan Balik Interaktif & Transisi**:
-  - Transisi antar-tab halus di bawah 180ms, indikator sedang memproses (*"Mengunduh media tanpa watermark..."* / *"Merender stiker WebP..."*) langsung di dalam gelembung chat, pemutar video/audio langsung di ruang simulator, serta pratinjau stiker transparan ukuran penuh saat diklik.
+  - **60% Latar Utama (`--background`)**: Terang hangat (`#FAF9F6`) dan gelap pekat (`#0C0C0E`).
+  - **30% Panel Struktural (`--surface`)**: Permukaan satu tingkat (`#FFFFFF` / `#141417`) dengan garis batas tipis 1px dan garis pemisah baris tanpa tumpukan kartu di dalam kartu.
+  - **10% Aksen Fungsional (`--primary`)**: Hijau zamrud (`#059669` / `#10B981`) untuk aksi utama dan penanda koneksi aktif; kuning amber dan merah khusus indikator peringatan/kegagalan yang disertai teks keterangan jelas.
+- **Tipografi & Keterbacaan Angka**:
+  - **Plus Jakarta Sans** untuk judul dan navigasi utama, **DM Sans** untuk teks bacaan dan gelembung simulasi chat, serta **JetBrains Mono** (`tabular-nums`) untuk seluruh sintaks command, angka statistik, waktu proses, dan ukuran berkas.
+  - Keterangan kategori, daftar alias, dan syarat media ditulis menggunakan pemisah titik tengah (`·`) yang bersih tanpa lencana kapsul warna-warni pada elemen non-interaktif.
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Keputusan 1: Mesin Pemroses Perintah Terpadu (Unified Command Router)**
-  - *Pendekatan Terpilih*: Satu mesin pemroses perintah di sisi server menangani pesan dari koneksi WhatsApp asli maupun dari Simulator Chat Web menggunakan logika yang persis sama.
-  - *Alasan*: Memastikan apa pun yang berhasil diuji di Simulator Web (seperti unduhan `.tt`, audio `.mp3`, stiker `.brat`, maupun moderasi `.antilink`) berjalan identik 100% ketika seseorang mengirim chat ke nomor WhatsApp bot yang sudah tertaut.
-  - *Alternatif yang Dilewati*: Membuat simulasi palsu di sisi browser saja — dilewati karena tidak mencerminkan hasil pengunduhan media maupun pembuatan file stiker WebP yang sesungguhnya.
+- **Keputusan 1: Balasan `.hdsw` Langsung di Ruang Grup (Tanpa Cold DM)**
+  - *Pendekatan Terpilih*: Mengirim hasil konversi media ukuran asli `.hdsw` langsung sebagai balasan (*quoted reply*) di ruang chat tempat perintah diketik — baik di Chat Pribadi maupun di Grup.
+  - *Alasan*: Sebelumnya pengiriman hasil ke chat pribadi anggota grup memicu pemblokiran WhatsApp karena dianggap mengirim spam DM ke nomor asing. Membalas langsung di dalam grup 100% aman dari aturan *cold DM*, tetap mempertahankan kualitas byte asli untuk diteruskan ke Status WA, dan bisa dinikmati bersama di grup.
 
-- **Keputusan 2: Pembuatan Stiker Mandiri di Server (Tanpa Ketergantungan Layanan Luar)**
-  - *Pendekatan Terpilih*: Merender stiker gambar (`.s`), stiker teks gaya Brat (`.brat`), dan stiker meme (`.meme`) secara langsung di server menggunakan kanvas grafis vektor dan pengolah gambar berformat WebP 512×512 lengkap dengan penyuntikan metadata EXIF WhatsApp (Nama Paket & Pembuat).
-  - *Alasan*: Cepat, tidak dibatasi kuota pihak ketiga, mendukung transparansi maupun latar khas hijau limau Brat dengan presisi tinggi, dan langsung dikenali WhatsApp sebagai stiker resmi yang bisa disimpan ke favorit.
+- **Keputusan 2: Arsitektur Koneksi Fleksibel untuk Mengatasi Keterbatasan Serverless Vercel**
+  - *Pendekatan Terpilih*: Memisahkan alamat koneksi API & WebSocket di antarmuka web agar dapat diarahkan ke URL server bot eksternal (disimpan di peramban atau variabel lingkungan), menambahkan dukungan lintas domain di server, menyertakan aturan *rewrite* halaman tunggal untuk Vercel, serta menyiapkan cetak biru kontainer lengkap (Node + mesin pengolah video/audio) untuk platform server 24/7.
+  - *Alasan*: Koneksi WhatsApp Baileys wajib menyala terus-menerus di latar belakang sehingga mustahil hidup di fungsi *serverless* Vercel murni. Dengan pendekatan ini, pengguna bebas memilih: tetap memakai Vercel untuk tampilan Dashboard sambil menghubungkannya ke mesin bot 24/7, atau men-deploy keduanya sekaligus di Cloud Run / Railway / Render / VPS.
 
-- **Keputusan 3: Sinkronisasi Koneksi Waktu Nyata (WebSocket)**
-  - *Pendekatan Terpilih*: Menggunakan saluran komunikasi dua arah waktu nyata antara server bot dan dashboard web untuk mengalirkan pembaruan QR Code, Pairing Code 8 digit, status keterhubungan perangkat, dan riwayat aktivitas perintah.
-  - *Alasan*: Kode QR WhatsApp berganti secara berkala setiap beberapa puluh detik; aliran langsung menjamin kode di layar selalu segar tanpa perlu memuat ulang halaman.
+- **Keputusan 3: Pemrosesan Media Lokal & Pengiriman Slide Berjeda Anti-Ban**
+  - *Pendekatan Terpilih*: Merender stiker statis/animasi, `.qc`, konversi audio/video, dan efek suara secara lokal di server, serta menyalurkan setiap pengiriman balasan (termasuk rangkaian foto `.ttslide` dan media besar `.hdsw`) melewati antrean keluar berjeda (*paced outbound queue*) dengan batas ukuran aman 35 MB.
+  - *Alasan*: Menjamin kecepatan dan ketajaman hasil tanpa ketergantungan API pembuat stiker luar, sekaligus menjaga ritme pengiriman pesan tetap terlihat manusiawi di mata sistem keamanan Meta.
 
 ---
 
 ## 4. Technical Architecture & Data Strategy
 
-### Diagram Arsitektur & Komponen
+### Diagram Arsitektur Koneksi, Hosting & Pemrosesan Bot
 
 ```text
-┌────────────────────────────────────────────────────────────────────────────┐
-│                   ANTARMUKA WEB GEPABOT (Gepa Corner UI)                   │
-│                                                                            │
-│  ┌──────────────────┐  ┌────────────────────┐  ┌────────────────────────┐  │
-│  │ Panel Koneksi WA │  │ Simulator Chat WA  │  │ Katalog & Pengaturan   │  │
-│  │ (QR & 8-Digit    │  │ (Pribadi & Grup,   │  │ Command "." (Toggle,   │  │
-│  │  Pairing Code)   │  │  Upload Foto, MP3) │  │  Prefix, Sticker Info) │  │
-│  └────────┬─────────┘  └─────────┬──────────┘  └───────────┬────────────┘  │
-└───────────┼──────────────────────┼─────────────────────────┼───────────────┘
-            │ WebSocket & HTTP     │ Pesan & Lampiran        │ Konfigurasi
-            ▼                      ▼                         ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│                        SERVER BOT & COMMAND ENGINE                         │
-│                                                                            │
-│  ┌─────────────────────────┐          ┌─────────────────────────────────┐  │
-│  │ Manajer Sesi WhatsApp   │◄────────►│ Router Perintah Awalan "."      │  │
-│  │ (Multi-Device Socket,   │  Pesan   │ (.menu, .tt, .ig, .yt, .mp3,    │  │
-│  │  Auth State, Auto-Retry)│  Masuk   │  .s, .brat, .meme, .hidetag,    │  │
-│  └─────────────────────────┘          │  .tagall, .antilink)            │  │
-│                                       └───────┬───────────────┬─────────┘  │
-│                                               │               │            │
-│                              ┌────────────────▼──┐   ┌────────▼─────────┐  │
-│                              │ Modul Downloader  │   │ Studio Stiker    │  │
-│                              │ Video & Audio MP3 │   │ WebP & EXIF Pack │  │
-│                              │ (TikTok/IG/YT)    │   │ (Brat/Meme/Foto) │  │
-│                              └───────────────────┘   └──────────────────┘  │
-└────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────┐
+│           ANTARMUKA WEB DASHBOARD (Bisa di Server Terpadu atau di Vercel)          │
+│                                                                                    │
+│  ┌────────────────┐ ┌──────────────────┐ ┌──────────────┐ ┌──────────────────────┐ │
+│  │ Simulator Chat │ │ Katalog & Studio │ │ Koneksi WA & │ │ Keamanan, Gateway,   │ │
+│  │ (.hdsw Grup,   │ │ (Filter Kategori │ │ Konfigurasi  │ │ Pengaturan &         │ │
+│  │  Video, Audio) │ │  & Toggle Aktif) │ │ URL Server   │ │ Template Balasan     │ │
+│  └───────┬────────┘ └────────┬─────────┘ └──────┬───────┘ └──────────┬───────────┘ │
+└──────────┴───────────────────┴─────────┬────────┴────────────────────┴─────────────┘
+                                         │ HTTP REST + Real-Time WebSocket
+                                         │ (Otomatis Lokal atau Lintas Domain / CORS)
+                                         ▼
+┌────────────────────────────────────────────────────────────────────────────────────┐
+│        MESIN SERVER BOT PERSISTEN 24/7 (Cloud Run / Railway / Render / VPS)        │
+│                                                                                    │
+│  ┌──────────────────────────────┐        ┌──────────────────────────────────────┐  │
+│  │ Perisai Anti-Ban & Antrean   │◄──────►│ Router Command Awalan Tunggal (".")  │  │
+│  │ (Cooldown, Typing/Recording, │        │ (Reaksi ⏳/✔️/❌, Konteks Grup & Pribadi,│  │
+│  │  Paced Queue, Kunci Manual)  │        │  Ekstraksi Reply Media & ViewOnce)   │  │
+│  └──────────────┬───────────────┘        └─────┬────────────────┬───────────────┘  │
+│                 │                              │                │                  │
+│                 ▼                              ▼                ▼                  │
+│  ┌──────────────────────────┐   ┌─────────────────────┐  ┌──────────────────────┐  │
+│  │ Studio Stiker & Maker    │   │ Konverter & .hdsw   │  │ Multi-Downloader     │  │
+│  │ (.s Foto/Vid, .qc, .iqc, │   │ (.hdsw Grup/Pribadi,│  │ (.aio, .tt, .ttslide,│  │
+│  │  .brat/.bratvid, .attp,  │   │  .hd, .rvo, .toptv, │  │  .ig, .fb, .tw, .pin,│  │
+│  │  .wm, .toimg, .tovid,    │   │  .tomp3, .tovn,     │  │  .capcut, .mf, .play,│  │
+│  │  .meme, .emojimix)       │   │  Efek Audio, QR)    │  │  .yt / .ytmp3)       │  │
+│  └──────────────────────────┘   └─────────────────────┘  └──────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Model Data & Penyimpanan Status
+### Model Data & Status
 
-- **Konfigurasi Bot (`BotConfig`)**: Menyimpan awalan perintah aktif (default `.`), nama bot (`GepaBot`), nama paket stiker (`Gepa Corner`), nama pembuat stiker (`gepacorner.my.id`), daftar perintah yang diaktifkan/dinonaktifkan, serta pengaturan per-grup (`antilink`, `welcome`). Disimpan secara persisten di penyimpanan lokal server agar tidak hilang saat dimuat ulang.
-- **Status Sesi WhatsApp (`ConnectionState`)**: Melacak kondisi tautan saat ini (`disconnected`, `connecting`, `qr_ready`, `pairing_code_ready`, `connected`), string QR terkini, kode pairing 8 karakter, profil nomor tertaut (nama & nomor), serta waktu aktif sesi.
-- **Pesan & Riwayat Aktivitas (`ChatMessage` & `CommandLog`)**: Menyimpan percakapan di ruang Simulator (teks, lampiran gambar/stiker WebP, pemutar video MP4, pemutar audio MP3, status penghapusan pesan antilink, serta daftar anggota grup simulasi untuk `.hidetag`/`.tagall`) dan ringkasan eksekusi perintah terbaru.
+- **Pengelola Alamat Backend Dinamis**: Menyimpan konfigurasi opsional alamat server bot (bawaan otomatis mengikuti domain aktif, namun dapat diubah ke alamat server eksternal `https://...` / `wss://...` saat antarmuka dibuka dari hosting statis seperti Vercel) lengkap dengan indikator status jangkauan server.
+- **Dukungan `.hdsw` Konteks Grup & Pribadi**: Memperbarui alur ekstraksi dokumen di soket WhatsApp dan Simulator agar menerima dokumen foto/video dari ruang grup maupun pribadi, mempertahankan byte asli video/foto, dan mengirimkan hasilnya kembali di ruang percakapan yang sama.
+- **Konteks & Balasan Multi-Media Lengkap**: Mendukung pemrosesan pesan masuk berupa foto, video pendek, audio/Voice Note, stiker statis/animasi, dokumen HD, serta pesan *View Once*, dan mendukung balasan berupa stiker WebP ber-EXIF, video bulat PTV, Voice Note PTT, MP3, maupun galeri foto berurutan.
 
-### Pemetaan Interaksi Komponen & Perubahan Status
+### Pemetaan Interaksi Komponen & Penanganan Status
 
-- **Panel Koneksi WA**:
-  - Memilih metode *Scan QR* memicu inisialisasi soket WhatsApp dan menampilkan gambar QR yang diperbarui otomatis setiap kali token berganti.
-  - Memilih *Pairing Code*, memvalidasi nomor telepon hanya angka berkode negara (contoh `628...`), meminta kode 8 digit dari soket WhatsApp, dan menampilkannya dengan tombol salin cepat.
-  - Menekan *Putuskan Sesi* membersihkan kredensial sesi aktif dan mengembalikan panel ke keadaan siap taut baru.
-- **Simulator Chat WA**:
-  - Mengirim pesan berawalan `.` (misal `.tt <url>`) menampilkan gelembung pesan pengguna, status pengetikan bot, lalu merender balasan media asli (video MP4 tanpa watermark yang dapat diputar & diunduh, atau pemutar audio MP3 untuk `.mp3`).
-  - Mengunggah gambar dengan caption `.s` atau membalas (*reply*) pesan bergambar dengan `.s` maupun `.meme teks atas | teks bawah` mengubah gambar menjadi stiker WebP 512×512 transparan/proporsional langsung di ruang chat.
-  - Mengetik `.brat kata-kata` menghasilkan stiker persegi khas Brat lengkap dengan tombol unduh stiker.
-  - Pada mode Grup, mengaktifkan `.antilink on` lalu menekan tombol simulasi *"Kirim Link sebagai Member Biasa"* akan menampilkan pesan tautan yang seketika ditandai terhapus oleh bot disertai peringatan moderasi grup, sedangkan `.hidetag pengumuman` menandai seluruh anggota grup simulasi pada metadata pesan tanpa mengotori teks pengumuman.
-- **Katalog Command & Pengaturan**:
-  - Pencarian instan dan filter kategori menyaring daftar command secara langsung; tombol *"Coba di Simulator"* otomatis berpindah ke tab Simulator dan mengisi kolom input dengan contoh perintah siap kirim.
-  - Mengubah sakelar aktif/nonaktif suatu command atau mengganti awalan perintah (`.` menjadi `!` atau `#`) langsung memperbarui router server dan disinkronkan ke semua klien yang terbuka.
+- **Panel Koneksi WA & Diagnostik Hosting**:
+  - Menampilkan status sambungan ke mesin server bot secara *real-time*. Bila antarmuka berjalan di Vercel tanpa mesin belakang yang terhubung, muncul peringatan informatif beserta input **Hubungkan URL Server Bot** dan panduan ringkas cara menjalankan mesin bot 24/7 di Cloud Run / Railway / Render / VPS.
+- **Simulator Chat Grup & Pribadi**:
+  - Membuka akses uji coba lampiran *Dokumen Foto/Video HD* (`.hdsw`) baik saat tab Simulator berada di **Chat Pribadi** maupun **Grup Komunitas**, ditambah tombol uji cepat untuk Video, Audio/VN, Stiker, *View Once*, dan fitur *Reply* berantai pada pesan hasil bot.
+- **Konsolidasi Ruang Kerja & Menu `.menu` Terkategori**:
+  - Menyusun ulang tampilan `.menu` di WhatsApp per sub-kategori (`.menu stiker`, `.menu downloader`, `.menu media`, `.menu audio`, `.menu grup`, `.menu utilitas`) serta menyatukan halaman pengaturan serumpun di Web Dashboard agar seluruh fitur baru dan fitur lama tertata rapi dalam 5 tab utama.

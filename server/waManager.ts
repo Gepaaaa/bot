@@ -868,19 +868,24 @@ class WhatsAppSessionManager {
     }
   }
 
-  private async extractAttachedOrQuotedImage(
+  private async extractAttachedOrQuotedMediaByKind(
     sock: WASocket,
-    msg: WAMessage
+    msg: WAMessage,
+    kind: 'image' | 'video' | 'audio' | 'sticker'
   ): Promise<Buffer | null> {
+    const pickField = (m: WAMessage['message'] | null | undefined) => {
+      if (!m) return null;
+      if (kind === 'image') return m.imageMessage || null;
+      if (kind === 'video') return m.videoMessage || m.ptvMessage || null;
+      if (kind === 'audio') return m.audioMessage || null;
+      return m.stickerMessage || null;
+    };
+
     try {
       const m = this.unwrapWaMessage(msg.message);
-      if (m?.imageMessage) {
-        const normalizedMsg: WAMessage = {
-          key: msg.key,
-          message: m,
-        };
+      if (pickField(m)) {
         const buf = await downloadMediaMessage(
-          normalizedMsg,
+          { key: msg.key, message: m! },
           'buffer',
           {},
           {
@@ -893,14 +898,14 @@ class WhatsAppSessionManager {
 
       const contextInfo = this.extractContextInfo(msg);
       const quoted = this.unwrapWaMessage(contextInfo?.quotedMessage);
-      if (quoted?.imageMessage && contextInfo?.stanzaId) {
+      if (pickField(quoted) && contextInfo?.stanzaId) {
         const quotedMsg: WAMessage = {
           key: {
             remoteJid: msg.key.remoteJid,
             id: contextInfo.stanzaId,
             participant: contextInfo.participant,
           },
-          message: quoted,
+          message: quoted!,
         };
         const buf = await downloadMediaMessage(
           quotedMsg,
@@ -917,6 +922,108 @@ class WhatsAppSessionManager {
       return null;
     }
     return null;
+  }
+
+  private async extractQuotedViewOnceMedia(
+    sock: WASocket,
+    msg: WAMessage
+  ): Promise<{
+    kind: 'image' | 'video' | 'audio';
+    buffer: Buffer;
+    mimeType: string;
+    caption?: string;
+  } | null> {
+    try {
+      const contextInfo = this.extractContextInfo(msg);
+      const rawQuoted = contextInfo?.quotedMessage;
+      if (!rawQuoted || !contextInfo?.stanzaId) return null;
+
+      const voInner =
+        rawQuoted.viewOnceMessage?.message ||
+        rawQuoted.viewOnceMessageV2?.message ||
+        rawQuoted.viewOnceMessageV2Extension?.message ||
+        (rawQuoted.imageMessage?.viewOnce ||
+        rawQuoted.videoMessage?.viewOnce ||
+        rawQuoted.audioMessage?.viewOnce
+          ? rawQuoted
+          : null);
+
+      const unwrapped = voInner || this.unwrapWaMessage(rawQuoted);
+      if (!unwrapped) return null;
+
+      const isVoFlagged = Boolean(
+        voInner ||
+          unwrapped.imageMessage?.viewOnce ||
+          unwrapped.videoMessage?.viewOnce ||
+          unwrapped.audioMessage?.viewOnce
+      );
+      if (!isVoFlagged) return null;
+
+      let kind: 'image' | 'video' | 'audio' | null = null;
+      let mimeType = 'application/octet-stream';
+      let caption: string | undefined;
+
+      if (unwrapped.imageMessage) {
+        kind = 'image';
+        mimeType = unwrapped.imageMessage.mimetype || 'image/jpeg';
+        caption = unwrapped.imageMessage.caption || undefined;
+      } else if (unwrapped.videoMessage) {
+        kind = 'video';
+        mimeType = unwrapped.videoMessage.mimetype || 'video/mp4';
+        caption = unwrapped.videoMessage.caption || undefined;
+      } else if (unwrapped.audioMessage) {
+        kind = 'audio';
+        mimeType = unwrapped.audioMessage.mimetype || 'audio/mpeg';
+      }
+
+      if (!kind) return null;
+
+      const cleanInner = { ...unwrapped };
+      if (cleanInner.imageMessage) {
+        cleanInner.imageMessage = {
+          ...cleanInner.imageMessage,
+          viewOnce: false,
+        };
+      }
+      if (cleanInner.videoMessage) {
+        cleanInner.videoMessage = {
+          ...cleanInner.videoMessage,
+          viewOnce: false,
+        };
+      }
+      if (cleanInner.audioMessage) {
+        cleanInner.audioMessage = {
+          ...cleanInner.audioMessage,
+          viewOnce: false,
+        };
+      }
+
+      const dlBuf = await downloadMediaMessage(
+        {
+          key: {
+            remoteJid: msg.key.remoteJid,
+            id: contextInfo.stanzaId,
+            participant: contextInfo.participant,
+          },
+          message: cleanInner,
+        },
+        'buffer',
+        {},
+        {
+          logger: silentLogger as never,
+          reuploadRequest: sock.updateMediaMessage,
+        }
+      );
+
+      return {
+        kind,
+        buffer: Buffer.from(dlBuf),
+        mimeType,
+        caption,
+      };
+    } catch {
+      return null;
+    }
   }
 
   private classifyDocKind(
@@ -1005,10 +1112,10 @@ class WhatsAppSessionManager {
       };
     }
 
-    const maxBytes = 100 * 1024 * 1024; // 100 MB safety ceiling
+    const maxBytes = 65 * 1024 * 1024; // 65 MB safe ceiling for WA Status HD
     if (fileSize > maxBytes) {
       throw new Error(
-        'Ukuran dokumen melebihi batas 100 MB untuk pengiriman Status WhatsApp.'
+        'Ukuran dokumen melebihi batas aman 65 MB untuk pengiriman Status WhatsApp.'
       );
     }
 
@@ -1086,7 +1193,7 @@ class WhatsAppSessionManager {
       const isOwner =
         isFromMe || (ownerNumberDigits && senderPhone === ownerNumberDigits);
       if (!isOwner) {
-        return; // Silently ignore non-owner messages to keep bot completely stealthy
+        return;
       }
     }
 
@@ -1117,7 +1224,6 @@ class WhatsAppSessionManager {
         recent.push(now);
         this.userCommandTimestamps.set(userKey, recent);
 
-        // Only send warning on the exact moment limit is hit to avoid bot flood
         if (recent.length === maxPerMin + 1) {
           const waitTime = Math.ceil(Math.max(cooldownSec - elapsedSec, 5));
           try {
@@ -1139,7 +1245,7 @@ class WhatsAppSessionManager {
       this.userCommandTimestamps.set(userKey, recent);
     }
 
-    // Anti-ban: ONLY send read receipt on actual bot commands (never on every ordinary group chat!)
+    // Anti-ban: ONLY send read receipt on actual bot commands
     if (
       isPrefixCommand &&
       botStore.config.autoRead &&
@@ -1272,7 +1378,6 @@ class WhatsAppSessionManager {
         );
         if (foundSender) {
           isAdmin = foundSender.isAdmin || Boolean(msg.key.fromMe);
-          // Upgrade senderPhone to resolved phone digits when senderJid was @lid
           if (/^[0-9]{8,16}$/.test(foundSender.phone)) {
             senderPhone = foundSender.phone;
           }
@@ -1285,6 +1390,20 @@ class WhatsAppSessionManager {
     const contextInfo = this.extractContextInfo(msg);
     const mentionedJids = contextInfo?.mentionedJid || [];
     const quotedParticipantJid = contextInfo?.participant || undefined;
+    const unwrappedQuoted = this.unwrapWaMessage(contextInfo?.quotedMessage);
+    const quotedText =
+      unwrappedQuoted?.conversation ||
+      unwrappedQuoted?.extendedTextMessage?.text ||
+      unwrappedQuoted?.imageMessage?.caption ||
+      unwrappedQuoted?.videoMessage?.caption ||
+      unwrappedQuoted?.documentMessage?.caption ||
+      undefined;
+    const quotedSenderPhone = quotedParticipantJid
+      ? quotedParticipantJid.split(':')[0]?.split('@')[0]
+      : undefined;
+    const quotedSenderName = quotedSenderPhone
+      ? `+${quotedSenderPhone}`
+      : undefined;
 
     const pfx = botStore.config.prefix;
     const lowerText = text.toLowerCase();
@@ -1292,16 +1411,164 @@ class WhatsAppSessionManager {
       ? lowerText.slice(pfx.length).trim().split(/\s+/)[0] || ''
       : '';
 
-    const needsImage = ['s', 'stiker', 'sticker', 'sgif', 'meme', 'smeme', 'memesticker'].includes(
-      firstToken
-    );
-    const needsHdswDoc = ['hdsw', 'sw', 'tosw', 'hdstatus', 'swori'].includes(
-      firstToken
-    );
+    const needsImage = [
+      's',
+      'stiker',
+      'sticker',
+      'sgif',
+      'meme',
+      'smeme',
+      'memesticker',
+      'hd',
+      'remini',
+      'upscale',
+      'jernih',
+      'hdr',
+      'hitamkan',
+      'grayscale',
+      'bw',
+      'hitamputih',
+      'imgedit',
+      'blur',
+      'invert',
+      'negatif',
+      'mirror',
+      'flip',
+      'sepia',
+      'tourl',
+      'upload',
+      'catbox',
+      'linkmedia',
+    ].includes(firstToken);
 
-    const imageBuffer = needsImage
-      ? await this.extractAttachedOrQuotedImage(sock, msg)
-      : null;
+    const needsVideo = [
+      's',
+      'stiker',
+      'sticker',
+      'sgif',
+      'toptv',
+      'ptv',
+      'videobulat',
+      'tomp3',
+      'toaudio',
+      'vn2mp3',
+      'tovn',
+      'toptt',
+      'vn',
+      'bass',
+      'bassboost',
+      'jedagjedug',
+      'nightcore',
+      'nc',
+      'tupai',
+      'slow',
+      'slowed',
+      'reverb',
+      'fast',
+      'speedup',
+      'cepat',
+      'robot',
+      'robo',
+      'cyborg',
+      'reverse',
+      'baliksuara',
+      'tourl',
+      'upload',
+      'catbox',
+      'linkmedia',
+    ].includes(firstToken);
+
+    const needsAudio = [
+      'tomp3',
+      'toaudio',
+      'vn2mp3',
+      'tovn',
+      'toptt',
+      'vn',
+      'bass',
+      'bassboost',
+      'jedagjedug',
+      'nightcore',
+      'nc',
+      'tupai',
+      'slow',
+      'slowed',
+      'reverb',
+      'fast',
+      'speedup',
+      'cepat',
+      'robot',
+      'robo',
+      'cyborg',
+      'reverse',
+      'baliksuara',
+      'tourl',
+      'upload',
+      'catbox',
+      'linkmedia',
+    ].includes(firstToken);
+
+    const needsSticker = [
+      'wm',
+      'take',
+      'colong',
+      'swm',
+      'exif',
+      'toimg',
+      'topng',
+      'toimage',
+      'tovid',
+      'tomp4',
+      'togif',
+      'tourl',
+      'upload',
+      'catbox',
+      'linkmedia',
+    ].includes(firstToken);
+
+    const needsViewOnce = [
+      'rvo',
+      'readviewonce',
+      'bukavo',
+      'lihatsekali',
+    ].includes(firstToken);
+
+    const needsHdswDoc = [
+      'hdsw',
+      'sw',
+      'tosw',
+      'hdstatus',
+      'swori',
+      's',
+      'stiker',
+      'sticker',
+      'sgif',
+      'hd',
+      'remini',
+      'upscale',
+      'toptv',
+      'ptv',
+      'tourl',
+    ].includes(firstToken);
+
+    const [imageBuffer, videoBuffer, audioBuffer, stickerBuffer, viewOnceMedia] =
+      await Promise.all([
+        needsImage
+          ? this.extractAttachedOrQuotedMediaByKind(sock, msg, 'image')
+          : Promise.resolve(null),
+        needsVideo
+          ? this.extractAttachedOrQuotedMediaByKind(sock, msg, 'video')
+          : Promise.resolve(null),
+        needsAudio
+          ? this.extractAttachedOrQuotedMediaByKind(sock, msg, 'audio')
+          : Promise.resolve(null),
+        needsSticker
+          ? this.extractAttachedOrQuotedMediaByKind(sock, msg, 'sticker')
+          : Promise.resolve(null),
+        needsViewOnce
+          ? this.extractQuotedViewOnceMedia(sock, msg)
+          : Promise.resolve(null),
+      ]);
 
     let documentMedia: {
       kind: 'image' | 'video' | 'unsupported';
@@ -1313,7 +1580,8 @@ class WhatsAppSessionManager {
     } | null = null;
     let attachedNonDocumentMedia = false;
 
-    if (needsHdswDoc && !isGroup) {
+    // Works in BOTH Private Chat and Group Chat!
+    if (needsHdswDoc) {
       try {
         const extracted = await this.extractDocumentForHdsw(sock, msg);
         documentMedia = extracted.documentMedia;
@@ -1347,6 +1615,12 @@ class WhatsAppSessionManager {
       isBotGroupAdmin,
       text,
       imageBuffer,
+      videoBuffer,
+      audioBuffer,
+      stickerBuffer,
+      viewOnceMedia,
+      quotedText,
+      quotedSenderName,
       documentMedia,
       attachedNonDocumentMedia,
       mentionedJids,
@@ -1384,7 +1658,7 @@ class WhatsAppSessionManager {
 
         if (result.hdswMedia) {
           const hd = result.hdswMedia;
-          await this.simulateHumanTyping(sock, remoteJid, false);
+          await this.simulateHumanTyping(sock, remoteJid, isGroup);
 
           if (hd.kind === 'image') {
             await sock.sendMessage(
@@ -1392,7 +1666,8 @@ class WhatsAppSessionManager {
               {
                 image: hd.buffer,
                 mimetype: hd.mimeType,
-                caption: hd.privateCaption,
+                caption: hd.caption,
+                mentions: result.mentions,
                 ...(hd.width ? { width: hd.width } : {}),
                 ...(hd.height ? { height: hd.height } : {}),
                 ...(hd.jpegThumbnail ? { jpegThumbnail: hd.jpegThumbnail } : {}),
@@ -1405,7 +1680,8 @@ class WhatsAppSessionManager {
               {
                 video: hd.buffer,
                 mimetype: hd.mimeType,
-                caption: hd.privateCaption,
+                caption: hd.caption,
+                mentions: result.mentions,
                 ...(hd.jpegThumbnail ? { jpegThumbnail: hd.jpegThumbnail } : {}),
               },
               { quoted: msg }
@@ -1418,6 +1694,107 @@ class WhatsAppSessionManager {
             { sticker: result.stickerBuffer },
             { quoted: msg }
           );
+        } else if (result.imageBuffer) {
+          await this.simulateHumanTyping(sock, remoteJid, isGroup);
+          await sock.sendMessage(
+            remoteJid,
+            {
+              image: result.imageBuffer,
+              mimetype: result.imageMimeType || 'image/jpeg',
+              caption: result.replyText || '',
+            },
+            { quoted: msg }
+          );
+        } else if (result.videoBuffer) {
+          await this.simulateHumanTyping(sock, remoteJid, isGroup);
+          if (result.asPtv) {
+            await sock.sendMessage(
+              remoteJid,
+              {
+                video: result.videoBuffer,
+                mimetype: 'video/mp4',
+                ptv: true,
+              },
+              { quoted: msg }
+            );
+          } else {
+            await sock.sendMessage(
+              remoteJid,
+              {
+                video: result.videoBuffer,
+                mimetype: result.videoMimeType || 'video/mp4',
+                caption: result.replyText || '',
+              },
+              { quoted: msg }
+            );
+          }
+        } else if (result.audioBuffer) {
+          await this.simulateHumanTyping(sock, remoteJid, isGroup, 'audio');
+          await sock.sendMessage(
+            remoteJid,
+            {
+              audio: result.audioBuffer,
+              mimetype: result.audioMimeType || 'audio/mpeg',
+              ptt: Boolean(result.asVoiceNote),
+            },
+            { quoted: msg }
+          );
+        } else if (result.documentBuffer) {
+          await this.simulateHumanTyping(sock, remoteJid, isGroup);
+          await sock.sendMessage(
+            remoteJid,
+            {
+              document: result.documentBuffer,
+              mimetype: result.documentMimeType || 'application/octet-stream',
+              fileName: result.documentFileName || 'berkas-unduhan',
+              caption: result.replyText || '',
+            },
+            { quoted: msg }
+          );
+        } else if (
+          result.slideImageUrls &&
+          result.slideImageUrls.length > 0
+        ) {
+          const slides = result.slideImageUrls.slice(0, 8);
+          for (let i = 0; i < slides.length; i += 1) {
+            const { buffer, contentType } = await fetchRemoteBuffer(slides[i]);
+            await this.simulateHumanTyping(sock, remoteJid, isGroup);
+            await sock.sendMessage(
+              remoteJid,
+              {
+                image: buffer,
+                mimetype: contentType.startsWith('image/')
+                  ? contentType
+                  : 'image/jpeg',
+                caption:
+                  i === 0
+                    ? result.replyText || `Slide 1/${slides.length}`
+                    : `Slide ${i + 1}/${slides.length}`,
+              },
+              i === 0 ? { quoted: msg } : undefined
+            );
+            if (i < slides.length - 1) {
+              await this.sleepRandom(1100, 1900);
+            }
+          }
+          if (result.audioRemoteUrl) {
+            try {
+              const { buffer } = await fetchRemoteBuffer(result.audioRemoteUrl);
+              await this.sleepRandom(900, 1500);
+              await this.simulateHumanTyping(sock, remoteJid, isGroup, 'audio');
+              await sock.sendMessage(
+                remoteJid,
+                {
+                  audio: buffer,
+                  mimetype: 'audio/mpeg',
+                  ptt: false,
+                },
+                { quoted: msg }
+              );
+            } catch {
+              // Optional slide background audio non-fatal
+            }
+          }
         } else if (result.videoRemoteUrl) {
           const { buffer } = await fetchRemoteBuffer(result.videoRemoteUrl);
           await this.simulateHumanTyping(sock, remoteJid, isGroup);

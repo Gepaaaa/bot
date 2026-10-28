@@ -25,6 +25,7 @@ import {
   Webhook,
   Zap,
 } from 'lucide-react';
+import { buildApiUrl, getActiveBackendBaseUrl } from '../lib/apiBase.ts';
 import type {
   AutoResponderRule,
   BotConfig,
@@ -63,9 +64,14 @@ export function GatewayWebhookView({
   const [messageText, setMessageText] = useState(
     'Halo! Ini adalah pesan otomatis yang dikirim via OpenWA REST API Gateway GepaBot.'
   );
-  const [mediaUrl, setMediaUrl] = useState(
-    'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800'
-  );
+  const [mediaUrl, setMediaUrl] = useState(() => {
+    const base =
+      getActiveBackendBaseUrl() ||
+      (typeof window !== 'undefined'
+        ? window.location.origin
+        : 'http://localhost:3000');
+    return `${base}/api/sample-cat.jpg`;
+  });
   const [mediaType, setMediaType] = useState<'image' | 'video' | 'audio' | 'document'>('image');
   const [mediaCaption, setMediaCaption] = useState('Gambar dikirim via OpenWA API');
   const [pollTitle, setPollTitle] = useState('Apakah sistem anti-ban OpenWA ini sangat membantu?');
@@ -134,7 +140,7 @@ export function GatewayWebhookView({
     }
 
     try {
-      const res = await fetch(url, {
+      const res = await fetch(buildApiUrl(url), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -149,7 +155,11 @@ export function GatewayWebhookView({
   };
 
   const getCurlSnippet = () => {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+    const origin =
+      getActiveBackendBaseUrl() ||
+      (typeof window !== 'undefined'
+        ? window.location.origin
+        : 'http://localhost:3000');
     if (consoleEndpoint === 'send-text') {
       return `curl -X POST ${origin}/api/gateway/send-text \\
   -H "Content-Type: application/json" \\
@@ -198,7 +208,7 @@ export function GatewayWebhookView({
     setPingLoading(true);
     setPingResult(null);
     try {
-      const res = await fetch('/api/gateway/test-webhook', {
+      const res = await fetch(buildApiUrl('/api/gateway/test-webhook'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -252,7 +262,7 @@ export function GatewayWebhookView({
     setRuleSaving(true);
     try {
       if (editingRuleId) {
-        await fetch(`/api/gateway/auto-responder/${editingRuleId}`, {
+        await fetch(buildApiUrl(`/api/gateway/auto-responder/${editingRuleId}`), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -263,7 +273,7 @@ export function GatewayWebhookView({
           }),
         });
       } else {
-        await fetch('/api/gateway/auto-responder/add', {
+        await fetch(buildApiUrl('/api/gateway/auto-responder/add'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -282,11 +292,13 @@ export function GatewayWebhookView({
   };
 
   const handleDeleteRule = async (id: string) => {
-    await fetch(`/api/gateway/auto-responder/${id}`, { method: 'DELETE' });
+    await fetch(buildApiUrl(`/api/gateway/auto-responder/${id}`), {
+      method: 'DELETE',
+    });
   };
 
   const handleToggleRule = async (rule: AutoResponderRule) => {
-    await fetch(`/api/gateway/auto-responder/${rule.id}`, {
+    await fetch(buildApiUrl(`/api/gateway/auto-responder/${rule.id}`), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: !rule.enabled }),
@@ -305,12 +317,11 @@ export function GatewayWebhookView({
               <Globe className="w-6 h-6" />
             </div>
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                  OpenWA REST Gateway &amp; Webhook Engine
-                </span>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
-                  Paced Queue Ready
+              <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                <span>OpenWA REST Gateway &amp; Webhook Engine</span>
+                <span aria-hidden="true">·</span>
+                <span className="text-emerald-700 dark:text-emerald-400 font-medium">
+                  Antrean Paced FIFO Aktif
                 </span>
               </div>
               <h2 className="text-xl sm:text-2xl font-bold font-display text-zinc-900 dark:text-zinc-100">
@@ -626,10 +637,10 @@ export function GatewayWebhookView({
                 </span>
                 {apiResponse && (
                   <span
-                    className={`text-[11px] font-mono font-semibold px-2 py-0.5 rounded-full ${
+                    className={`text-xs font-mono tabular-nums font-semibold ${
                       apiResponse.ok
-                        ? 'bg-emerald-500/10 text-emerald-600'
-                        : 'bg-rose-500/10 text-rose-600'
+                        ? 'text-emerald-600'
+                        : 'text-rose-600'
                     }`}
                   >
                     HTTP {apiResponse.status}
@@ -676,14 +687,14 @@ export function GatewayWebhookView({
                         <div className="text-[11px] text-zinc-500 truncate">{job.text}</div>
                       </div>
                       <span
-                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 font-mono uppercase ${
+                        className={`text-[11px] font-semibold shrink-0 font-mono ${
                           job.status === 'sent'
-                            ? 'bg-emerald-500/10 text-emerald-600'
+                            ? 'text-emerald-600'
                             : job.status === 'composing'
-                            ? 'bg-amber-500/10 text-amber-600'
+                            ? 'text-amber-600'
                             : job.status === 'failed'
-                            ? 'bg-rose-500/10 text-rose-600'
-                            : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                            ? 'text-rose-600'
+                            : 'text-zinc-500 dark:text-zinc-400'
                         }`}
                       >
                         {job.status}
@@ -906,13 +917,13 @@ export function GatewayWebhookView({
                         {log.event}
                       </span>
                       <span
-                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                        className={`text-[11px] font-semibold tabular-nums ${
                           log.success
-                            ? 'bg-emerald-500/10 text-emerald-600'
-                            : 'bg-rose-500/10 text-rose-600'
+                            ? 'text-emerald-600'
+                            : 'text-rose-600'
                         }`}
                       >
-                        {log.statusCode ? `HTTP ${log.statusCode}` : 'TIMEOUT'}
+                        {log.statusCode ? `HTTP ${log.statusCode}` : 'Timeout'}
                       </span>
                     </div>
                     <div className="text-[11px] text-zinc-500 truncate">{log.url}</div>
@@ -966,11 +977,14 @@ export function GatewayWebhookView({
                 >
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-sm text-zinc-900 dark:text-zinc-100 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-md">
-                          "{rule.trigger}"
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="font-mono font-bold text-sm text-zinc-900 dark:text-zinc-100">
+                          &ldquo;{rule.trigger}&rdquo;
                         </span>
-                        <span className="text-[10px] uppercase font-mono tracking-wider px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                        <span aria-hidden="true" className="text-zinc-400">
+                          ·
+                        </span>
+                        <span className="font-mono text-zinc-500 dark:text-zinc-400">
                           {rule.matchType}
                         </span>
                       </div>

@@ -9,18 +9,41 @@ import type {
   GroupEditableTemplateKey,
   SimulatorMember,
 } from '../src/shared/types.ts';
+import { evaluateAutoResponder } from './autoResponder.ts';
 import {
   downloadTikTokMedia,
   extractFirstUrl,
+  fetchRemoteBuffer,
   resolveSocialMedia,
+  searchAndDownloadPlay,
+  type SupportedPlatform,
 } from './mediaDownloader.ts';
+import {
+  applyAudioEffect,
+  applyImageFilter,
+  type AudioEffectMode,
+  convertVideoToPtv,
+  enhanceImageHd,
+  extractOrConvertAudio,
+  generateQrImage,
+  type ImageFilterMode,
+  uploadBufferToPublicUrl,
+} from './mediaProcessor.ts';
 import { botStore } from './stateStore.ts';
 import {
+  animatedWebpToMp4,
+  createAttpSticker,
+  createBratAnimatedSticker,
   createBratSticker,
+  createEmojiMixSticker,
   createMemeSticker,
+  createQuoteChatSticker,
+  createTtpSticker,
   imageToStickerWebp,
+  rewriteStickerExif,
+  stickerWebpToPng,
+  videoToAnimatedStickerWebp,
 } from './stickerStudio.ts';
-import { evaluateAutoResponder } from './autoResponder.ts';
 
 export interface WAGroupOperations {
   removeParticipant: (targetJid: string) => Promise<void>;
@@ -43,13 +66,20 @@ export interface IncomingDocumentPayload {
   jpegThumbnail?: Buffer;
 }
 
+export interface IncomingViewOncePayload {
+  kind: 'image' | 'video' | 'audio';
+  buffer: Buffer;
+  mimeType: string;
+  caption?: string;
+}
+
 export interface HdSwPreparedMedia {
   kind: 'image' | 'video';
   buffer: Buffer;
   mimeType: string;
   fileName: string;
   fileSizeLabel: string;
-  privateCaption: string;
+  caption: string;
   webUrl: string;
   width?: number;
   height?: number;
@@ -68,6 +98,12 @@ export interface IncomingBotContext {
   isBotGroupAdmin?: boolean;
   text: string;
   imageBuffer?: Buffer | null;
+  videoBuffer?: Buffer | null;
+  audioBuffer?: Buffer | null;
+  stickerBuffer?: Buffer | null;
+  viewOnceMedia?: IncomingViewOncePayload | null;
+  quotedText?: string;
+  quotedSenderName?: string;
   documentMedia?: IncomingDocumentPayload | null;
   attachedNonDocumentMedia?: boolean;
   mentionedJids?: string[];
@@ -84,6 +120,24 @@ export interface BotCommandResult {
   replyText?: string;
   stickerBuffer?: Buffer;
   stickerWebUrl?: string;
+  stickerPackOverride?: { pack: string; author: string };
+  imageBuffer?: Buffer;
+  imageMimeType?: string;
+  imageWebUrl?: string;
+  videoBuffer?: Buffer;
+  videoMimeType?: string;
+  videoWebUrl?: string;
+  asPtv?: boolean;
+  audioBuffer?: Buffer;
+  audioMimeType?: string;
+  audioWebUrl?: string;
+  asVoiceNote?: boolean;
+  documentBuffer?: Buffer;
+  documentMimeType?: string;
+  documentFileName?: string;
+  documentWebUrl?: string;
+  slideImageUrls?: string[];
+  slideProxyUrls?: string[];
   videoRemoteUrl?: string;
   videoProxyUrl?: string;
   audioRemoteUrl?: string;
@@ -99,6 +153,53 @@ export interface BotCommandResult {
 const LINK_REGEX =
   /(https?:\/\/[^\s]+|chat\.whatsapp\.com\/[^\s]+|wa\.me\/[^\s]+|t\.me\/[^\s]+)/i;
 const SERVER_BOOT_TIME = Date.now();
+
+const LINK_COMMAND_ALLOWLIST = new Set([
+  'aio',
+  'dl',
+  'autodl',
+  'unduh',
+  'tt',
+  'tiktok',
+  'ttdl',
+  'vt',
+  'ttslide',
+  'ttimg',
+  'ttfoto',
+  'tiktokslide',
+  'ig',
+  'instagram',
+  'igdl',
+  'reels',
+  'fb',
+  'facebook',
+  'fbdl',
+  'fbwatch',
+  'tw',
+  'twitter',
+  'x',
+  'xdl',
+  'pin',
+  'pinterest',
+  'pindl',
+  'capcut',
+  'cc',
+  'ccdl',
+  'mf',
+  'mediafire',
+  'mfdl',
+  'yt',
+  'youtube',
+  'ytmp4',
+  'shorts',
+  'mp3',
+  'ttmp3',
+  'ytmp3',
+  'musik',
+  'qrcode',
+  'qr',
+  'buatqr',
+]);
 
 // Anti-suspension rate-limit tracker per WhatsApp group JID
 const groupActionLastRun = new Map<string, number>();
@@ -179,7 +280,6 @@ function resolveGroupTarget(
 ): { jid: string; phone: string; member?: SimulatorMember } | null {
   const members = ctx.groupMembers || botStore.groupMembers;
 
-  // 1. Check quoted reply participant first
   if (ctx.quotedParticipantJid || ctx.quotedParticipantPhone) {
     const qJid = ctx.quotedParticipantJid || '';
     const qPhone =
@@ -198,7 +298,6 @@ function resolveGroupTarget(
     }
   }
 
-  // 2. Check explicit @mention JIDs from WhatsApp message contextInfo
   if (ctx.mentionedJids && ctx.mentionedJids.length > 0) {
     const mJid = ctx.mentionedJids[0];
     const mPhone = mJid.split(':')[0]?.split('@')[0] || '';
@@ -214,7 +313,6 @@ function resolveGroupTarget(
     return { jid: mJid, phone: mPhone };
   }
 
-  // 3. Parse phone digits or @628... from argsText
   const digits = normalizePhoneInput(argsText);
   if (digits.length >= 7) {
     const found = members.find(
@@ -226,7 +324,6 @@ function resolveGroupTarget(
     return { jid: `${digits}@s.whatsapp.net`, phone: digits };
   }
 
-  // 4. Match by name in Simulator group roster
   if (argsText.trim()) {
     const cleanQuery = argsText.replace(/^@/, '').trim().toLowerCase();
     const byName = members.find((m) =>
@@ -262,6 +359,16 @@ function buildMenuText(
   });
 }
 
+function isAllowedLinkCommand(trimmed: string, prefix: string): boolean {
+  if (!trimmed.toLowerCase().startsWith(prefix.toLowerCase())) return false;
+  const cmdPart = trimmed
+    .slice(prefix.length)
+    .trim()
+    .split(/\s+/)[0]
+    ?.toLowerCase();
+  return Boolean(cmdPart && LINK_COMMAND_ALLOWLIST.has(cmdPart));
+}
+
 export async function processBotMessage(
   ctx: IncomingBotContext
 ): Promise<BotCommandResult> {
@@ -273,16 +380,13 @@ export async function processBotMessage(
   const effectiveGroupSettings =
     botStore.getEffectiveGroupSettings(effectiveGroupId);
 
-  // 1. Passive Group Antilink Moderation (for non-admins sending links)
+  // 1. Passive Group Antilink Moderation (for non-admins sending external links)
   if (
     ctx.isGroup &&
     effectiveGroupSettings.antilink &&
     !ctx.isAdmin &&
     LINK_REGEX.test(trimmed) &&
-    !trimmed.startsWith(`${config.prefix}tt`) &&
-    !trimmed.startsWith(`${config.prefix}mp3`) &&
-    !trimmed.startsWith(`${config.prefix}ig`) &&
-    !trimmed.startsWith(`${config.prefix}yt`)
+    !isAllowedLinkCommand(trimmed, config.prefix)
   ) {
     botStore.incrementStat('linksModerated');
     botStore.addLog({
@@ -331,7 +435,7 @@ export async function processBotMessage(
     };
   }
 
-  // 3. Prefix check
+  // 3. Single Prefix check
   if (!trimmed.startsWith(config.prefix)) {
     const autoReply = evaluateAutoResponder(trimmed, {
       isGroup: Boolean(ctx.isGroup),
@@ -421,7 +525,7 @@ export async function processBotMessage(
     };
   }
 
-  // Silently ignore rapid command floods (<3.5s) from the same WhatsApp sender to protect bot number from spam ban
+  // Silently ignore rapid command floods (<3.5s) from the same WhatsApp sender
   if (checkSenderRateLimit(ctx)) {
     return { handled: false };
   }
@@ -535,6 +639,103 @@ export async function processBotMessage(
     };
   };
 
+  const buildSocialDownloadResponse = async (
+    targetUrl: string,
+    platformHint: SupportedPlatform | 'auto'
+  ): Promise<BotCommandResult> => {
+    const media =
+      platformHint === 'tiktok'
+        ? await downloadTikTokMedia(targetUrl)
+        : await resolveSocialMedia(targetUrl, platformHint);
+
+    botStore.incrementStat('mediaDownloaded');
+
+    const caption = renderBotTemplate(config.templates.downloaderCaption, {
+      platform: media.platform.toUpperCase(),
+      title: media.title,
+      author: media.author,
+      duration: media.duration ? `${media.duration} detik` : '-',
+      botName: config.botName,
+      prefix: config.prefix,
+    });
+
+    // 1. Multi-photo slide / carousel (TikTok Slide / X Gallery)
+    if (media.slideImages && media.slideImages.length > 0) {
+      const proxySlides = media.slideImages.map(
+        (u) => `/api/proxy-media?url=${encodeURIComponent(u)}&type=image`
+      );
+      return {
+        handled: true,
+        reactionStatus: 'success',
+        slideImageUrls: media.slideImages,
+        slideProxyUrls: proxySlides,
+        audioRemoteUrl: media.audioUrl,
+        audioProxyUrl: media.audioUrl
+          ? `/api/proxy-media?url=${encodeURIComponent(
+              media.audioUrl
+            )}&type=audio`
+          : undefined,
+        mediaTitle: media.title,
+        mediaAuthor: media.author,
+        replyText: `${caption}\nJumlah Slide: *${media.slideImages.length} Foto*`,
+      };
+    }
+
+    // 2. Direct file download (MediaFire)
+    if (media.fileUrl) {
+      const { buffer, contentType } = await fetchRemoteBuffer(media.fileUrl);
+      const fname = media.fileName || 'berkas-unduhan';
+      const storedUrl = botStore.storeHdMedia(buffer, contentType, fname);
+      return {
+        handled: true,
+        reactionStatus: 'success',
+        documentBuffer: buffer,
+        documentMimeType: contentType,
+        documentFileName: fname,
+        documentWebUrl: storedUrl,
+        replyText: `*Unduhan Berkas Selesai (${media.platform.toUpperCase()})*\nNama: *${fname}*\nUkuran: *${formatByteSize(
+          buffer.length
+        )}*`,
+      };
+    }
+
+    // 3. Single photo post (Pinterest / IG / X image)
+    if (media.imageUrl && !media.videoUrl) {
+      const { buffer, contentType } = await fetchRemoteBuffer(media.imageUrl);
+      const mime = contentType.startsWith('image/')
+        ? contentType
+        : 'image/jpeg';
+      const webUrl = botStore.storeHdMedia(buffer, mime, 'social-photo.jpg');
+      return {
+        handled: true,
+        reactionStatus: 'success',
+        imageBuffer: buffer,
+        imageMimeType: mime,
+        imageWebUrl: webUrl,
+        replyText: caption,
+      };
+    }
+
+    if (!media.videoUrl) {
+      throw new Error('URL media tidak ditemukan pada tautan tersebut.');
+    }
+
+    const proxyUrl = `/api/proxy-media?url=${encodeURIComponent(
+      media.videoUrl
+    )}&type=video`;
+
+    return {
+      handled: true,
+      reactionStatus: 'success',
+      videoRemoteUrl: media.videoUrl,
+      videoProxyUrl: proxyUrl,
+      mediaTitle: media.title,
+      mediaAuthor: media.author,
+      mediaDuration: media.duration,
+      replyText: caption,
+    };
+  };
+
   try {
     let result: BotCommandResult = { handled: true, reactionStatus: 'success' };
 
@@ -566,14 +767,8 @@ export async function processBotMessage(
         break;
       }
 
+      // ================= PERKAKAS MEDIA & .HDSW (GRUP & CHAT PRIBADI) =================
       case 'hdsw': {
-        // Anti-ban safeguard: never initiate cold outbound DM to a group member who hasn't chatted the bot privately first
-        if (ctx.source === 'whatsapp' && ctx.isGroup) {
-          return failReply(
-            `Demi keamanan nomor bot agar tidak terdeteksi spam pesan pribadi (DM) ke nomor baru oleh WhatsApp, silakan kirim file *Dokumen* foto/video langsung ke *Chat Pribadi* *${config.botName}* dengan caption *${config.prefix}hdsw*.`
-          );
-        }
-
         if (!ctx.documentMedia) {
           if (ctx.attachedNonDocumentMedia) {
             return failReply(
@@ -581,7 +776,7 @@ export async function processBotMessage(
             );
           }
           return failReply(
-            `Kirim file *Foto* atau *Video* lewat menu *Dokumen (Document)* dengan caption *${config.prefix}hdsw* (atau balas file dokumen foto/video dengan *${config.prefix}hdsw*).\n\nBot akan mengirimkannya kembali ke *Chat Pribadi* kamu sebagai media ukuran asli seperti kiriman WA Web, jadi kamu tinggal teruskan jernih ke Status WA!`
+            `Kirim file *Foto* atau *Video* lewat menu *Dokumen (Document)* dengan caption *${config.prefix}hdsw* (atau balas file dokumen foto/video dengan *${config.prefix}hdsw*).\n\nBisa dipakai di *Grup* maupun *Chat Pribadi*! Bot akan membalasnya sebagai media ukuran asli ala WA Web agar tinggal kamu *Teruskan (Forward)* jernih ke Status WA.`
           );
         }
 
@@ -615,7 +810,6 @@ export async function processBotMessage(
             width = meta.width;
             height = meta.height;
 
-            // Convert WebP document to lossless PNG for universal WA photo forwarding; keep JPEG/PNG bytes 100% untouched
             if (
               meta.format === 'webp' ||
               finalMime.toLowerCase().includes('webp')
@@ -641,7 +835,6 @@ export async function processBotMessage(
               : 'image/jpeg';
           }
         } else {
-          // Video: preserve 100% untouched original bytes (WA Web native upload)
           finalMime = 'video/mp4';
         }
 
@@ -655,11 +848,21 @@ export async function processBotMessage(
             (validKind === 'video' ? 'hd-status.mp4' : 'hd-status.jpg')
         );
 
-        const privateCaption =
+        const resolvedCaption =
           argsText.toLowerCase() === 'nocaption'
             ? ''
             : argsText
             ? argsText
+            : ctx.isGroup
+            ? renderBotTemplate(config.templates.hdswGroupConfirm, {
+                mediaKind: mediaKindLabel,
+                fileName: doc.fileName || mediaKindLabel,
+                fileSize: fileSizeLabel,
+                sender: ctx.senderPhone,
+                target: ctx.senderPhone,
+                botName: config.botName,
+                prefix: config.prefix,
+              })
             : renderBotTemplate(config.templates.hdswCaption, {
                 mediaKind: mediaKindLabel,
                 fileSize: fileSizeLabel,
@@ -670,22 +873,10 @@ export async function processBotMessage(
 
         botStore.incrementStat('mediaDownloaded');
 
-        const groupReply = ctx.isGroup
-          ? renderBotTemplate(config.templates.hdswGroupConfirm, {
-              mediaKind: mediaKindLabel,
-              fileName: doc.fileName || mediaKindLabel,
-              fileSize: fileSizeLabel,
-              sender: ctx.senderPhone,
-              target: ctx.senderPhone,
-              botName: config.botName,
-              prefix: config.prefix,
-            })
-          : privateCaption;
-
         result = {
           handled: true,
           reactionStatus: 'success',
-          replyText: groupReply,
+          replyText: resolvedCaption,
           mentions: ctx.isGroup
             ? [ctx.senderJid || `${ctx.senderPhone}@s.whatsapp.net`]
             : undefined,
@@ -697,7 +888,7 @@ export async function processBotMessage(
               doc.fileName ||
               (validKind === 'video' ? 'status-hd.mp4' : 'status-hd.jpg'),
             fileSizeLabel,
-            privateCaption,
+            caption: resolvedCaption,
             webUrl,
             width,
             height,
@@ -707,59 +898,277 @@ export async function processBotMessage(
         break;
       }
 
-      case 'tt':
-      case 'ig':
-      case 'yt': {
-        const targetUrl = extractFirstUrl(argsText);
-        if (!targetUrl) {
+      case 'hd': {
+        const imgBuf =
+          ctx.imageBuffer ||
+          (ctx.documentMedia?.kind === 'image'
+            ? ctx.documentMedia.buffer
+            : null);
+        if (!imgBuf) {
           return failReply(
-            `Masukkan tautan yang valid.\nContoh: *${config.prefix}${matchedCmd.example}*`
+            `Kirim atau balas (reply) sebuah foto dengan *${config.prefix}hd* untuk dipertajam resolusinya 2× lipat.`
           );
         }
-
-        const platformHint =
-          matchedCmd.id === 'tt'
-            ? 'tiktok'
-            : matchedCmd.id === 'ig'
-            ? 'instagram'
-            : 'youtube';
-
-        const media =
-          platformHint === 'tiktok'
-            ? await downloadTikTokMedia(targetUrl)
-            : await resolveSocialMedia(targetUrl, platformHint);
-
-        if (!media.videoUrl) {
-          throw new Error('URL video tidak ditemukan dari tautan tersebut.');
-        }
-
+        const enhanced = await enhanceImageHd(imgBuf);
+        const webUrl = botStore.storeHdMedia(
+          enhanced.buffer,
+          'image/jpeg',
+          'gepabot-hd-upscale.jpg'
+        );
         botStore.incrementStat('mediaDownloaded');
-        const proxyUrl = `/api/proxy-media?url=${encodeURIComponent(
-          media.videoUrl
-        )}&type=video`;
-
         result = {
           handled: true,
           reactionStatus: 'success',
-          videoRemoteUrl: media.videoUrl,
-          videoProxyUrl: proxyUrl,
-          mediaTitle: media.title,
-          mediaAuthor: media.author,
-          mediaDuration: media.duration,
-          replyText: renderBotTemplate(config.templates.downloaderCaption, {
-            platform: media.platform.toUpperCase(),
-            title: media.title,
-            author: media.author,
-            duration: media.duration ? `${media.duration} detik` : '-',
-            botName: config.botName,
-            prefix: config.prefix,
-          }),
+          imageBuffer: enhanced.buffer,
+          imageMimeType: 'image/jpeg',
+          imageWebUrl: webUrl,
+          replyText: `*Foto HD Berhasil Dipertajam*\nResolusi akhir: *${enhanced.width}×${enhanced.height} px* (${formatByteSize(
+            enhanced.buffer.length
+          )})`,
         };
         break;
       }
 
+      case 'hitamkan':
+      case 'imgedit': {
+        const imgBuf =
+          ctx.imageBuffer ||
+          (ctx.documentMedia?.kind === 'image'
+            ? ctx.documentMedia.buffer
+            : null);
+        if (!imgBuf) {
+          return failReply(
+            `Kirim atau balas (reply) sebuah foto.\nContoh: *${config.prefix}hitamkan*, *${config.prefix}blur*, *${config.prefix}invert*, *${config.prefix}mirror*, atau *${config.prefix}sepia*.`
+          );
+        }
+
+        let filterMode: ImageFilterMode = 'grayscale';
+        const sub = (
+          matchedCmd.id === 'hitamkan'
+            ? 'hitamkan'
+            : rawCmd !== 'imgedit'
+            ? rawCmd
+            : argsText.split(/\s+/)[0] || 'blur'
+        ).toLowerCase();
+
+        if (sub === 'negatif' || sub === 'invert') filterMode = 'invert';
+        else if (sub === 'blur') filterMode = 'blur';
+        else if (sub === 'mirror') filterMode = 'mirror';
+        else if (sub === 'flip') filterMode = 'flip';
+        else if (sub === 'sepia') filterMode = 'sepia';
+        else filterMode = 'hitamkan';
+
+        const outBuf = await applyImageFilter(imgBuf, filterMode);
+        const webUrl = botStore.storeHdMedia(
+          outBuf,
+          'image/jpeg',
+          `gepabot-${filterMode}.jpg`
+        );
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          imageBuffer: outBuf,
+          imageMimeType: 'image/jpeg',
+          imageWebUrl: webUrl,
+          replyText: `*Efek Gambar (${filterMode.toUpperCase()}) Selesai*`,
+        };
+        break;
+      }
+
+      case 'rvo': {
+        if (!ctx.viewOnceMedia) {
+          return failReply(
+            `Balas (reply) pada pesan *View Once* (foto, video, atau suara sekali lihat) dengan *${config.prefix}rvo* untuk membukanya kembali.`
+          );
+        }
+        const vo = ctx.viewOnceMedia;
+        const caption = vo.caption
+          ? `*Media View Once Dibuka*\nCaption asli: ${vo.caption}`
+          : `*Media View Once Berhasil Dibuka*`;
+
+        if (vo.kind === 'image') {
+          const webUrl = botStore.storeHdMedia(
+            vo.buffer,
+            vo.mimeType || 'image/jpeg',
+            'viewonce.jpg'
+          );
+          result = {
+            handled: true,
+            reactionStatus: 'success',
+            imageBuffer: vo.buffer,
+            imageMimeType: vo.mimeType || 'image/jpeg',
+            imageWebUrl: webUrl,
+            replyText: caption,
+          };
+        } else if (vo.kind === 'video') {
+          const webUrl = botStore.storeHdMedia(
+            vo.buffer,
+            vo.mimeType || 'video/mp4',
+            'viewonce.mp4'
+          );
+          result = {
+            handled: true,
+            reactionStatus: 'success',
+            videoBuffer: vo.buffer,
+            videoMimeType: vo.mimeType || 'video/mp4',
+            videoWebUrl: webUrl,
+            replyText: caption,
+          };
+        } else {
+          const webUrl = botStore.storeHdMedia(
+            vo.buffer,
+            vo.mimeType || 'audio/mpeg',
+            'viewonce.mp3'
+          );
+          result = {
+            handled: true,
+            reactionStatus: 'success',
+            audioBuffer: vo.buffer,
+            audioMimeType: vo.mimeType || 'audio/mpeg',
+            audioWebUrl: webUrl,
+            replyText: caption,
+          };
+        }
+        break;
+      }
+
+      case 'toptv': {
+        const vidBuf =
+          ctx.videoBuffer ||
+          (ctx.documentMedia?.kind === 'video'
+            ? ctx.documentMedia.buffer
+            : null);
+        if (!vidBuf) {
+          return failReply(
+            `Kirim atau balas (reply) video dengan *${config.prefix}toptv* untuk mengubahnya menjadi Video Note bulat (PTV).`
+          );
+        }
+        const ptvBuf = await convertVideoToPtv(vidBuf);
+        const webUrl = botStore.storeHdMedia(ptvBuf, 'video/mp4', 'ptv-note.mp4');
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          videoBuffer: ptvBuf,
+          videoMimeType: 'video/mp4',
+          videoWebUrl: webUrl,
+          asPtv: true,
+          replyText: 'Video Note bulat (PTV) berhasil dibuat.',
+        };
+        break;
+      }
+
+      case 'qrcode': {
+        if (!argsText && !ctx.quotedText) {
+          return failReply(
+            `Ketik teks atau tautan setelah perintah.\nContoh: *${config.prefix}qrcode https://gepacorner.my.id*`
+          );
+        }
+        const targetStr = argsText || ctx.quotedText || '';
+        const qrBuf = await generateQrImage(targetStr);
+        const webUrl = botStore.storeHdMedia(qrBuf, 'image/png', 'qrcode.png');
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          imageBuffer: qrBuf,
+          imageMimeType: 'image/png',
+          imageWebUrl: webUrl,
+          replyText: `*Kode QR Siap Pindai*\nIsi: ${targetStr.slice(0, 140)}`,
+        };
+        break;
+      }
+
+      case 'tourl': {
+        let buf: Buffer | null = null;
+        let mime = 'application/octet-stream';
+        let name = 'media.bin';
+
+        if (ctx.imageBuffer) {
+          buf = ctx.imageBuffer;
+          mime = 'image/jpeg';
+          name = 'image.jpg';
+        } else if (ctx.videoBuffer) {
+          buf = ctx.videoBuffer;
+          mime = 'video/mp4';
+          name = 'video.mp4';
+        } else if (ctx.audioBuffer) {
+          buf = ctx.audioBuffer;
+          mime = 'audio/mpeg';
+          name = 'audio.mp3';
+        } else if (ctx.stickerBuffer) {
+          buf = ctx.stickerBuffer;
+          mime = 'image/webp';
+          name = 'sticker.webp';
+        } else if (ctx.documentMedia?.buffer) {
+          buf = ctx.documentMedia.buffer;
+          mime = ctx.documentMedia.mimeType;
+          name = ctx.documentMedia.fileName || 'file.bin';
+        }
+
+        if (!buf) {
+          return failReply(
+            `Kirim atau balas (reply) foto, video, audio, atau stiker dengan *${config.prefix}tourl* untuk mendapatkan tautan publik.`
+          );
+        }
+
+        const localPath = botStore.storeHdMedia(buf, mime, name);
+        const remoteLink = await uploadBufferToPublicUrl(buf, name, mime);
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          replyText: [
+            `*Media Berhasil Diunggah*`,
+            `Ukuran: *${formatByteSize(buf.length)}*`,
+            remoteLink
+              ? `Tautan Publik: ${remoteLink}`
+              : `Tautan Server Lokal: ${localPath}`,
+          ].join('\n'),
+        };
+        break;
+      }
+
+      // ================= DOWNLOADER MULTI-PLATFORM =================
+      case 'aio':
+      case 'tt':
+      case 'ttslide':
+      case 'ig':
+      case 'fb':
+      case 'tw':
+      case 'pin':
+      case 'capcut':
+      case 'mf':
+      case 'yt': {
+        const targetUrl =
+          extractFirstUrl(argsText) || extractFirstUrl(ctx.quotedText || '');
+        if (!targetUrl) {
+          return failReply(
+            `Masukkan tautan yang valid (atau reply pesan berisi link).\nContoh: *${config.prefix}${matchedCmd.example}*`
+          );
+        }
+
+        const hintMap: Record<string, SupportedPlatform | 'auto'> = {
+          aio: 'auto',
+          tt: 'tiktok',
+          ttslide: 'tiktok',
+          ig: 'instagram',
+          fb: 'facebook',
+          tw: 'twitter',
+          pin: 'pinterest',
+          capcut: 'capcut',
+          mf: 'mediafire',
+          yt: 'youtube',
+        };
+
+        result = await buildSocialDownloadResponse(
+          targetUrl,
+          hintMap[matchedCmd.id] || 'auto'
+        );
+        break;
+      }
+
+      // ================= AUDIO, MUSIK & EFEK SUARA =================
       case 'mp3': {
-        const targetUrl = extractFirstUrl(argsText);
+        const targetUrl =
+          extractFirstUrl(argsText) || extractFirstUrl(ctx.quotedText || '');
         if (!targetUrl) {
           return failReply(
             `Masukkan tautan video sosmed yang ingin diambil MP3-nya.\nContoh: *${config.prefix}${matchedCmd.example}*`
@@ -798,8 +1207,118 @@ export async function processBotMessage(
         break;
       }
 
+      case 'play': {
+        const query = argsText || ctx.quotedText || '';
+        if (!query.trim()) {
+          return failReply(
+            `Ketik judul lagu atau nama penyanyi.\nContoh: *${config.prefix}play Hindia Evaluasi*`
+          );
+        }
+        const track = await searchAndDownloadPlay(query);
+        if (!track.audioUrl) {
+          throw new Error('Sumber audio lagu tidak tersedia saat ini.');
+        }
+        botStore.incrementStat('mediaDownloaded');
+        const proxyUrl = `/api/proxy-media?url=${encodeURIComponent(
+          track.audioUrl
+        )}&type=audio`;
+
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          audioRemoteUrl: track.audioUrl,
+          audioProxyUrl: proxyUrl,
+          mediaTitle: track.title,
+          mediaAuthor: track.author,
+          mediaDuration: track.duration,
+          replyText: `*Lagu Ditemukan*\nJudul: *${track.title}*\nArtis: *${track.author}*`,
+        };
+        break;
+      }
+
+      case 'tomp3':
+      case 'tovn': {
+        const mediaBuf =
+          ctx.audioBuffer ||
+          ctx.videoBuffer ||
+          (ctx.documentMedia?.kind === 'video'
+            ? ctx.documentMedia.buffer
+            : null);
+        if (!mediaBuf) {
+          return failReply(
+            `Balas (reply) sebuah video, musik, atau Voice Note dengan *${config.prefix}${matchedCmd.id}*.`
+          );
+        }
+        const isVn = matchedCmd.id === 'tovn';
+        const converted = await extractOrConvertAudio(
+          mediaBuf,
+          isVn ? 'vn' : 'mp3'
+        );
+        const webUrl = botStore.storeHdMedia(
+          converted.buffer,
+          converted.mimeType,
+          `gepabot-audio.${converted.ext}`
+        );
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          audioBuffer: converted.buffer,
+          audioMimeType: converted.mimeType,
+          audioWebUrl: webUrl,
+          asVoiceNote: isVn,
+          mediaTitle: isVn ? 'Voice Note (PTT)' : 'Ekstraksi Audio MP3',
+          replyText: isVn
+            ? 'Berhasil diubah menjadi pesan suara Voice Note.'
+            : 'Audio MP3 berhasil diekstrak.',
+        };
+        break;
+      }
+
+      case 'bass':
+      case 'nightcore':
+      case 'slow':
+      case 'fast':
+      case 'robot':
+      case 'reverse': {
+        const audioInput = ctx.audioBuffer || ctx.videoBuffer;
+        if (!audioInput) {
+          return failReply(
+            `Balas (reply) sebuah lagu, Voice Note, atau video dengan *${config.prefix}${matchedCmd.id}* untuk menerapkan efek suara.`
+          );
+        }
+        const effectMode = matchedCmd.id as AudioEffectMode;
+        const processed = await applyAudioEffect(audioInput, effectMode);
+        const webUrl = botStore.storeHdMedia(
+          processed.buffer,
+          processed.mimeType,
+          `gepabot-${effectMode}.mp3`
+        );
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          audioBuffer: processed.buffer,
+          audioMimeType: processed.mimeType,
+          audioWebUrl: webUrl,
+          mediaTitle: `Efek Suara ${effectMode.toUpperCase()}`,
+          replyText: `*Efek Audio (${effectMode.toUpperCase()}) Selesai*`,
+        };
+        break;
+      }
+
+      // ================= STUDIO STIKER & MAKER =================
       case 's': {
-        if (!ctx.imageBuffer) {
+        const vidSource =
+          ctx.videoBuffer ||
+          (ctx.documentMedia?.kind === 'video'
+            ? ctx.documentMedia.buffer
+            : null);
+        const imgSource =
+          ctx.imageBuffer ||
+          (ctx.documentMedia?.kind === 'image'
+            ? ctx.documentMedia.buffer
+            : null);
+
+        if (!imgSource && !vidSource) {
           return failReply(
             renderBotTemplate(config.templates.stickerMissingMedia, {
               prefix: config.prefix,
@@ -810,11 +1329,18 @@ export async function processBotMessage(
           );
         }
 
-        const stickerBuf = await imageToStickerWebp(
-          ctx.imageBuffer,
-          config.stickerPackName,
-          config.stickerAuthor
-        );
+        const stickerBuf = vidSource
+          ? await videoToAnimatedStickerWebp(
+              vidSource,
+              config.stickerPackName,
+              config.stickerAuthor
+            )
+          : await imageToStickerWebp(
+              imgSource!,
+              config.stickerPackName,
+              config.stickerAuthor
+            );
+
         const webUrl = botStore.storeSticker(stickerBuf);
         botStore.incrementStat('stickersCreated');
 
@@ -832,21 +1358,145 @@ export async function processBotMessage(
         break;
       }
 
+      case 'qc':
+      case 'iqc': {
+        const bubbleText = argsText || ctx.quotedText || '';
+        if (!bubbleText.trim()) {
+          return failReply(
+            `Ketik teks setelah perintah atau balas (reply) pesan teman dengan *${config.prefix}${matchedCmd.id}*.\nContoh: *${config.prefix}${matchedCmd.example}*`
+          );
+        }
+        const bubbleSender =
+          !argsText && ctx.quotedSenderName
+            ? ctx.quotedSenderName
+            : ctx.senderName;
+        const stickerBuf = await createQuoteChatSticker({
+          text: bubbleText,
+          senderName: bubbleSender,
+          style: matchedCmd.id === 'iqc' ? 'ios' : 'wa',
+          packName: config.stickerPackName,
+          author: config.stickerAuthor,
+        });
+        const webUrl = botStore.storeSticker(stickerBuf);
+        botStore.incrementStat('stickersCreated');
+
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          stickerBuffer: stickerBuf,
+          stickerWebUrl: webUrl,
+        };
+        break;
+      }
+
       case 'brat':
       case 'bratwhite': {
-        if (!argsText) {
+        const textVal = argsText || ctx.quotedText || '';
+        if (!textVal) {
           return failReply(
             `Ketik teks setelah perintah.\nContoh: *${config.prefix}${matchedCmd.example}*`
           );
         }
-
         const variant = matchedCmd.id === 'brat' ? 'lime' : 'white';
         const stickerBuf = await createBratSticker(
-          argsText,
+          textVal,
           variant,
           config.stickerPackName,
           config.stickerAuthor
         );
+        const webUrl = botStore.storeSticker(stickerBuf);
+        botStore.incrementStat('stickersCreated');
+
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          stickerBuffer: stickerBuf,
+          stickerWebUrl: webUrl,
+        };
+        break;
+      }
+
+      case 'bratcolor': {
+        if (!argsText) {
+          return failReply(
+            `Gunakan format *${config.prefix}bratcolor warna | teks*.\nPilihan warna: pink, biru, merah, ungu, kuning, hitam, oranye, cyan.\nContoh: *${config.prefix}bratcolor pink | santai dulu*`
+          );
+        }
+        let colorKey = 'pink';
+        let content = argsText;
+        if (argsText.includes('|')) {
+          const [c, ...rest] = argsText.split('|');
+          colorKey = (c || 'pink').trim();
+          content = rest.join('|').trim();
+        } else {
+          const [firstWord, ...restWords] = argsText.split(/\s+/);
+          if (restWords.length > 0) {
+            colorKey = firstWord;
+            content = restWords.join(' ');
+          }
+        }
+        const stickerBuf = await createBratSticker(
+          content || 'santai',
+          colorKey,
+          config.stickerPackName,
+          config.stickerAuthor
+        );
+        const webUrl = botStore.storeSticker(stickerBuf);
+        botStore.incrementStat('stickersCreated');
+
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          stickerBuffer: stickerBuf,
+          stickerWebUrl: webUrl,
+        };
+        break;
+      }
+
+      case 'bratvid': {
+        const textVal = argsText || ctx.quotedText || '';
+        if (!textVal) {
+          return failReply(
+            `Ketik kalimat singkat setelah perintah untuk dibuat stiker Brat bergerak.\nContoh: *${config.prefix}bratvid santai dulu ngopi sebentar*`
+          );
+        }
+        const stickerBuf = await createBratAnimatedSticker(
+          textVal,
+          config.stickerPackName,
+          config.stickerAuthor
+        );
+        const webUrl = botStore.storeSticker(stickerBuf);
+        botStore.incrementStat('stickersCreated');
+
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          stickerBuffer: stickerBuf,
+          stickerWebUrl: webUrl,
+        };
+        break;
+      }
+
+      case 'ttp':
+      case 'attp': {
+        const textVal = argsText || ctx.quotedText || '';
+        if (!textVal) {
+          return failReply(
+            `Ketik teks setelah perintah.\nContoh: *${config.prefix}${matchedCmd.example}*`
+          );
+        }
+        const stickerBuf =
+          matchedCmd.id === 'attp'
+            ? await createAttpSticker(
+                textVal,
+                config.stickerPackName,
+                config.stickerAuthor
+              )
+            : await createTtpSticker(
+                textVal,
+                config.stickerPackName,
+                config.stickerAuthor
+              );
         const webUrl = botStore.storeSticker(stickerBuf);
         botStore.incrementStat('stickersCreated');
 
@@ -865,7 +1515,6 @@ export async function processBotMessage(
             `Gunakan format *${config.prefix}meme teks atas | teks bawah* (bisa sambil melampirkan atau me-reply foto).`
           );
         }
-
         const parts = argsText.split('|');
         const topText = (parts[0] || '').trim();
         const bottomText = (parts.slice(1).join(' ') || '').trim();
@@ -889,6 +1538,109 @@ export async function processBotMessage(
         break;
       }
 
+      case 'emojimix': {
+        if (!argsText) {
+          return failReply(
+            `Masukkan 2 emoji dipisah tanda tambah.\nContoh: *${config.prefix}emojimix 😀+😎*`
+          );
+        }
+        const stickerBuf = await createEmojiMixSticker(
+          argsText,
+          config.stickerPackName,
+          config.stickerAuthor
+        );
+        const webUrl = botStore.storeSticker(stickerBuf);
+        botStore.incrementStat('stickersCreated');
+
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          stickerBuffer: stickerBuf,
+          stickerWebUrl: webUrl,
+        };
+        break;
+      }
+
+      case 'wm': {
+        if (!ctx.stickerBuffer) {
+          return failReply(
+            `Balas (reply) sebuah stiker dengan format *${config.prefix}wm Nama Pack | Nama Author* untuk mengganti hak cipta stiker.`
+          );
+        }
+        const parts = argsText.split('|');
+        const newPack =
+          (parts[0] || '').trim() || config.stickerPackName || 'Gepa Corner';
+        const newAuthor =
+          (parts.slice(1).join('|') || '').trim() ||
+          ctx.senderName ||
+          config.stickerAuthor;
+
+        const rebranded = await rewriteStickerExif(
+          ctx.stickerBuffer,
+          newPack,
+          newAuthor
+        );
+        const webUrl = botStore.storeSticker(rebranded);
+        botStore.incrementStat('stickersCreated');
+
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          stickerBuffer: rebranded,
+          stickerWebUrl: webUrl,
+          stickerPackOverride: { pack: newPack, author: newAuthor },
+          replyText: `Watermark stiker diperbarui: *${newPack}* · *${newAuthor}*`,
+        };
+        break;
+      }
+
+      case 'toimg': {
+        if (!ctx.stickerBuffer) {
+          return failReply(
+            `Balas (reply) sebuah stiker dengan *${config.prefix}toimg* untuk mengubahnya menjadi foto PNG.`
+          );
+        }
+        const pngBuf = await stickerWebpToPng(ctx.stickerBuffer);
+        const webUrl = botStore.storeHdMedia(
+          pngBuf,
+          'image/png',
+          'sticker-to-image.png'
+        );
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          imageBuffer: pngBuf,
+          imageMimeType: 'image/png',
+          imageWebUrl: webUrl,
+          replyText: '*Stiker berhasil diubah menjadi gambar PNG*',
+        };
+        break;
+      }
+
+      case 'tovid': {
+        if (!ctx.stickerBuffer) {
+          return failReply(
+            `Balas (reply) sebuah stiker animasi bergerak dengan *${config.prefix}tovid* untuk mengubahnya menjadi video MP4.`
+          );
+        }
+        const mp4Buf = await animatedWebpToMp4(ctx.stickerBuffer);
+        const webUrl = botStore.storeHdMedia(
+          mp4Buf,
+          'video/mp4',
+          'sticker-to-video.mp4'
+        );
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          videoBuffer: mp4Buf,
+          videoMimeType: 'video/mp4',
+          videoWebUrl: webUrl,
+          replyText: '*Stiker berhasil diubah menjadi video MP4*',
+        };
+        break;
+      }
+
+      // ================= ADMIN & MODERASI GRUP =================
       case 'kick': {
         const guard = ensureFullGroupAdminWithBot();
         if (guard) return guard;
@@ -917,7 +1669,7 @@ export async function processBotMessage(
           );
           if (!exists) {
             return failReply(
-              `Nomor *+${target.phone}* tidak berada di dalam grup ini.`
+              `Anggota dengan nomor *+${target.phone}* tidak ditemukan di grup ini.`
             );
           }
           botStore.setGroupMembers(
@@ -932,9 +1684,10 @@ export async function processBotMessage(
           reactionStatus: 'success',
           replyText: renderBotTemplate(config.templates.kickSuccess, {
             target: target.phone,
-            targetName: target.member?.name || `+${target.phone}`,
             sender: ctx.senderPhone,
+            targetName: target.member?.name || `+${target.phone}`,
             botName: config.botName,
+            prefix: config.prefix,
             groupName: ctx.groupName || botStore.groupState.subject,
           }),
           mentions: [target.jid],
@@ -943,50 +1696,7 @@ export async function processBotMessage(
       }
 
       case 'add': {
-        const guard = ensureFullGroupAdminWithBot();
-        if (guard) return guard;
-
-        const cleanDigits = normalizePhoneInput(argsText);
-        if (cleanDigits.length < 9 || cleanDigits.length > 16) {
-          return failReply(
-            `Masukkan nomor WhatsApp yang ingin ditambahkan.\nContoh: *${config.prefix}add 628199000777*`
-          );
-        }
-        const targetJid = `${cleanDigits}@s.whatsapp.net`;
-
-        if (ctx.waGroupOps) {
-          await ctx.waGroupOps.addParticipant(targetJid);
-        } else {
-          const already = botStore.groupMembers.some(
-            (m) => m.phone === cleanDigits
-          );
-          if (already) {
-            return failReply(
-              `Nomor *+${cleanDigits}* sudah menjadi anggota grup.`
-            );
-          }
-          botStore.setGroupMembers([
-            ...botStore.groupMembers,
-            {
-              jid: targetJid,
-              name: `Anggota +${cleanDigits.slice(-4)}`,
-              phone: cleanDigits,
-              isAdmin: false,
-            },
-          ]);
-        }
-
-        result = {
-          handled: true,
-          reactionStatus: 'success',
-          replyText: renderBotTemplate(config.templates.addSuccess, {
-            target: cleanDigits,
-            botName: config.botName,
-            groupName: ctx.groupName || botStore.groupState.subject,
-          }),
-          mentions: [targetJid],
-        };
-        break;
+        return failReply(SUSPENSION_RISK_DISABLED_REPLY);
       }
 
       case 'promote': {
@@ -1000,7 +1710,11 @@ export async function processBotMessage(
           );
         }
 
-        const promoteCooldown = checkGroupActionCooldown(ctx, 'mutation', 12000);
+        const promoteCooldown = checkGroupActionCooldown(
+          ctx,
+          'mutation',
+          12000
+        );
         if (promoteCooldown) return failReply(promoteCooldown);
 
         if (ctx.waGroupOps) {
@@ -1117,7 +1831,11 @@ export async function processBotMessage(
         }
 
         const announcementOnly = isClose;
-        const groupLockCooldown = checkGroupActionCooldown(ctx, 'mutation', 10000);
+        const groupLockCooldown = checkGroupActionCooldown(
+          ctx,
+          'mutation',
+          10000
+        );
         if (groupLockCooldown) return failReply(groupLockCooldown);
 
         if (ctx.waGroupOps) {
@@ -1158,7 +1876,11 @@ export async function processBotMessage(
         }
 
         const newSubject = argsText.slice(0, 80);
-        const setNameCooldown = checkGroupActionCooldown(ctx, 'mutation', 15000);
+        const setNameCooldown = checkGroupActionCooldown(
+          ctx,
+          'mutation',
+          15000
+        );
         if (setNameCooldown) return failReply(setNameCooldown);
 
         if (ctx.waGroupOps) {
@@ -1188,7 +1910,11 @@ export async function processBotMessage(
           );
         }
 
-        const setDescCooldown = checkGroupActionCooldown(ctx, 'mutation', 15000);
+        const setDescCooldown = checkGroupActionCooldown(
+          ctx,
+          'mutation',
+          15000
+        );
         if (setDescCooldown) return failReply(setDescCooldown);
 
         if (ctx.waGroupOps) {
@@ -1209,7 +1935,11 @@ export async function processBotMessage(
         const guard = ensureFullGroupAdminWithBot();
         if (guard) return guard;
 
-        const linkCooldown = checkGroupActionCooldown(ctx, 'invite_link', 20000);
+        const linkCooldown = checkGroupActionCooldown(
+          ctx,
+          'invite_link',
+          20000
+        );
         if (linkCooldown) return failReply(linkCooldown);
 
         let code: string | undefined;
@@ -1266,62 +1996,9 @@ export async function processBotMessage(
         break;
       }
 
-      case 'hidetag': {
-        const { antiBan } = botStore.config;
-
-        const guard = ensureSenderGroupAdmin();
-        if (guard) return guard;
-
-        const cooldownSec = antiBan?.enabled
-          ? antiBan.hidetagCooldownSeconds || 45
-          : 15;
-        const hidetagCooldown = checkGroupActionCooldown(
-          ctx,
-          'hidetag',
-          cooldownSec * 1000
-        );
-        if (hidetagCooldown) {
-          return failReply(
-            `🛡️ *Anti-Ban Shield Aktif*: Perintah hidetag dibatasi jeda *${cooldownSec} detik* per grup untuk melindungi nomor bot dari deteksi spam WhatsApp. ${hidetagCooldown}`
-          );
-        }
-
-        const members = ctx.groupMembers || botStore.groupMembers;
-        const maxLimit = antiBan?.enabled
-          ? antiBan.maxMentionsLimit || 40
-          : 50;
-
-        const targetMentions = members.slice(0, maxLimit).map((m) => m.jid);
-        const announcement =
-          argsText || 'Perhatian untuk seluruh anggota grup!';
-
-        botStore.incrementAntiBanStat('hidetagProtected');
-
-        result = {
-          handled: true,
-          reactionStatus: 'success',
-          replyText: announcement,
-          hiddenMentions: targetMentions,
-        };
-        break;
-      }
-
+      case 'hidetag':
       case 'tagall': {
-        const guard = ensureSenderGroupAdmin();
-        if (guard) return guard;
-
-        const members = ctx.groupMembers || botStore.groupMembers;
-        const header = argsText || 'Panggilan seluruh anggota grup';
-        const mentionLines = members.map(
-          (m, i) => `${i + 1}. @${m.phone} (${m.name})`
-        );
-        result = {
-          handled: true,
-          reactionStatus: 'success',
-          replyText: `*${header}*\n\n${mentionLines.join('\n')}`,
-          mentions: members.map((m) => m.jid),
-        };
-        break;
+        return failReply(SUSPENSION_RISK_DISABLED_REPLY);
       }
 
       case 'antilink': {

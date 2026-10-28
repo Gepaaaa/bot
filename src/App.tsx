@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Server } from 'lucide-react';
 import { COMMAND_CATALOG } from './shared/commands.ts';
 import { useBotRealtime } from './hooks/useBotRealtime.ts';
 import { GepaCreatorAvatar } from './components/GepaAvatar.tsx';
@@ -10,13 +11,11 @@ import { SettingsView } from './components/SettingsView.tsx';
 import { AntiBanView } from './components/AntiBanView.tsx';
 import { GatewayWebhookView } from './components/GatewayWebhookView.tsx';
 
-type ActiveTab =
+type ActiveWorkspace =
   | 'simulator'
-  | 'connection'
-  | 'antiban'
-  | 'gateway'
   | 'catalog'
-  | 'templates'
+  | 'connection'
+  | 'security'
   | 'settings';
 
 export default function App() {
@@ -32,16 +31,27 @@ export default function App() {
     gatewayJobs,
     gatewayStats,
     socketConnected,
+    backendUrl,
+    backendUnreachable,
+    isStaticHost,
+    updateBackendUrl,
     connectQR,
     connectPairing,
     disconnectWA,
     updateConfig,
     sendSimulatorMessage,
+    injectViewOnce,
     triggerGroupEvent,
     clearSimulator,
   } = useBotRealtime();
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>('simulator');
+  const [activeTab, setActiveTab] = useState<ActiveWorkspace>('simulator');
+  const [securitySubTab, setSecuritySubTab] = useState<'antiban' | 'gateway'>(
+    'antiban'
+  );
+  const [settingsSubTab, setSettingsSubTab] = useState<'general' | 'templates'>(
+    'general'
+  );
   const [prefillCommand, setPrefillCommand] = useState<string | null>(null);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     try {
@@ -65,16 +75,16 @@ export default function App() {
     }
   }, [darkMode]);
 
+  const lockedCount = COMMAND_CATALOG.filter((c) => c.suspensionRisk).length;
   const activeCommandCount =
-    COMMAND_CATALOG.length - config.disabledCommands.length;
+    COMMAND_CATALOG.length - lockedCount - config.disabledCommands.length;
 
-  const navItems: Array<{ id: ActiveTab; label: string }> = [
+  // Strict 5 single-line navigation links in Top Bar Contract
+  const navItems: Array<{ id: ActiveWorkspace; label: string }> = [
     { id: 'simulator', label: 'Simulator Chat' },
+    { id: 'catalog', label: 'Katalog Fitur' },
     { id: 'connection', label: 'Koneksi WA' },
-    { id: 'antiban', label: 'Keamanan & Anti-Ban' },
-    { id: 'gateway', label: 'Gateway & Webhook' },
-    { id: 'catalog', label: 'Katalog Command' },
-    { id: 'templates', label: 'Template Chat' },
+    { id: 'security', label: 'Keamanan & API' },
     { id: 'settings', label: 'Pengaturan' },
   ];
 
@@ -143,7 +153,33 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-[1240px] mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <main className="max-w-[1240px] mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+        {/* Static Vercel / Unreachable Backend Notice */}
+        {backendUnreachable && (
+          <div className="bg-amber-50/90 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/70 rounded-2xl px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3 text-xs sm:text-sm text-amber-900 dark:text-amber-200">
+              <Server className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <div className="font-semibold">
+                  {isStaticHost
+                    ? 'Halaman Statis Terdeteksi (Vercel / Static Host) — Mesin Server Bot Belum Terhubung'
+                    : 'Mesin Server Bot Belum Merespon'}
+                </div>
+                <p className="text-xs text-amber-800/90 dark:text-amber-300/90 leading-relaxed">
+                  Vercel tidak dapat menjaga koneksi socket WhatsApp 24/7 secara langsung. Hubungkan URL Server Bot eksternal kamu (Railway / Render / Cloud Run / VPS) pada menu Koneksi WA agar semua fitur berjalan penuh.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab('connection')}
+              className="px-4 py-2 rounded-xl bg-amber-900 dark:bg-amber-500 text-white dark:text-zinc-950 text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 self-start sm:self-center"
+            >
+              Atur Server Bot 24/7
+            </button>
+          </div>
+        )}
+
         {/* Gepa — Personal Corner Identity Strip */}
         <section className="bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="flex items-start sm:items-center gap-4 min-w-0">
@@ -154,18 +190,18 @@ export default function App() {
                 <span aria-hidden="true">·</span>
                 <span>{config.ownerWebsite}</span>
                 <span aria-hidden="true">·</span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      socketConnected ? 'bg-emerald-500' : 'bg-amber-500'
-                    }`}
-                    aria-hidden="true"
-                  />
-                  <span>
-                    {socketConnected
-                      ? 'Mesin Real-Time Terhubung'
-                      : 'Menyambungkan Mesin...'}
-                  </span>
+                <span
+                  className={
+                    socketConnected
+                      ? 'text-emerald-700 dark:text-emerald-400 font-medium'
+                      : 'text-amber-700 dark:text-amber-400 font-medium'
+                  }
+                >
+                  {socketConnected
+                    ? backendUrl
+                      ? `Server Eksternal Aktif`
+                      : 'Mesin Real-Time Terhubung'
+                    : 'Menunggu Koneksi Server'}
                 </span>
               </div>
 
@@ -173,16 +209,11 @@ export default function App() {
                 className="text-xl sm:text-2xl font-display font-bold tracking-tight text-zinc-900 dark:text-zinc-100"
                 style={{ textWrap: 'balance' }}
               >
-                Bot WhatsApp Serbaguna Cukup Ketik Satu Titik ({config.prefix})
+                Studio Stiker, Perkakas Media &amp; Multi-Downloader Satu Titik ({config.prefix})
               </h1>
 
               <p className="text-sm text-zinc-600 dark:text-zinc-400 max-w-2xl leading-relaxed">
-                Download video TikTok ({config.prefix}tt), kirim Status WA HD
-                tanpa kompresi dari Dokumen ({config.prefix}hdsw), stiker instan (
-                {config.prefix}s &amp; {config.prefix}brat), reaksi status otomatis (
-                {config.reactions.pending} {config.reactions.error}{' '}
-                {config.reactions.success}), serta admin &amp; kustomisasi grup (
-                {config.prefix}setwelcome, {config.prefix}setout, {config.prefix}kick).
+                Status WA HD tanpa kompresi di Grup &amp; Pribadi ({config.prefix}hdsw), stiker quote chat &amp; animasi ({config.prefix}qc, {config.prefix}iqc, {config.prefix}s, {config.prefix}bratvid, {config.prefix}emojimix), konverter media ({config.prefix}toptv, {config.prefix}rvo, {config.prefix}hd), efek audio ({config.prefix}play, {config.prefix}bass, {config.prefix}nightcore), serta multi-downloader TikTok, IG, FB, X, Pinterest, &amp; MediaFire.
               </p>
             </div>
           </div>
@@ -194,7 +225,7 @@ export default function App() {
                 Fitur Aktif
               </div>
               <div className="text-lg font-mono font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
-                {activeCommandCount}/{COMMAND_CATALOG.length}
+                {Math.max(0, activeCommandCount)}/{COMMAND_CATALOG.length}
               </div>
             </div>
             <div>
@@ -215,7 +246,7 @@ export default function App() {
             </div>
             <div>
               <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                Media Diunduh
+                Media Diproses
               </div>
               <div className="text-lg font-mono font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
                 {stats.mediaDownloaded}
@@ -253,38 +284,9 @@ export default function App() {
             prefillCommand={prefillCommand}
             onConsumePrefill={() => setPrefillCommand(null)}
             onSendMessage={sendSimulatorMessage}
+            onInjectViewOnce={injectViewOnce}
             onTriggerGroupEvent={triggerGroupEvent}
             onClearMessages={clearSimulator}
-          />
-        )}
-
-        {activeTab === 'connection' && (
-          <ConnectionView
-            waState={waState}
-            config={config}
-            onConnectQR={connectQR}
-            onConnectPairing={connectPairing}
-            onDisconnect={disconnectWA}
-            onUpdateConfig={updateConfig}
-          />
-        )}
-
-        {activeTab === 'antiban' && (
-          <AntiBanView
-            config={config}
-            stats={stats}
-            onUpdateConfig={updateConfig}
-          />
-        )}
-
-        {activeTab === 'gateway' && (
-          <GatewayWebhookView
-            config={config}
-            stats={stats}
-            gatewayStats={gatewayStats}
-            gatewayJobs={gatewayJobs}
-            webhookLogs={webhookLogs}
-            onUpdateConfig={updateConfig}
           />
         )}
 
@@ -296,21 +298,110 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'templates' && (
-          <ReplyTemplateEditorView
+        {activeTab === 'connection' && (
+          <ConnectionView
+            waState={waState}
             config={config}
+            socketConnected={socketConnected}
+            backendUrl={backendUrl}
+            backendUnreachable={backendUnreachable}
+            isStaticHost={isStaticHost}
+            onUpdateBackendUrl={updateBackendUrl}
+            onConnectQR={connectQR}
+            onConnectPairing={connectPairing}
+            onDisconnect={disconnectWA}
             onUpdateConfig={updateConfig}
-            onTryInSimulator={handleTryInSimulator}
           />
         )}
 
+        {activeTab === 'security' && (
+          <div className="space-y-5">
+            <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 max-w-fit">
+              <button
+                type="button"
+                onClick={() => setSecuritySubTab('antiban')}
+                className={`px-4 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  securitySubTab === 'antiban'
+                    ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+                }`}
+              >
+                Perisai Anti-Ban &amp; Cooldown
+              </button>
+              <button
+                type="button"
+                onClick={() => setSecuritySubTab('gateway')}
+                className={`px-4 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  securitySubTab === 'gateway'
+                    ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+                }`}
+              >
+                REST Gateway, Webhook &amp; Auto-Responder
+              </button>
+            </div>
+
+            {securitySubTab === 'antiban' ? (
+              <AntiBanView
+                config={config}
+                stats={stats}
+                onUpdateConfig={updateConfig}
+              />
+            ) : (
+              <GatewayWebhookView
+                config={config}
+                stats={stats}
+                gatewayStats={gatewayStats}
+                gatewayJobs={gatewayJobs}
+                webhookLogs={webhookLogs}
+                onUpdateConfig={updateConfig}
+              />
+            )}
+          </div>
+        )}
+
         {activeTab === 'settings' && (
-          <SettingsView
-            config={config}
-            darkMode={darkMode}
-            onToggleDarkMode={setDarkMode}
-            onUpdateConfig={updateConfig}
-          />
+          <div className="space-y-5">
+            <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 max-w-fit">
+              <button
+                type="button"
+                onClick={() => setSettingsSubTab('general')}
+                className={`px-4 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  settingsSubTab === 'general'
+                    ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+                }`}
+              >
+                Pengaturan Umum &amp; Kunci Manual
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettingsSubTab('templates')}
+                className={`px-4 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  settingsSubTab === 'templates'
+                    ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+                }`}
+              >
+                Editor Template Balasan Chat
+              </button>
+            </div>
+
+            {settingsSubTab === 'general' ? (
+              <SettingsView
+                config={config}
+                darkMode={darkMode}
+                onToggleDarkMode={setDarkMode}
+                onUpdateConfig={updateConfig}
+              />
+            ) : (
+              <ReplyTemplateEditorView
+                config={config}
+                onUpdateConfig={updateConfig}
+                onTryInSimulator={handleTryInSimulator}
+              />
+            )}
+          </div>
         )}
       </main>
 

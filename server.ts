@@ -6,10 +6,15 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import {
   type IncomingDocumentPayload,
+  type IncomingViewOncePayload,
   processBotMessage,
   shouldSendPendingReaction,
 } from './server/commandEngine.ts';
 import { gatewayRouter } from './server/gatewayRouter.ts';
+import {
+  getOrCreateSampleAudioBuffer,
+  getOrCreateSampleVideoBuffer,
+} from './server/mediaProcessor.ts';
 import { botStore } from './server/stateStore.ts';
 import { waManager } from './server/waManager.ts';
 import { renderBotTemplate } from './src/shared/commands.ts';
@@ -63,6 +68,24 @@ async function startServer() {
   const app = express();
   const server = http.createServer(app);
 
+  // Cross-Origin Resource Sharing (CORS) so a Vercel static frontend can connect to this 24/7 Bot Server
+  app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+    );
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Api-Key'
+    );
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
+    next();
+  });
+
   app.use(express.json({ limit: '50mb' }));
 
   // WebSocket server mounted on /ws on the same port 3000 HTTP server
@@ -82,6 +105,15 @@ async function startServer() {
   });
 
   // --- REST API ROUTES ---
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      ok: true,
+      engine: 'GepaBot Stateful Engine',
+      waStatus: botStore.waState.status,
+      timestamp: Date.now(),
+    });
+  });
+
   app.use('/api/gateway', gatewayRouter);
 
   app.get('/api/state', (_req, res) => {
@@ -108,7 +140,8 @@ async function startServer() {
     } catch (err) {
       res.status(400).json({
         ok: false,
-        error: err instanceof Error ? err.message : 'Gagal meminta Pairing Code.',
+        error:
+          err instanceof Error ? err.message : 'Gagal meminta Pairing Code.',
       });
     }
   });
@@ -133,6 +166,28 @@ async function startServer() {
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     res.send(buf);
+  });
+
+  app.get('/api/sample-video.mp4', async (_req, res) => {
+    try {
+      const buf = await getOrCreateSampleVideoBuffer();
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.send(buf);
+    } catch {
+      res.status(500).send('Gagal menyiapkan video contoh.');
+    }
+  });
+
+  app.get('/api/sample-audio.mp3', async (_req, res) => {
+    try {
+      const buf = await getOrCreateSampleAudioBuffer();
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.send(buf);
+    } catch {
+      res.status(500).send('Gagal menyiapkan audio contoh.');
+    }
   });
 
   app.get('/api/stickers/:stickerFile', (req, res) => {
@@ -190,7 +245,9 @@ async function startServer() {
         headers: {
           'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-          Referer: 'https://www.tikwm.com/',
+          Referer: rawUrl.includes('tikwm')
+            ? 'https://www.tikwm.com/'
+            : rawUrl,
         },
         signal: controller.signal,
       });
@@ -203,6 +260,8 @@ async function startServer() {
       const contentType =
         mediaType === 'audio'
           ? 'audio/mpeg'
+          : mediaType === 'image'
+          ? upstream.headers.get('content-type') || 'image/jpeg'
           : upstream.headers.get('content-type') || 'video/mp4';
 
       res.setHeader('Content-Type', contentType);
@@ -210,7 +269,12 @@ async function startServer() {
       if (len) res.setHeader('Content-Length', len);
 
       if (forceDownload) {
-        const ext = mediaType === 'audio' ? 'mp3' : 'mp4';
+        const ext =
+          mediaType === 'audio'
+            ? 'mp3'
+            : mediaType === 'image'
+            ? 'jpg'
+            : 'mp4';
         res.setHeader(
           'Content-Disposition',
           `attachment; filename="gepabot-${Date.now()}.${ext}"`
@@ -288,6 +352,36 @@ async function startServer() {
     res.json({ ok: true });
   });
 
+  app.post('/api/simulator/inject-viewonce', async (req, res) => {
+    const chatMode: 'private' | 'group' =
+      req.body?.chatMode === 'group' ? 'group' : 'private';
+    const catBuf = await loadSampleCatBuffer();
+    if (!catBuf) {
+      res.status(500).json({ ok: false, error: 'Media contoh tidak ditemukan.' });
+      return;
+    }
+    const voUrl = botStore.storeHdMedia(catBuf, 'image/jpeg', 'viewonce-secret.jpg');
+    const voMsg: SimulatorMessage = {
+      id: `sim-vo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      chatMode,
+      sender: 'member',
+      senderName: 'Raka Pratama',
+      senderPhone: '628138000222',
+      isAdmin: true,
+      text: 'Foto rahasia sekali lihat (coba klik Balas lalu ketik .rvo)',
+      timestamp: Date.now(),
+      media: {
+        type: 'image',
+        url: voUrl,
+        mimeType: 'image/jpeg',
+        isViewOnce: true,
+        title: 'Foto Sekali Lihat (View Once)',
+      },
+    };
+    botStore.addSimulatorMessage(voMsg);
+    res.json({ ok: true, message: voMsg });
+  });
+
   app.post('/api/simulator/send', async (req, res) => {
     try {
       const chatMode: 'private' | 'group' =
@@ -299,6 +393,8 @@ async function startServer() {
         ? String(req.body.imageBase64)
         : null;
       const useSampleCat = Boolean(req.body?.useSampleCat);
+      const useSampleVideo = Boolean(req.body?.useSampleVideo);
+      const useSampleAudio = Boolean(req.body?.useSampleAudio);
       const documentBase64 = req.body?.documentBase64
         ? String(req.body.documentBase64)
         : null;
@@ -315,6 +411,8 @@ async function startServer() {
         !text &&
         !imageBase64 &&
         !useSampleCat &&
+        !useSampleVideo &&
+        !useSampleAudio &&
         !documentBase64 &&
         !useSampleHdDoc
       ) {
@@ -323,21 +421,50 @@ async function startServer() {
       }
 
       let imageBuffer: Buffer | null = null;
-      let attachedPreviewUrl: string | undefined;
+      let videoBuffer: Buffer | null = null;
+      let audioBuffer: Buffer | null = null;
+      let stickerBuffer: Buffer | null = null;
+      let viewOnceMedia: IncomingViewOncePayload | null = null;
+      let attachedPreviewMedia: SimulatorMessage['media'] | undefined;
 
       if (imageBase64) {
         const base64Clean = imageBase64.includes(',')
           ? imageBase64.split(',')[1]
           : imageBase64;
         imageBuffer = Buffer.from(base64Clean, 'base64');
-        attachedPreviewUrl = imageBase64;
+        attachedPreviewMedia = {
+          type: 'image',
+          url: imageBase64,
+          mimeType: 'image/jpeg',
+        };
       } else if (useSampleCat) {
         imageBuffer = await loadSampleCatBuffer();
-        attachedPreviewUrl = '/api/sample-cat.jpg';
+        attachedPreviewMedia = {
+          type: 'image',
+          url: '/api/sample-cat.jpg',
+          mimeType: 'image/jpeg',
+        };
+      } else if (useSampleVideo) {
+        videoBuffer = await getOrCreateSampleVideoBuffer();
+        attachedPreviewMedia = {
+          type: 'video',
+          url: '/api/sample-video.mp4',
+          mimeType: 'video/mp4',
+          fileName: 'sample-clip.mp4',
+          title: 'Video Pendek Uji Coba',
+        };
+      } else if (useSampleAudio) {
+        audioBuffer = await getOrCreateSampleAudioBuffer();
+        attachedPreviewMedia = {
+          type: 'audio',
+          url: '/api/sample-audio.mp3',
+          mimeType: 'audio/mpeg',
+          fileName: 'sample-audio.mp3',
+          title: 'Audio / Voice Note Uji Coba',
+        };
       }
 
       let documentMedia: IncomingDocumentPayload | null = null;
-      let attachedDocMessageMedia: SimulatorMessage['media'] | undefined;
 
       if (documentBase64) {
         const base64Clean = documentBase64.includes(',')
@@ -362,7 +489,7 @@ async function startServer() {
           fileSize: docBuf.length,
         };
 
-        attachedDocMessageMedia = {
+        attachedPreviewMedia = {
           type: 'document',
           url: storedDocUrl,
           mimeType: resolvedMime,
@@ -390,7 +517,7 @@ async function startServer() {
             fileSize: catBuf.length,
           };
 
-          attachedDocMessageMedia = {
+          attachedPreviewMedia = {
             type: 'document',
             url: storedDocUrl,
             mimeType: resolvedMime,
@@ -404,11 +531,50 @@ async function startServer() {
       let replySnapshot: SimulatorMessage['replyTo'] | undefined;
       let quotedParticipantPhone: string | undefined;
       let quotedParticipantJid: string | undefined;
+      let quotedText: string | undefined;
+      let quotedSenderName: string | undefined;
       let quotedRegularMedia = false;
 
+      const resolveCachedBufferFromUrl = async (
+        mediaUrl?: string
+      ): Promise<Buffer | null> => {
+        if (!mediaUrl) return null;
+        if (mediaUrl.startsWith('data:')) {
+          const rawB64 = mediaUrl.split(',')[1];
+          return rawB64 ? Buffer.from(rawB64, 'base64') : null;
+        }
+        if (
+          mediaUrl.includes('sample_sticker_cat') ||
+          mediaUrl.includes('sample-cat.jpg')
+        ) {
+          return loadSampleCatBuffer();
+        }
+        if (mediaUrl.includes('sample-video.mp4')) {
+          return getOrCreateSampleVideoBuffer();
+        }
+        if (mediaUrl.includes('sample-audio.mp3')) {
+          return getOrCreateSampleAudioBuffer();
+        }
+        if (mediaUrl.startsWith('/api/hd-media/')) {
+          const id = mediaUrl.replace('/api/hd-media/', '').split('?')[0];
+          return botStore.hdMediaCache.get(id)?.buffer || null;
+        }
+        if (mediaUrl.startsWith('/api/stickers/')) {
+          const id = mediaUrl
+            .replace('/api/stickers/', '')
+            .replace(/\.webp.*$/i, '');
+          return botStore.stickerCache.get(id) || null;
+        }
+        return null;
+      };
+
       if (replyToId) {
-        const targetMsg = botStore.simulatorMessages.find((m) => m.id === replyToId);
+        const targetMsg = botStore.simulatorMessages.find(
+          (m) => m.id === replyToId
+        );
         if (targetMsg) {
+          quotedText = targetMsg.text || undefined;
+          quotedSenderName = targetMsg.senderName;
           if (targetMsg.sender !== 'bot' && targetMsg.sender !== 'system') {
             quotedParticipantPhone = targetMsg.senderPhone;
             quotedParticipantJid = `${targetMsg.senderPhone}@s.whatsapp.net`;
@@ -421,11 +587,16 @@ async function startServer() {
               targetMsg.text ||
               (targetMsg.media
                 ? `[${
-                    targetMsg.media.type === 'document'
+                    targetMsg.media.isViewOnce
+                      ? 'View Once'
+                      : targetMsg.media.type === 'document'
                       ? `Dokumen: ${targetMsg.media.fileName || 'File'}`
                       : targetMsg.media.type
                   }]`
                 : ''),
+            mediaType: targetMsg.media?.type,
+            mediaUrl: targetMsg.media?.url,
+            isViewOnce: targetMsg.media?.isViewOnce,
             hasImage: targetMsg.media?.type === 'image',
             imageUrl: targetMsg.media?.url,
             hasDocument: targetMsg.media?.type === 'document',
@@ -442,31 +613,47 @@ async function startServer() {
                 ? targetMsg.media.fileName
                 : undefined,
           };
-          if (!imageBuffer && targetMsg.media?.type === 'image' && targetMsg.media.url) {
+
+          const mType = targetMsg.media?.type;
+          const mUrl = targetMsg.media?.url;
+          const resolvedBuf = await resolveCachedBufferFromUrl(mUrl);
+
+          if (targetMsg.media?.isViewOnce && resolvedBuf) {
+            viewOnceMedia = {
+              kind:
+                mType === 'video'
+                  ? 'video'
+                  : mType === 'audio' || mType === 'vn'
+                  ? 'audio'
+                  : 'image',
+              buffer: resolvedBuf,
+              mimeType: targetMsg.media.mimeType || 'image/jpeg',
+              caption: targetMsg.text,
+            };
+          } else if (mType === 'image' && resolvedBuf && !imageBuffer) {
             quotedRegularMedia = true;
-            if (targetMsg.media.url.startsWith('data:')) {
-              const rawB64 = targetMsg.media.url.split(',')[1];
-              if (rawB64) imageBuffer = Buffer.from(rawB64, 'base64');
-            } else if (
-              targetMsg.media.url.includes('sample_sticker_cat') ||
-              targetMsg.media.url.includes('sample-cat.jpg')
-            ) {
-              imageBuffer = await loadSampleCatBuffer();
-            } else if (targetMsg.media.url.startsWith('/api/hd-media/')) {
-              const id = targetMsg.media.url.replace('/api/hd-media/', '');
-              const cached = botStore.hdMediaCache.get(id);
-              if (cached) imageBuffer = cached.buffer;
-            }
-          }
-          if (targetMsg.media?.type === 'video') {
-            quotedRegularMedia = true;
-          }
-          if (
-            !documentMedia &&
-            targetMsg.media?.type === 'document' &&
-            targetMsg.media.url.startsWith('/api/hd-media/')
+            imageBuffer = resolvedBuf;
+          } else if (
+            (mType === 'video' || mType === 'ptv') &&
+            resolvedBuf &&
+            !videoBuffer
           ) {
-            const id = targetMsg.media.url.replace('/api/hd-media/', '');
+            quotedRegularMedia = true;
+            videoBuffer = resolvedBuf;
+          } else if (
+            (mType === 'audio' || mType === 'vn') &&
+            resolvedBuf &&
+            !audioBuffer
+          ) {
+            audioBuffer = resolvedBuf;
+          } else if (mType === 'sticker' && resolvedBuf && !stickerBuffer) {
+            stickerBuffer = resolvedBuf;
+          } else if (
+            !documentMedia &&
+            mType === 'document' &&
+            mUrl?.startsWith('/api/hd-media/')
+          ) {
+            const id = mUrl.replace('/api/hd-media/', '').split('?')[0];
             const cached = botStore.hdMediaCache.get(id);
             if (cached) {
               const kind = classifySimulatorDocKind(
@@ -494,7 +681,9 @@ async function startServer() {
         return;
       }
 
-      const senderName = isMemberSimulation ? 'Nadia Putri (Member)' : 'Kamu (Gepa)';
+      const senderName = isMemberSimulation
+        ? 'Nadia Putri (Member)'
+        : 'Kamu (Gepa)';
       const senderPhone = isMemberSimulation ? '628577000333' : '628129000111';
       const isAdmin = !isMemberSimulation;
 
@@ -502,7 +691,9 @@ async function startServer() {
         ? botStore.config.reactions.pending
         : null;
 
-      const userMsgId = `sim-u-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const userMsgId = `sim-u-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 6)}`;
       const userMsg: SimulatorMessage = {
         id: userMsgId,
         chatMode,
@@ -514,15 +705,7 @@ async function startServer() {
         timestamp: Date.now(),
         reaction: pendingReaction,
         replyTo: replySnapshot,
-        media: attachedDocMessageMedia
-          ? attachedDocMessageMedia
-          : attachedPreviewUrl
-          ? {
-              type: 'image',
-              url: attachedPreviewUrl,
-              mimeType: 'image/jpeg',
-            }
-          : undefined,
+        media: attachedPreviewMedia,
       };
 
       botStore.addSimulatorMessage(userMsg);
@@ -540,9 +723,16 @@ async function startServer() {
         isBotGroupAdmin: true,
         text,
         imageBuffer,
+        videoBuffer,
+        audioBuffer,
+        stickerBuffer,
+        viewOnceMedia,
+        quotedText,
+        quotedSenderName,
         documentMedia,
         attachedNonDocumentMedia:
-          !documentMedia && Boolean(imageBuffer || quotedRegularMedia),
+          !documentMedia &&
+          Boolean(imageBuffer || videoBuffer || quotedRegularMedia),
         quotedParticipantPhone,
         quotedParticipantJid,
         groupMembers: botStore.groupMembers,
@@ -577,15 +767,17 @@ async function startServer() {
 
       if (botResult.handled) {
         if (botResult.hdswMedia) {
+          // Replies directly inside the active chatMode (works in BOTH Group & Private Chat!)
           const hd = botResult.hdswMedia;
-          const privateHdMsg: SimulatorMessage = {
+          const hdReplyMsg: SimulatorMessage = {
             id: `sim-hd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-            chatMode: 'private',
+            chatMode,
             sender: 'bot',
             senderName: botStore.config.botName,
             senderPhone: 'Bot Engine',
-            text: hd.privateCaption,
+            text: hd.caption,
             timestamp: Date.now(),
+            mentions: botResult.mentions,
             replyTo: {
               id: userMsg.id,
               senderName: userMsg.senderName,
@@ -601,28 +793,85 @@ async function startServer() {
               title: `${hd.fileName} (${hd.fileSizeLabel})`,
             },
           };
-          botStore.addSimulatorMessage(privateHdMsg);
+          botStore.addSimulatorMessage(hdReplyMsg);
+        } else {
+          let resolvedMedia: SimulatorMessage['media'] | undefined;
 
-          if (chatMode === 'group' && botResult.replyText) {
-            const groupConfirmMsg: SimulatorMessage = {
-              id: `sim-gconf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              chatMode: 'group',
-              sender: 'bot',
-              senderName: botStore.config.botName,
-              senderPhone: 'Bot Engine',
-              text: botResult.replyText,
-              timestamp: Date.now(),
-              mentions: botResult.mentions,
-              replyTo: {
-                id: userMsg.id,
-                senderName: userMsg.senderName,
-                senderPhone: userMsg.senderPhone,
-                text: userMsg.text || `[Dokumen: ${hd.fileName}]`,
+          if (botResult.stickerWebUrl) {
+            resolvedMedia = {
+              type: 'sticker',
+              url: botResult.stickerWebUrl,
+              mimeType: 'image/webp',
+              fileName: 'gepa-corner-sticker.webp',
+              packInfo: botResult.stickerPackOverride || {
+                pack: botStore.config.stickerPackName,
+                author: botStore.config.stickerAuthor,
               },
             };
-            botStore.addSimulatorMessage(groupConfirmMsg);
+          } else if (botResult.slideProxyUrls?.length) {
+            resolvedMedia = {
+              type: 'gallery',
+              url: botResult.slideProxyUrls[0],
+              galleryUrls: botResult.slideProxyUrls,
+              mimeType: 'image/jpeg',
+              title: botResult.mediaTitle,
+              author: botResult.mediaAuthor,
+            };
+          } else if (botResult.imageWebUrl) {
+            resolvedMedia = {
+              type: 'image',
+              url: botResult.imageWebUrl,
+              mimeType: botResult.imageMimeType || 'image/jpeg',
+              fileName: 'gepabot-image.jpg',
+            };
+          } else if (botResult.videoWebUrl) {
+            resolvedMedia = {
+              type: botResult.asPtv ? 'ptv' : 'video',
+              url: botResult.videoWebUrl,
+              mimeType: botResult.videoMimeType || 'video/mp4',
+              fileName: botResult.asPtv ? 'video-note.mp4' : 'gepabot-video.mp4',
+              title: botResult.mediaTitle,
+            };
+          } else if (botResult.audioWebUrl) {
+            resolvedMedia = {
+              type: botResult.asVoiceNote ? 'vn' : 'audio',
+              url: botResult.audioWebUrl,
+              mimeType: botResult.audioMimeType || 'audio/mpeg',
+              fileName: botResult.asVoiceNote
+                ? 'voice-note.ogg'
+                : 'gepabot-audio.mp3',
+              title: botResult.mediaTitle,
+            };
+          } else if (botResult.documentWebUrl) {
+            resolvedMedia = {
+              type: 'document',
+              url: botResult.documentWebUrl,
+              mimeType:
+                botResult.documentMimeType || 'application/octet-stream',
+              fileName: botResult.documentFileName || 'berkas-unduhan',
+            };
+          } else if (botResult.videoProxyUrl) {
+            resolvedMedia = {
+              type: 'video',
+              url: botResult.videoProxyUrl,
+              mimeType: 'video/mp4',
+              fileName: 'gepabot-video.mp4',
+              title: botResult.mediaTitle,
+              author: botResult.mediaAuthor,
+              duration: botResult.mediaDuration,
+            };
+          } else if (botResult.audioProxyUrl) {
+            resolvedMedia = {
+              type: 'audio',
+              url: botResult.audioProxyUrl,
+              mimeType: 'audio/mpeg',
+              fileName: 'gepabot-audio.mp3',
+              title: botResult.mediaTitle,
+              author: botResult.mediaAuthor,
+              duration: botResult.mediaDuration,
+            };
           }
-        } else {
+
           const botMsg: SimulatorMessage = {
             id: `sim-b-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             chatMode,
@@ -641,38 +890,7 @@ async function startServer() {
                   text: userMsg.text || '[Lampiran Media]',
                 }
               : undefined,
-            media: botResult.stickerWebUrl
-              ? {
-                  type: 'sticker',
-                  url: botResult.stickerWebUrl,
-                  mimeType: 'image/webp',
-                  fileName: 'gepa-corner-sticker.webp',
-                  packInfo: {
-                    pack: botStore.config.stickerPackName,
-                    author: botStore.config.stickerAuthor,
-                  },
-                }
-              : botResult.videoProxyUrl
-              ? {
-                  type: 'video',
-                  url: botResult.videoProxyUrl,
-                  mimeType: 'video/mp4',
-                  fileName: 'gepabot-video.mp4',
-                  title: botResult.mediaTitle,
-                  author: botResult.mediaAuthor,
-                  duration: botResult.mediaDuration,
-                }
-              : botResult.audioProxyUrl
-              ? {
-                  type: 'audio',
-                  url: botResult.audioProxyUrl,
-                  mimeType: 'audio/mpeg',
-                  fileName: 'gepabot-audio.mp3',
-                  title: botResult.mediaTitle,
-                  author: botResult.mediaAuthor,
-                  duration: botResult.mediaDuration,
-                }
-              : undefined,
+            media: resolvedMedia,
           };
           botStore.addSimulatorMessage(botMsg);
         }
@@ -682,7 +900,10 @@ async function startServer() {
     } catch (err) {
       res.status(500).json({
         ok: false,
-        error: err instanceof Error ? err.message : 'Gagal menjalankan simulasi pesan.',
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Gagal menjalankan simulasi pesan.',
       });
     }
   });

@@ -12,16 +12,18 @@ interface CommandCatalogViewProps {
 const CATEGORY_TABS: Array<{ id: 'all' | CommandCategory; label: string }> = [
   { id: 'all', label: 'Semua Fitur' },
   { id: 'downloader', label: 'Downloader' },
-  { id: 'audio', label: 'Audio MP3' },
   { id: 'sticker', label: 'Studio Stiker' },
+  { id: 'media', label: 'Perkakas Media' },
+  { id: 'audio', label: 'Audio & Efek' },
   { id: 'group', label: 'Admin Grup' },
   { id: 'utility', label: 'Utilitas' },
 ];
 
 const CATEGORY_LABELS: Record<CommandCategory, string> = {
-  downloader: 'Downloader Sosmed',
-  audio: 'Ekstraktor Audio',
+  downloader: 'Multi-Downloader',
   sticker: 'Studio Stiker',
+  media: 'Perkakas Media',
+  audio: 'Audio & Efek Suara',
   group: 'Admin Grup',
   utility: 'Utilitas',
 };
@@ -81,8 +83,7 @@ export function CommandCatalogView({
             Katalog Command Awalan ({config.prefix})
           </h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Aktifkan atau matikan command tertentu secara langsung, atau klik Coba
-            untuk mengujinya di Simulator Chat.
+            Seluruh perkakas stiker, konverter media, audio efek, dan multi-downloader aktif pada satu awalan ({config.prefix}). Klik Coba untuk menguji langsung di Simulator.
           </p>
         </div>
 
@@ -92,7 +93,7 @@ export function CommandCatalogView({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Cari command (.tt, .brat, .s)..."
+            placeholder="Cari (.hdsw, .qc, .tt, .toptv, .play)..."
             className="w-full pl-9 pr-3.5 py-2 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-emerald-500"
           />
         </div>
@@ -119,13 +120,11 @@ export function CommandCatalogView({
       {/* Active Group Anti-Suspension Safeguard Note (hairline divider, no nested card) */}
       <div className="pt-2 pb-1 border-b border-zinc-200/80 dark:border-zinc-800 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
         <span className="font-semibold text-zinc-900 dark:text-zinc-200">
-          Proteksi Anti-Suspend Grup Aktif:
+          Proteksi Anti-Ban &amp; Dukungan Grup Aktif:
         </span>{' '}
-        Perintah pemicu penangguhan grup (<code className="font-mono">{config.prefix}add</code>,{' '}
+        Fitur <code className="font-mono">{config.prefix}hdsw</code> kini bisa dipakai langsung di Grup maupun Chat Pribadi tanpa DM ke nomor asing. Perintah berisiko suspend (<code className="font-mono">{config.prefix}add</code>,{' '}
         <code className="font-mono">{config.prefix}hidetag</code>,{' '}
-        <code className="font-mono">{config.prefix}tagall</code>) dikunci otomatis.
-        Seluruh fitur grup lainnya dilindungi cache metadata 5 menit, jeda ketik natural,
-        serta batas jeda (cooldown) aksi admin agar grup tetap aman.
+        <code className="font-mono">{config.prefix}tagall</code>) tetap dikunci otomatis, dan seluruh unduhan dibatasi aman di bawah 35 MB dengan jeda ketik natural.
       </div>
 
       {/* High-Clarity Command Rows */}

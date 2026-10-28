@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DEFAULT_REACTIONS, DEFAULT_TEMPLATES } from '../shared/commands.ts';
+import {
+  buildApiUrl,
+  buildRealtimeWsUrl,
+  getActiveBackendBaseUrl,
+  isLikelyStaticFrontendHost,
+  setStoredBackendUrl,
+} from '../lib/apiBase.ts';
 import type {
   BotConfig,
   CommandExecutionLog,
@@ -106,11 +113,23 @@ export interface SendSimulatorPayload {
   senderRole?: 'admin' | 'member';
   imageBase64?: string | null;
   useSampleCat?: boolean;
+  useSampleVideo?: boolean;
+  useSampleAudio?: boolean;
   documentBase64?: string | null;
   documentMimeType?: string;
   documentFileName?: string;
   useSampleHdDoc?: boolean;
   replyToId?: string | null;
+}
+
+async function parseApiJson<T>(res: Response): Promise<T> {
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    throw new Error(
+      'Server Bot belum terhubung (menerima respon statis HTML). Buka menu Koneksi WA untuk menghubungkan URL Server Bot 24/7.'
+    );
+  }
+  return (await res.json()) as T;
 }
 
 export function useBotRealtime() {
@@ -137,6 +156,11 @@ export function useBotRealtime() {
   });
   const [socketConnected, setSocketConnected] = useState(false);
   const [isLoadingInitial, setIsLoadingInitial] = useState(true);
+  const [backendUrl, setBackendUrl] = useState<string>(() =>
+    getActiveBackendBaseUrl()
+  );
+  const [backendUnreachable, setBackendUnreachable] = useState(false);
+  const isStaticHost = isLikelyStaticFrontendHost();
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -169,18 +193,22 @@ export function useBotRealtime() {
     if (snap.gatewayStats) {
       setGatewayStats(snap.gatewayStats);
     }
+    setBackendUnreachable(false);
     setIsLoadingInitial(false);
   }, []);
 
   const fetchSnapshot = useCallback(async () => {
     try {
-      const res = await fetch('/api/state');
-      if (res.ok) {
+      const res = await fetch(buildApiUrl('/api/state'));
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
         const snap = (await res.json()) as ServerStateSnapshot;
         applySnapshot(snap);
+      } else {
+        setBackendUnreachable(true);
       }
     } catch {
-      // Will retry via WebSocket reconnect
+      setBackendUnreachable(true);
     } finally {
       setIsLoadingInitial(false);
     }
@@ -192,13 +220,21 @@ export function useBotRealtime() {
 
     const connectWs = () => {
       if (unmounted) return;
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws`;
-      const ws = new WebSocket(wsUrl);
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(buildRealtimeWsUrl());
+      } catch {
+        setSocketConnected(false);
+        setBackendUnreachable(true);
+        return;
+      }
       wsRef.current = ws;
 
       ws.onopen = () => {
-        if (!unmounted) setSocketConnected(true);
+        if (!unmounted) {
+          setSocketConnected(true);
+          setBackendUnreachable(false);
+        }
       };
 
       ws.onmessage = (event) => {
@@ -296,7 +332,7 @@ export function useBotRealtime() {
       ws.onclose = () => {
         if (unmounted) return;
         setSocketConnected(false);
-        reconnectTimeoutRef.current = setTimeout(connectWs, 2500);
+        reconnectTimeoutRef.current = setTimeout(connectWs, 3000);
       };
 
       ws.onerror = () => {
@@ -311,66 +347,101 @@ export function useBotRealtime() {
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       if (wsRef.current) wsRef.current.close();
     };
-  }, [applySnapshot, fetchSnapshot]);
+  }, [applySnapshot, fetchSnapshot, backendUrl]);
+
+  const updateBackendUrl = useCallback((rawUrl: string) => {
+    const normalized = setStoredBackendUrl(rawUrl);
+    const active = getActiveBackendBaseUrl();
+    setSocketConnected(false);
+    setBackendUrl(active || normalized);
+  }, []);
 
   const connectQR = useCallback(async () => {
-    const res = await fetch('/api/wa/connect-qr', { method: 'POST' });
-    const data = (await res.json()) as { ok: boolean; error?: string };
+    const res = await fetch(buildApiUrl('/api/wa/connect-qr'), {
+      method: 'POST',
+    });
+    const data = await parseApiJson<{ ok: boolean; error?: string }>(res);
     if (!data.ok) throw new Error(data.error || 'Gagal memulai sesi QR');
   }, []);
 
   const connectPairing = useCallback(async (phoneNumber: string) => {
-    const res = await fetch('/api/wa/connect-pairing', {
+    const res = await fetch(buildApiUrl('/api/wa/connect-pairing'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phoneNumber }),
     });
-    const data = (await res.json()) as { ok: boolean; error?: string };
+    const data = await parseApiJson<{ ok: boolean; error?: string }>(res);
     if (!data.ok) throw new Error(data.error || 'Gagal meminta Pairing Code');
   }, []);
 
   const disconnectWA = useCallback(async () => {
-    await fetch('/api/wa/disconnect', { method: 'POST' });
+    await fetch(buildApiUrl('/api/wa/disconnect'), { method: 'POST' });
   }, []);
 
   const updateConfig = useCallback(async (patch: Partial<BotConfig>) => {
-    const res = await fetch('/api/config', {
+    const res = await fetch(buildApiUrl('/api/config'), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     });
-    const data = (await res.json()) as { ok: boolean; config?: BotConfig };
+    const data = await parseApiJson<{ ok: boolean; config?: BotConfig }>(res);
     if (data.ok && data.config) {
       setConfig(data.config);
     }
   }, []);
 
-  const sendSimulatorMessage = useCallback(async (payload: SendSimulatorPayload) => {
-    const res = await fetch('/api/simulator/send', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const data = (await res.json()) as { ok: boolean; error?: string };
-    if (!data.ok) {
-      throw new Error(data.error || 'Gagal mengirim pesan simulasi');
-    }
-  }, []);
+  const sendSimulatorMessage = useCallback(
+    async (payload: SendSimulatorPayload) => {
+      const res = await fetch(buildApiUrl('/api/simulator/send'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await parseApiJson<{ ok: boolean; error?: string }>(res);
+      if (!data.ok) {
+        throw new Error(data.error || 'Gagal mengirim pesan simulasi');
+      }
+    },
+    []
+  );
 
-  const triggerGroupEvent = useCallback(async (action: 'welcome' | 'goodbye') => {
-    const res = await fetch('/api/simulator/group-event', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action }),
-    });
-    const data = (await res.json()) as { ok: boolean; error?: string };
-    if (!data.ok) {
-      throw new Error(data.error || 'Gagal memicu simulasi event grup');
-    }
-  }, []);
+  const injectViewOnce = useCallback(
+    async (chatMode: 'private' | 'group'): Promise<SimulatorMessage | null> => {
+      const res = await fetch(buildApiUrl('/api/simulator/inject-viewonce'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatMode }),
+      });
+      const data = await parseApiJson<{
+        ok: boolean;
+        message?: SimulatorMessage;
+        error?: string;
+      }>(res);
+      if (!data.ok) {
+        throw new Error(data.error || 'Gagal membuat pesan View Once');
+      }
+      return data.message ?? null;
+    },
+    []
+  );
+
+  const triggerGroupEvent = useCallback(
+    async (action: 'welcome' | 'goodbye') => {
+      const res = await fetch(buildApiUrl('/api/simulator/group-event'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const data = await parseApiJson<{ ok: boolean; error?: string }>(res);
+      if (!data.ok) {
+        throw new Error(data.error || 'Gagal memicu simulasi event grup');
+      }
+    },
+    []
+  );
 
   const clearSimulator = useCallback(async (chatMode?: 'private' | 'group') => {
-    await fetch('/api/simulator/clear', {
+    await fetch(buildApiUrl('/api/simulator/clear'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chatMode }),
@@ -390,11 +461,16 @@ export function useBotRealtime() {
     gatewayStats,
     socketConnected,
     isLoadingInitial,
+    backendUrl,
+    backendUnreachable,
+    isStaticHost,
+    updateBackendUrl,
     connectQR,
     connectPairing,
     disconnectWA,
     updateConfig,
     sendSimulatorMessage,
+    injectViewOnce,
     triggerGroupEvent,
     clearSimulator,
   };
