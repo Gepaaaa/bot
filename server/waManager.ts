@@ -29,7 +29,8 @@ import { groupCache } from './groupCache.ts';
 import { queueEngine } from './queueEngine.ts';
 import { webhookDispatcher } from './webhookDispatcher.ts';
 
-const AUTH_DIR = path.join(process.cwd(), '.baileys_auth');
+const DATA_DIR = process.env.DATA_DIR || process.cwd();
+const AUTH_DIR = path.join(DATA_DIR, '.baileys_auth');
 const silentLogger = pino({ level: 'silent' });
 
 type SessionLaunchOptions =

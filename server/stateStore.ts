@@ -23,7 +23,8 @@ import type {
 import { queueEngine } from './queueEngine.ts';
 import { webhookDispatcher } from './webhookDispatcher.ts';
 
-const STATE_FILE = path.join(process.cwd(), '.bot-state.json');
+const DATA_DIR = process.env.DATA_DIR || process.cwd();
+const STATE_FILE = path.join(DATA_DIR, '.bot-state.json');
 
 export const DEFAULT_WEBHOOK_CONFIG: WebhookConfig = {
   enabled: false,
@@ -286,6 +287,7 @@ class BotStateStore {
 
   public saveToDisk() {
     try {
+      fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
       fs.writeFileSync(
         STATE_FILE,
         JSON.stringify(
