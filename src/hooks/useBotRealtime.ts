@@ -230,11 +230,18 @@ export function useBotRealtime() {
       }
       wsRef.current = ws;
 
+      let pingInterval: ReturnType<typeof setInterval> | null = null;
+
       ws.onopen = () => {
         if (!unmounted) {
           setSocketConnected(true);
           setBackendUnreachable(false);
         }
+        pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 25000);
       };
 
       ws.onmessage = (event) => {
@@ -330,6 +337,10 @@ export function useBotRealtime() {
       };
 
       ws.onclose = () => {
+        if (pingInterval) {
+          clearInterval(pingInterval);
+          pingInterval = null;
+        }
         if (unmounted) return;
         setSocketConnected(false);
         reconnectTimeoutRef.current = setTimeout(connectWs, 3000);

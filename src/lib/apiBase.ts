@@ -20,8 +20,13 @@ export function getStoredBackendUrl(): string {
   }
 }
 
+const DEFAULT_FLY_BACKEND_URL = 'https://bot--ztdpa.fly.dev';
+
 export function getActiveBackendBaseUrl(): string {
-  return getStoredBackendUrl() || getEnvBackendUrl();
+  const explicit = getStoredBackendUrl() || getEnvBackendUrl();
+  if (explicit) return explicit;
+  if (isLikelyStaticFrontendHost()) return DEFAULT_FLY_BACKEND_URL;
+  return '';
 }
 
 export function setStoredBackendUrl(url: string): string {

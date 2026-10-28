@@ -16,6 +16,7 @@ import {
   getOrCreateSampleVideoBuffer,
 } from './server/mediaProcessor.ts';
 import { botStore } from './server/stateStore.ts';
+import { resolveDataDir } from './server/storagePath.ts';
 import { waManager } from './server/waManager.ts';
 import { renderBotTemplate } from './src/shared/commands.ts';
 import type { BotConfig, SimulatorMessage } from './src/shared/types.ts';
@@ -102,14 +103,42 @@ async function startServer() {
 
   wss.on('connection', (ws) => {
     botStore.attachClient(ws);
+    ws.on('message', (raw) => {
+      try {
+        const msg = JSON.parse(String(raw)) as { type?: string };
+        if (msg?.type === 'ping' && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
+        }
+      } catch {
+        // Ignore non-JSON frames
+      }
+    });
   });
+
+  // Keep WebSocket connections alive across Fly.io / cloud proxies (60s idle timeout)
+  const wsHeartbeatInterval = setInterval(() => {
+    for (const client of wss.clients) {
+      if (client.readyState === 1) {
+        try {
+          client.ping();
+        } catch {
+          // Ignore ping error
+        }
+      }
+    }
+  }, 25000);
+  wsHeartbeatInterval.unref();
 
   // --- REST API ROUTES ---
   app.get('/api/health', (_req, res) => {
+    const activeDataDir = resolveDataDir();
     res.json({
       ok: true,
       engine: 'GepaBot Stateful Engine',
       waStatus: botStore.waState.status,
+      uptimeSeconds: Math.floor(process.uptime()),
+      dataDir: activeDataDir,
+      persistentMount: activeDataDir === '/data' || Boolean(process.env.DATA_DIR),
       timestamp: Date.now(),
     });
   });
@@ -928,6 +957,20 @@ async function startServer() {
     console.log(`GepaBot server running on http://0.0.0.0:${PORT}`);
     void waManager.initAutoResume();
   });
+
+  const handleShutdown = async (signal: string) => {
+    console.log(`Received ${signal}, flushing bot state & closing WA socket...`);
+    clearInterval(wsHeartbeatInterval);
+    botStore.saveToDisk();
+    await waManager.shutdownGracefully();
+    server.close(() => {
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(0), 3000).unref();
+  };
+
+  process.on('SIGTERM', () => void handleShutdown('SIGTERM'));
+  process.on('SIGINT', () => void handleShutdown('SIGINT'));
 }
 
 void startServer();

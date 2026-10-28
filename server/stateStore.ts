@@ -21,10 +21,10 @@ import type {
   WebhookConfig,
 } from '../src/shared/types.ts';
 import { queueEngine } from './queueEngine.ts';
+import { resolveDataDir } from './storagePath.ts';
 import { webhookDispatcher } from './webhookDispatcher.ts';
 
-const DATA_DIR = process.env.DATA_DIR || process.cwd();
-const STATE_FILE = path.join(DATA_DIR, '.bot-state.json');
+const STATE_FILE = path.join(resolveDataDir(), '.bot-state.json');
 
 export const DEFAULT_WEBHOOK_CONFIG: WebhookConfig = {
   enabled: false,

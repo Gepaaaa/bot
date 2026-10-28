@@ -27,10 +27,10 @@ import { fetchRemoteBuffer } from './mediaDownloader.ts';
 import { botStore } from './stateStore.ts';
 import { groupCache } from './groupCache.ts';
 import { queueEngine } from './queueEngine.ts';
+import { resolveDataDir } from './storagePath.ts';
 import { webhookDispatcher } from './webhookDispatcher.ts';
 
-const DATA_DIR = process.env.DATA_DIR || process.cwd();
-const AUTH_DIR = path.join(DATA_DIR, '.baileys_auth');
+const AUTH_DIR = path.join(resolveDataDir(), '.baileys_auth');
 const silentLogger = pino({ level: 'silent' });
 
 type SessionLaunchOptions =
@@ -276,6 +276,19 @@ class WhatsAppSessionManager {
     });
   }
 
+  public async shutdownGracefully(): Promise<void> {
+    this.manualDisconnect = true;
+    this.sessionGeneration += 1;
+    this.clearReconnectTimer();
+    this.isStarting = false;
+    this.destroyActiveSocketOnly();
+    try {
+      await this.pendingCredsSave;
+    } catch {
+      // Ignore flush error on exit
+    }
+  }
+
   public normalizePhoneNumber(raw: string): string {
     let digits = raw.replace(/[^0-9]/g, '');
     if (digits.startsWith('08')) {
@@ -385,7 +398,8 @@ class WhatsAppSessionManager {
         qrTimeout: 60000,
         connectTimeoutMs: 60000,
         defaultQueryTimeoutMs: 60000,
-        keepAliveIntervalMs: 25000,
+        keepAliveIntervalMs: 20000,
+        retryRequestDelayMs: 500,
         cachedGroupMetadata: async (jid) => {
           const cached = groupCache.get(jid);
           if (cached) return cached;
@@ -567,7 +581,6 @@ class WhatsAppSessionManager {
 
           if (
             statusCode === DisconnectReason.loggedOut ||
-            statusCode === DisconnectReason.badSession ||
             statusCode === DisconnectReason.multideviceMismatch ||
             statusCode === DisconnectReason.forbidden
           ) {
@@ -591,12 +604,29 @@ class WhatsAppSessionManager {
               pairingCode: null,
               statusMessage: null,
               lastError:
-                'Koneksi digantikan oleh sesi lain yang aktif pada nomor yang sama.',
+                'Koneksi digantikan oleh sesi lain (pastikan hanya 1 mesin/instance bot yang berjalan untuk nomor ini).',
             });
             return;
           }
 
           const paired = this.isDevicePaired(state);
+
+          // Transient 500 (badSession / stream error) on an already paired device: reload disk state & retry before giving up
+          if (statusCode === DisconnectReason.badSession && paired) {
+            this.authContext = null;
+            if (this.reconnectAttempts >= 6) {
+              this.destroyActiveSocketOnly();
+              botStore.updateWAState({
+                status: 'disconnected',
+                qrDataUrl: null,
+                pairingCode: null,
+                statusMessage: null,
+                lastError:
+                  'Sesi mengalami gangguan sinkronisasi berulang (kode 500). Silakan hubungkan kembali.',
+              });
+              return;
+            }
+          }
 
           // Post-pairing 515 restartRequired OR reconnect of an already paired device
           if (
@@ -608,7 +638,7 @@ class WhatsAppSessionManager {
             const delayMs =
               statusCode === DisconnectReason.restartRequired
                 ? 500
-                : Math.min(1500 * this.reconnectAttempts, 8000);
+                : Math.min(1500 * this.reconnectAttempts, 10000);
 
             botStore.updateWAState({
               status: 'connecting',

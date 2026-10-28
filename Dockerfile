@@ -16,6 +16,9 @@ RUN apt-get update && \
 
 WORKDIR /app
 
+# Create /data directory so persistent Fly.io Volume mounts cleanly
+RUN mkdir -p /data
+
 # Copy package manifests and install dependencies (--legacy-peer-deps resolves Vite 8 vs esbuild peer check)
 COPY package*.json ./
 RUN npm install --legacy-peer-deps --no-audit --no-fund
@@ -25,9 +28,10 @@ COPY . .
 RUN npm run build
 
 ENV NODE_ENV=production
-# Fly.io default internal_port is 8080 (server.ts still falls back to 3000 locally when PORT is unset)
 ENV PORT=8080
+ENV DATA_DIR=/data
 
 EXPOSE 8080
 
-CMD ["npx", "tsx", "server.ts"]
+# Run tsx directly without npx wrapper (saves ~90 MB RAM to prevent OOM restarts)
+CMD ["./node_modules/.bin/tsx", "server.ts"]
