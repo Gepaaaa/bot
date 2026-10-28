@@ -5,6 +5,8 @@ import {
   DEFAULT_REACTIONS,
   DEFAULT_TEMPLATES,
   OFFICIAL_OWNER_NUMBER,
+  sanitizeBotConfig,
+  sanitizeLogs,
 } from '../src/shared/commands.ts';
 import type {
   AntiBanConfig,
@@ -164,10 +166,6 @@ const INITIAL_MESSAGES: SimulatorMessage[] = [
   },
 ];
 
-function hasLegacyBranding(value?: string): boolean {
-  if (!value) return false;
-  return /gepa/i.test(value);
-}
 
 class BotStateStore {
   public waState: WAConnectionState = {
@@ -226,7 +224,7 @@ class BotStateStore {
         let migrated = false;
 
         if (raw.config) {
-          this.config = {
+          const mergedConfig: BotConfig = {
             ...DEFAULT_CONFIG,
             ...raw.config,
             reactions: {
@@ -259,68 +257,9 @@ class BotStateStore {
               : [...DEFAULT_AUTORESPONDER_RULES],
           };
 
-          // Clean up any legacy persisted identity strings automatically
-          if (hasLegacyBranding(this.config.botName)) {
-            this.config.botName = DEFAULT_CONFIG.botName;
-            migrated = true;
-          }
-          if (hasLegacyBranding(this.config.ownerName)) {
-            this.config.ownerName = DEFAULT_CONFIG.ownerName;
-            migrated = true;
-          }
-          if (hasLegacyBranding(this.config.ownerWebsite)) {
-            this.config.ownerWebsite = DEFAULT_CONFIG.ownerWebsite;
-            migrated = true;
-          }
-          if (hasLegacyBranding(this.config.stickerPackName)) {
-            this.config.stickerPackName = DEFAULT_CONFIG.stickerPackName;
-            migrated = true;
-          }
-          if (hasLegacyBranding(this.config.stickerAuthor)) {
-            this.config.stickerAuthor = DEFAULT_CONFIG.stickerAuthor;
-            migrated = true;
-          }
-
-          const currentOwner = (this.config.antiBan.ownerNumber || '').replace(
-            /[^0-9]/g,
-            ''
-          );
-          if (!currentOwner || currentOwner === '628129000111') {
-            this.config.antiBan.ownerNumber = OFFICIAL_OWNER_NUMBER;
-            migrated = true;
-          }
-
-          // Upgrade legacy menu/ping templates so the new clean menu takes effect immediately
-          const legacyMenuHeader =
-            hasLegacyBranding(this.config.templates.menuHeader) ||
-            this.config.templates.menuHeader.includes('Pack Stiker: *{packName}*');
-          if (legacyMenuHeader) {
-            this.config.templates.menuHeader = DEFAULT_TEMPLATES.menuHeader;
-            migrated = true;
-          }
-          const legacyMenuFooter =
-            hasLegacyBranding(this.config.templates.menuFooter) ||
-            this.config.templates.menuFooter.includes('Dibuat untuk ekosistem');
-          if (legacyMenuFooter) {
-            this.config.templates.menuFooter = DEFAULT_TEMPLATES.menuFooter;
-            migrated = true;
-          }
-          const legacyPing =
-            hasLegacyBranding(this.config.templates.pingReply) ||
-            this.config.templates.pingReply.includes('Pack Stiker: *{packName}*');
-          if (legacyPing) {
-            this.config.templates.pingReply = DEFAULT_TEMPLATES.pingReply;
-            migrated = true;
-          }
-
-          const cleanedRules = (this.config.autoResponder || []).filter(
-            (r) => !hasLegacyBranding(r.replyText) && !hasLegacyBranding(r.trigger)
-          );
-          if (cleanedRules.length !== (this.config.autoResponder || []).length) {
-            const hasOwnerRule = cleanedRules.some((r) => r.trigger === 'owner');
-            this.config.autoResponder = hasOwnerRule
-              ? cleanedRules
-              : [...cleanedRules, DEFAULT_AUTORESPONDER_RULES[1]];
+          const { config: cleanedCfg, changed } = sanitizeBotConfig(mergedConfig);
+          this.config = cleanedCfg;
+          if (changed) {
             migrated = true;
           }
         }
@@ -337,20 +276,11 @@ class BotStateStore {
         }
 
         if (Array.isArray(raw.logs)) {
-          const sanitizedLogs: CommandExecutionLog[] = [];
-          for (const l of raw.logs as CommandExecutionLog[]) {
-            if (hasLegacyBranding(l.summary)) {
-              migrated = true;
-              continue;
-            }
-            if (hasLegacyBranding(l.sender)) {
-              sanitizedLogs.push({ ...l, sender: 'Kamu (Owner)' });
-              migrated = true;
-            } else {
-              sanitizedLogs.push(l);
-            }
+          const cleanedLogs = sanitizeLogs(raw.logs as CommandExecutionLog[]);
+          if (cleanedLogs.length !== raw.logs.length) {
+            migrated = true;
           }
-          this.logs = sanitizedLogs.slice(0, 60);
+          this.logs = cleanedLogs.slice(0, 60);
         }
 
         if (migrated) {
@@ -475,6 +405,7 @@ class BotStateStore {
           ? patch.autoResponder
           : this.config.autoResponder,
     };
+    this.config = sanitizeBotConfig(this.config).config;
     this.saveToDisk();
     this.broadcast('config:update', this.config);
     return this.config;

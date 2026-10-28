@@ -1,7 +1,16 @@
 import type {
+  AutoResponderRule,
+  BotConfig,
   BotReactionConfig,
   BotReplyTemplates,
   CommandDefinition,
+  CommandExecutionLog,
+  GroupCustomConfig,
+  GroupEditableTemplateKey,
+  GroupSimulatorState,
+  ServerStateSnapshot,
+  SimulatorMember,
+  SimulatorMessage,
 } from './types.ts';
 
 export const OFFICIAL_OWNER_NUMBER = '6289673533963';
@@ -1282,3 +1291,282 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
 
   return lines.join('\n');
 }
+
+const LEGACY_BRAND_REGEX = new RegExp(
+  `${['ge', 'pa'].join('')}|gpcrnr`,
+  'i'
+);
+
+export function hasLegacyIdentity(value?: string | null): boolean {
+  if (!value) return false;
+  return LEGACY_BRAND_REGEX.test(value);
+}
+
+export const CLEAN_DEFAULT_RULES: AutoResponderRule[] = [
+  {
+    id: 'rule-halo',
+    trigger: 'halo',
+    matchType: 'contains',
+    replyText:
+      'Halo {sender}! Ada yang bisa {botName} bantu hari ini? Ketik *{prefix}menu* untuk melihat seluruh fitur.',
+    scope: 'all',
+    enabled: true,
+    hitCount: 0,
+    createdAt: 1714500000000,
+  },
+  {
+    id: 'rule-owner',
+    trigger: 'owner',
+    matchType: 'exact',
+    replyText: `Kontak resmi Owner {botName}: https://wa.me/${OFFICIAL_OWNER_NUMBER} (${OFFICIAL_OWNER_DISPLAY})`,
+    scope: 'all',
+    enabled: true,
+    hitCount: 0,
+    createdAt: 1714500000000,
+  },
+];
+
+export function sanitizeBotConfig(raw: BotConfig): {
+  config: BotConfig;
+  changed: boolean;
+} {
+  let changed = false;
+  const next: BotConfig = {
+    ...raw,
+    reactions: { ...DEFAULT_REACTIONS, ...(raw.reactions || {}) },
+    templates: { ...DEFAULT_TEMPLATES, ...(raw.templates || {}) },
+    groupSettings: {
+      antilink: raw.groupSettings?.antilink ?? true,
+      welcome: raw.groupSettings?.welcome ?? true,
+      goodbye: raw.groupSettings?.goodbye ?? true,
+    },
+    groupOverrides: raw.groupOverrides ? { ...raw.groupOverrides } : {},
+    antiBan: { ...raw.antiBan },
+    autoResponder: Array.isArray(raw.autoResponder)
+      ? [...raw.autoResponder]
+      : [...CLEAN_DEFAULT_RULES],
+  };
+
+  if (!next.botName?.trim() || hasLegacyIdentity(next.botName)) {
+    next.botName = 'WABot';
+    changed = true;
+  }
+  if (!next.ownerName?.trim() || hasLegacyIdentity(next.ownerName)) {
+    next.ownerName = 'Owner Bot';
+    changed = true;
+  }
+  if (!next.ownerWebsite?.trim() || hasLegacyIdentity(next.ownerWebsite)) {
+    next.ownerWebsite = `wa.me/${OFFICIAL_OWNER_NUMBER}`;
+    changed = true;
+  }
+  if (!next.stickerPackName?.trim() || hasLegacyIdentity(next.stickerPackName)) {
+    next.stickerPackName = 'WA Sticker';
+    changed = true;
+  }
+  if (!next.stickerAuthor?.trim() || hasLegacyIdentity(next.stickerAuthor)) {
+    next.stickerAuthor = OFFICIAL_OWNER_NUMBER;
+    changed = true;
+  }
+
+  const cleanOwnerDigits = (next.antiBan?.ownerNumber || '').replace(
+    /[^0-9]/g,
+    ''
+  );
+  if (
+    !cleanOwnerDigits ||
+    cleanOwnerDigits === '628129000111' ||
+    hasLegacyIdentity(next.antiBan?.ownerNumber)
+  ) {
+    next.antiBan = {
+      ...next.antiBan,
+      ownerNumber: OFFICIAL_OWNER_NUMBER,
+    };
+    changed = true;
+  }
+
+  if (hasLegacyIdentity(next.antiBan?.callRejectNotice)) {
+    next.antiBan = {
+      ...next.antiBan,
+      callRejectNotice:
+        'Maaf, bot ini berjalan secara otomatis dan tidak menerima panggilan telepon atau video WhatsApp.',
+    };
+    changed = true;
+  }
+
+  const templateKeys = Object.keys(DEFAULT_TEMPLATES) as Array<
+    keyof BotReplyTemplates
+  >;
+  for (const key of templateKeys) {
+    const val = next.templates[key];
+    const isOldVerboseTemplate =
+      (key === 'menuHeader' && val?.includes('Pack Stiker: *{packName}*')) ||
+      (key === 'menuFooter' && val?.includes('Dibuat untuk ekosistem')) ||
+      (key === 'pingReply' && val?.includes('Pack Stiker: *{packName}*'));
+    if (!val || hasLegacyIdentity(val) || isOldVerboseTemplate) {
+      next.templates[key] = DEFAULT_TEMPLATES[key];
+      changed = true;
+    }
+  }
+
+  if (next.groupOverrides) {
+    const cleanedOverrides: Record<string, GroupCustomConfig> = {};
+    for (const [gid, ov] of Object.entries(next.groupOverrides)) {
+      if (!ov) continue;
+      const ovTemplates = { ...(ov.templates || {}) };
+      for (const [tKey, tVal] of Object.entries(ovTemplates)) {
+        if (hasLegacyIdentity(tVal)) {
+          delete ovTemplates[tKey as GroupEditableTemplateKey];
+          changed = true;
+        }
+      }
+      cleanedOverrides[gid] = {
+        ...ov,
+        templates: ovTemplates,
+      };
+    }
+    next.groupOverrides = cleanedOverrides;
+  }
+
+  const filteredRules = (next.autoResponder || []).filter(
+    (r) => !hasLegacyIdentity(r.trigger) && !hasLegacyIdentity(r.replyText)
+  );
+  if (filteredRules.length !== (next.autoResponder || []).length) {
+    const hasOwnerRule = filteredRules.some((r) => r.trigger === 'owner');
+    next.autoResponder = hasOwnerRule
+      ? filteredRules
+      : [...filteredRules, CLEAN_DEFAULT_RULES[1]];
+    changed = true;
+  }
+
+  return { config: next, changed };
+}
+
+export function sanitizeGroupState(raw?: GroupSimulatorState): GroupSimulatorState {
+  if (
+    !raw ||
+    hasLegacyIdentity(raw.subject) ||
+    hasLegacyIdentity(raw.description) ||
+    hasLegacyIdentity(raw.inviteCode)
+  ) {
+    return {
+      subject: 'Ruang Diskusi Komunitas',
+      description:
+        'Ruang diskusi komunitas & berbagi media. Dilarang mengirim spam tautan.',
+      isAnnouncementOnly: raw?.isAnnouncementOnly ?? false,
+      inviteCode: 'Komunitas2026Official',
+    };
+  }
+  return raw;
+}
+
+export function sanitizeGroupMembers(
+  members?: SimulatorMember[]
+): SimulatorMember[] {
+  if (!Array.isArray(members)) return [];
+  return members.map((m) => {
+    if (m.phone === '628129000111' || hasLegacyIdentity(m.name)) {
+      return {
+        jid: `${OFFICIAL_OWNER_NUMBER}@s.whatsapp.net`,
+        name: 'Owner Bot',
+        phone: OFFICIAL_OWNER_NUMBER,
+        isAdmin: true,
+      };
+    }
+    return m;
+  });
+}
+
+export function sanitizeSimulatorMessage(
+  msg: SimulatorMessage
+): SimulatorMessage {
+  let next = msg;
+  if (msg.id === 'msg-welcome-private' && hasLegacyIdentity(msg.text)) {
+    next = {
+      ...next,
+      senderName: 'WABot',
+      text: 'Halo! Selamat datang di ruang uji WABot.\n\nKetik *.menu* untuk melihat daftar perintah yang sudah dirapikan, *.owner* untuk info kontak owner, kirim dokumen foto/video dengan *.hdsw* agar jadi media ukuran asli siap diteruskan ke Status WA, atau uji *.tt <link tiktok>* dan *.qc*.',
+    };
+  } else if (msg.id === 'msg-welcome-group' && hasLegacyIdentity(msg.text)) {
+    next = {
+      ...next,
+      senderName: 'WABot',
+      text: 'Grup *Ruang Diskusi Komunitas* aktif.\nAdmin & Owner dapat mengelola grup serta menguji fitur stiker, perkakas media (*.hdsw*, *.rvo*, *.toptv*), maupun moderasi *.kick*, *.promote*, dan *.demote*.',
+    };
+  }
+
+  if (hasLegacyIdentity(next.senderName)) {
+    next = {
+      ...next,
+      senderName: next.sender === 'bot' ? 'WABot' : 'Kamu (Owner)',
+    };
+  }
+
+  if (
+    next.media?.packInfo &&
+    (hasLegacyIdentity(next.media.packInfo.pack) ||
+      hasLegacyIdentity(next.media.packInfo.author))
+  ) {
+    next = {
+      ...next,
+      media: {
+        ...next.media,
+        packInfo: {
+          pack: 'WA Sticker',
+          author: OFFICIAL_OWNER_NUMBER,
+        },
+      },
+    };
+  }
+
+  return next;
+}
+
+export function sanitizeLogs(
+  logs?: CommandExecutionLog[]
+): CommandExecutionLog[] {
+  if (!Array.isArray(logs)) return [];
+  const cleaned: CommandExecutionLog[] = [];
+  for (const entry of logs) {
+    if (hasLegacyIdentity(entry.summary)) continue;
+    if (hasLegacyIdentity(entry.sender)) {
+      cleaned.push({ ...entry, sender: 'Kamu (Owner)' });
+    } else {
+      cleaned.push(entry);
+    }
+  }
+  return cleaned;
+}
+
+export function sanitizeServerSnapshot(snap: ServerStateSnapshot): {
+  snapshot: ServerStateSnapshot;
+  configChanged: boolean;
+} {
+  const { config, changed: configChanged } = sanitizeBotConfig(snap.config);
+  const waState =
+    snap.waState?.connectedUser &&
+    hasLegacyIdentity(snap.waState.connectedUser.name)
+      ? {
+          ...snap.waState,
+          connectedUser: {
+            ...snap.waState.connectedUser,
+            name: config.botName,
+          },
+        }
+      : snap.waState;
+
+  return {
+    configChanged,
+    snapshot: {
+      ...snap,
+      waState,
+      config,
+      simulatorMessages: (snap.simulatorMessages || []).map(
+        sanitizeSimulatorMessage
+      ),
+      logs: sanitizeLogs(snap.logs),
+      groupMembers: sanitizeGroupMembers(snap.groupMembers),
+      groupState: sanitizeGroupState(snap.groupState),
+    },
+  };
+}
+

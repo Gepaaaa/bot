@@ -78,6 +78,11 @@ export default function App() {
     }
   }, [darkMode]);
 
+  useEffect(() => {
+    const cleanTitleName = config.botName?.trim() || 'WABot';
+    document.title = `${cleanTitleName} — WhatsApp Multi-Feature Bot & Control Panel`;
+  }, [config.botName]);
+
   const lockedCount = COMMAND_CATALOG.filter((c) => c.suspensionRisk).length;
   const activeCommandCount =
     COMMAND_CATALOG.length - lockedCount - config.disabledCommands.length;

@@ -2,8 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_REACTIONS,
   DEFAULT_TEMPLATES,
+  hasLegacyIdentity,
   OFFICIAL_OWNER_DISPLAY,
   OFFICIAL_OWNER_NUMBER,
+  sanitizeBotConfig,
+  sanitizeGroupMembers,
+  sanitizeGroupState,
+  sanitizeLogs,
+  sanitizeServerSnapshot,
+  sanitizeSimulatorMessage,
 } from '../shared/commands.ts';
 import {
   buildApiUrl,
@@ -168,19 +175,12 @@ export function useBotRealtime() {
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncedCleanBackendsRef = useRef<Set<string>>(new Set());
 
-  const applySnapshot = useCallback((snap: ServerStateSnapshot) => {
+  const applySnapshot = useCallback((rawSnap: ServerStateSnapshot) => {
+    const { snapshot: snap, configChanged } = sanitizeServerSnapshot(rawSnap);
     setWaState(snap.waState);
-    setConfig({
-      ...snap.config,
-      reactions: { ...DEFAULT_REACTIONS, ...(snap.config.reactions || {}) },
-      templates: { ...DEFAULT_TEMPLATES, ...(snap.config.templates || {}) },
-      groupSettings: {
-        antilink: snap.config.groupSettings?.antilink ?? true,
-        welcome: snap.config.groupSettings?.welcome ?? true,
-        goodbye: snap.config.groupSettings?.goodbye ?? true,
-      },
-    });
+    setConfig(snap.config);
     setMessages(snap.simulatorMessages);
     setLogs(snap.logs);
     setGroupMembers(snap.groupMembers);
@@ -199,6 +199,16 @@ export function useBotRealtime() {
     }
     setBackendUnreachable(false);
     setIsLoadingInitial(false);
+
+    const targetApiUrl = buildApiUrl('/api/config');
+    if (configChanged && !syncedCleanBackendsRef.current.has(targetApiUrl)) {
+      syncedCleanBackendsRef.current.add(targetApiUrl);
+      void fetch(targetApiUrl, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(snap.config),
+      }).catch(() => {});
+    }
   }, []);
 
   const fetchSnapshot = useCallback(async () => {
@@ -260,27 +270,26 @@ export function useBotRealtime() {
             case 'state:init':
               applySnapshot(parsed.payload as ServerStateSnapshot);
               break;
-            case 'wa:update':
-              setWaState(parsed.payload as WAConnectionState);
+            case 'wa:update': {
+              const incomingWa = parsed.payload as WAConnectionState;
+              setWaState(
+                incomingWa.connectedUser &&
+                  hasLegacyIdentity(incomingWa.connectedUser.name)
+                  ? {
+                      ...incomingWa,
+                      connectedUser: {
+                        ...incomingWa.connectedUser,
+                        name: 'WABot',
+                      },
+                    }
+                  : incomingWa
+              );
               break;
+            }
             case 'config:update': {
               const incomingCfg = parsed.payload as BotConfig;
-              setConfig({
-                ...incomingCfg,
-                reactions: {
-                  ...DEFAULT_REACTIONS,
-                  ...(incomingCfg.reactions || {}),
-                },
-                templates: {
-                  ...DEFAULT_TEMPLATES,
-                  ...(incomingCfg.templates || {}),
-                },
-                groupSettings: {
-                  antilink: incomingCfg.groupSettings?.antilink ?? true,
-                  welcome: incomingCfg.groupSettings?.welcome ?? true,
-                  goodbye: incomingCfg.groupSettings?.goodbye ?? true,
-                },
-              });
+              const { config: cleanedCfg } = sanitizeBotConfig(incomingCfg);
+              setConfig(cleanedCfg);
               break;
             }
             case 'group:update': {
@@ -289,37 +298,50 @@ export function useBotRealtime() {
                 groupState?: GroupSimulatorState;
               };
               if (groupPayload.groupMembers) {
-                setGroupMembers(groupPayload.groupMembers);
+                setGroupMembers(sanitizeGroupMembers(groupPayload.groupMembers));
               }
               if (groupPayload.groupState) {
-                setGroupState(groupPayload.groupState);
+                setGroupState(sanitizeGroupState(groupPayload.groupState));
               }
               break;
             }
             case 'simulator:message': {
-              const incoming = parsed.payload as SimulatorMessage;
+              const incoming = sanitizeSimulatorMessage(
+                parsed.payload as SimulatorMessage
+              );
               setMessages((prev) =>
                 prev.some((m) => m.id === incoming.id) ? prev : [...prev, incoming]
               );
               break;
             }
             case 'simulator:update_message': {
-              const updated = parsed.payload as SimulatorMessage;
+              const updated = sanitizeSimulatorMessage(
+                parsed.payload as SimulatorMessage
+              );
               setMessages((prev) =>
                 prev.map((m) => (m.id === updated.id ? updated : m))
               );
               break;
             }
             case 'simulator:reset':
-              setMessages(parsed.payload as SimulatorMessage[]);
+              setMessages(
+                ((parsed.payload as SimulatorMessage[]) || []).map(
+                  sanitizeSimulatorMessage
+                )
+              );
               break;
             case 'log:new': {
-              const entry = parsed.payload as CommandExecutionLog;
-              setLogs((prev) =>
-                prev.some((l) => l.id === entry.id)
-                  ? prev
-                  : [entry, ...prev].slice(0, 60)
-              );
+              const cleaned = sanitizeLogs([
+                parsed.payload as CommandExecutionLog,
+              ]);
+              if (cleaned.length > 0) {
+                const entry = cleaned[0];
+                setLogs((prev) =>
+                  prev.some((l) => l.id === entry.id)
+                    ? prev
+                    : [entry, ...prev].slice(0, 60)
+                );
+              }
               break;
             }
             case 'stats:update':

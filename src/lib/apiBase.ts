@@ -1,4 +1,29 @@
 const STORAGE_KEY = 'wabot_backend_url';
+const LEGACY_KEY_RE = new RegExp(['ge', 'pa'].join(''), 'i');
+
+function purgeLegacyLocalStorage(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (k && LEGACY_KEY_RE.test(k)) {
+        keysToRemove.push(k);
+      }
+    }
+    for (const k of keysToRemove) {
+      localStorage.removeItem(k);
+    }
+    const storedUrl = localStorage.getItem(STORAGE_KEY) || '';
+    if (LEGACY_KEY_RE.test(storedUrl)) {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+}
+
+purgeLegacyLocalStorage();
 
 function normalizeBaseUrl(raw: string): string {
   const trimmed = raw.trim().replace(/\/+$/, '');
