@@ -134,7 +134,7 @@ async function startServer() {
     const activeDataDir = resolveDataDir();
     res.json({
       ok: true,
-      engine: 'GepaBot Stateful Engine',
+      engine: 'WABot Stateful Engine',
       waStatus: botStore.waState.status,
       uptimeSeconds: Math.floor(process.uptime()),
       dataDir: activeDataDir,
@@ -306,7 +306,7 @@ async function startServer() {
             : 'mp4';
         res.setHeader(
           'Content-Disposition',
-          `attachment; filename="gepabot-${Date.now()}.${ext}"`
+          `attachment; filename="wabot-${Date.now()}.${ext}"`
         );
       }
 
@@ -529,7 +529,7 @@ async function startServer() {
       } else if (useSampleHdDoc) {
         const catBuf = await loadSampleCatBuffer();
         if (catBuf) {
-          const resolvedName = 'GepaCorner-Portrait-RAW-Original.jpg';
+          const resolvedName = 'Portrait-RAW-Original.jpg';
           const resolvedMime = 'image/jpeg';
           const storedDocUrl = botStore.storeHdMedia(
             catBuf,
@@ -710,10 +710,15 @@ async function startServer() {
         return;
       }
 
+      const configuredOwner =
+        (botStore.config.antiBan?.ownerNumber || '6289673533963').replace(
+          /[^0-9]/g,
+          ''
+        ) || '6289673533963';
       const senderName = isMemberSimulation
         ? 'Nadia Putri (Member)'
-        : 'Kamu (Gepa)';
-      const senderPhone = isMemberSimulation ? '628577000333' : '628129000111';
+        : 'Kamu (Owner)';
+      const senderPhone = isMemberSimulation ? '628577000333' : configuredOwner;
       const isAdmin = !isMemberSimulation;
 
       const pendingReaction = shouldSendPendingReaction(text)
@@ -831,7 +836,7 @@ async function startServer() {
               type: 'sticker',
               url: botResult.stickerWebUrl,
               mimeType: 'image/webp',
-              fileName: 'gepa-corner-sticker.webp',
+              fileName: 'wabot-sticker.webp',
               packInfo: botResult.stickerPackOverride || {
                 pack: botStore.config.stickerPackName,
                 author: botStore.config.stickerAuthor,
@@ -851,14 +856,14 @@ async function startServer() {
               type: 'image',
               url: botResult.imageWebUrl,
               mimeType: botResult.imageMimeType || 'image/jpeg',
-              fileName: 'gepabot-image.jpg',
+              fileName: 'wabot-image.jpg',
             };
           } else if (botResult.videoWebUrl) {
             resolvedMedia = {
               type: botResult.asPtv ? 'ptv' : 'video',
               url: botResult.videoWebUrl,
               mimeType: botResult.videoMimeType || 'video/mp4',
-              fileName: botResult.asPtv ? 'video-note.mp4' : 'gepabot-video.mp4',
+              fileName: botResult.asPtv ? 'video-note.mp4' : 'wabot-video.mp4',
               title: botResult.mediaTitle,
             };
           } else if (botResult.audioWebUrl) {
@@ -868,7 +873,7 @@ async function startServer() {
               mimeType: botResult.audioMimeType || 'audio/mpeg',
               fileName: botResult.asVoiceNote
                 ? 'voice-note.ogg'
-                : 'gepabot-audio.mp3',
+                : 'wabot-audio.mp3',
               title: botResult.mediaTitle,
             };
           } else if (botResult.documentWebUrl) {
@@ -884,7 +889,7 @@ async function startServer() {
               type: 'video',
               url: botResult.videoProxyUrl,
               mimeType: 'video/mp4',
-              fileName: 'gepabot-video.mp4',
+              fileName: 'wabot-video.mp4',
               title: botResult.mediaTitle,
               author: botResult.mediaAuthor,
               duration: botResult.mediaDuration,
@@ -894,7 +899,7 @@ async function startServer() {
               type: 'audio',
               url: botResult.audioProxyUrl,
               mimeType: 'audio/mpeg',
-              fileName: 'gepabot-audio.mp3',
+              fileName: 'wabot-audio.mp3',
               title: botResult.mediaTitle,
               author: botResult.mediaAuthor,
               duration: botResult.mediaDuration,
@@ -954,7 +959,7 @@ async function startServer() {
   }
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`GepaBot server running on http://0.0.0.0:${PORT}`);
+    console.log(`WABot server running on http://0.0.0.0:${PORT}`);
     void waManager.initAutoResume();
   });
 

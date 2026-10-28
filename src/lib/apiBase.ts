@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'gepabot_backend_url';
+const STORAGE_KEY = 'wabot_backend_url';
 
 function normalizeBaseUrl(raw: string): string {
   const trimmed = raw.trim().replace(/\/+$/, '');

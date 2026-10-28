@@ -2,6 +2,8 @@ import sharp from 'sharp';
 import {
   buildBotMenuText,
   COMMAND_CATALOG,
+  formatPhoneDisplay,
+  OFFICIAL_OWNER_NUMBER,
   renderBotTemplate,
   SUSPENSION_RISK_DISABLED_REPLY,
 } from '../src/shared/commands.ts';
@@ -206,8 +208,19 @@ const groupActionLastRun = new Map<string, number>();
 // Per-sender anti-ban spam guard on real WhatsApp (prevents command flood bans)
 const senderLastCmdRun = new Map<string, number>();
 
+function isSenderBotOwner(ctx: IncomingBotContext): boolean {
+  const configuredOwner = normalizePhoneInput(
+    botStore.config.antiBan?.ownerNumber || OFFICIAL_OWNER_NUMBER
+  );
+  const senderNormalized = normalizePhoneInput(ctx.senderPhone || '');
+  return Boolean(
+    configuredOwner && senderNormalized && configuredOwner === senderNormalized
+  );
+}
+
 function checkSenderRateLimit(ctx: IncomingBotContext): boolean {
   if (ctx.source !== 'whatsapp') return false;
+  if (isSenderBotOwner(ctx)) return false;
   const senderKey = ctx.senderJid || ctx.senderPhone;
   if (!senderKey) return false;
   const now = Date.now();
@@ -343,10 +356,14 @@ function buildMenuText(
   senderName?: string
 ): string {
   const { config } = botStore;
+  const ownerDigits =
+    normalizePhoneInput(config.antiBan?.ownerNumber || OFFICIAL_OWNER_NUMBER) ||
+    OFFICIAL_OWNER_NUMBER;
   return buildBotMenuText({
     prefix: config.prefix,
     botName: config.botName,
     ownerName: config.ownerName,
+    ownerNumber: ownerDigits,
     ownerWebsite: config.ownerWebsite,
     stickerPackName: config.stickerPackName,
     stickerAuthor: config.stickerAuthor,
@@ -539,9 +556,9 @@ export async function processBotMessage(
   });
 
   const ensureSenderGroupAdmin = (): BotCommandResult | null => {
-    if (!ctx.isAdmin) {
+    if (!ctx.isAdmin && !isSenderBotOwner(ctx)) {
       return failReply(
-        `Hanya *Admin Grup* yang diizinkan menjalankan perintah *${config.prefix}${matchedCmd.id}*.`
+        `Hanya *Admin Grup* atau *Owner Bot* yang diizinkan menjalankan perintah *${config.prefix}${matchedCmd.id}*.`
       );
     }
     return null;
@@ -749,9 +766,35 @@ export async function processBotMessage(
         break;
       }
 
+      case 'owner': {
+        const ownerDigits =
+          normalizePhoneInput(
+            config.antiBan?.ownerNumber || OFFICIAL_OWNER_NUMBER
+          ) || OFFICIAL_OWNER_NUMBER;
+        const ownerDisplay = formatPhoneDisplay(ownerDigits);
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          replyText: [
+            `*Kontak Resmi Owner ${config.botName}*`,
+            '────────────────────',
+            `• *Nama:* ${config.ownerName || 'Owner Bot'}`,
+            `• *Nomor:* *${ownerDisplay}*`,
+            `• *Chat Langsung:* https://wa.me/${ownerDigits}`,
+            '────────────────────',
+            `_Silakan hubungi nomor di atas untuk keperluan izin grup atau kendala bot._`,
+          ].join('\n'),
+        };
+        break;
+      }
+
       case 'ping': {
         const latency = Math.max(1, Date.now() - startTime);
         const uptime = formatUptime(Date.now() - SERVER_BOOT_TIME);
+        const ownerDigits =
+          normalizePhoneInput(
+            config.antiBan?.ownerNumber || OFFICIAL_OWNER_NUMBER
+          ) || OFFICIAL_OWNER_NUMBER;
         result = {
           handled: true,
           reactionStatus: 'success',
@@ -762,6 +805,9 @@ export async function processBotMessage(
             prefix: config.prefix,
             packName: config.stickerPackName,
             authorName: config.stickerAuthor,
+            ownerNumber: ownerDigits,
+            ownerDisplay: formatPhoneDisplay(ownerDigits),
+            website: config.ownerWebsite,
           }),
         };
         break;
@@ -913,7 +959,7 @@ export async function processBotMessage(
         const webUrl = botStore.storeHdMedia(
           enhanced.buffer,
           'image/jpeg',
-          'gepabot-hd-upscale.jpg'
+          'wabot-hd-upscale.jpg'
         );
         botStore.incrementStat('mediaDownloaded');
         result = {
@@ -962,7 +1008,7 @@ export async function processBotMessage(
         const webUrl = botStore.storeHdMedia(
           outBuf,
           'image/jpeg',
-          `gepabot-${filterMode}.jpg`
+          `wabot-${filterMode}.jpg`
         );
         result = {
           handled: true,
@@ -1060,7 +1106,7 @@ export async function processBotMessage(
       case 'qrcode': {
         if (!argsText && !ctx.quotedText) {
           return failReply(
-            `Ketik teks atau tautan setelah perintah.\nContoh: *${config.prefix}qrcode https://gepacorner.my.id*`
+            `Ketik teks atau tautan setelah perintah.\nContoh: *${config.prefix}qrcode https://wa.me/${OFFICIAL_OWNER_NUMBER}*`
           );
         }
         const targetStr = argsText || ctx.quotedText || '';
@@ -1257,7 +1303,7 @@ export async function processBotMessage(
         const webUrl = botStore.storeHdMedia(
           converted.buffer,
           converted.mimeType,
-          `gepabot-audio.${converted.ext}`
+          `wabot-audio.${converted.ext}`
         );
         result = {
           handled: true,
@@ -1291,7 +1337,7 @@ export async function processBotMessage(
         const webUrl = botStore.storeHdMedia(
           processed.buffer,
           processed.mimeType,
-          `gepabot-${effectMode}.mp3`
+          `wabot-${effectMode}.mp3`
         );
         result = {
           handled: true,
@@ -1569,7 +1615,7 @@ export async function processBotMessage(
         }
         const parts = argsText.split('|');
         const newPack =
-          (parts[0] || '').trim() || config.stickerPackName || 'Gepa Corner';
+          (parts[0] || '').trim() || config.stickerPackName || 'WA Sticker';
         const newAuthor =
           (parts.slice(1).join('|') || '').trim() ||
           ctx.senderName ||
@@ -1871,7 +1917,7 @@ export async function processBotMessage(
 
         if (!argsText) {
           return failReply(
-            `Masukkan nama grup baru.\nContoh: *${config.prefix}setname Gepa Corner Official*`
+            `Masukkan nama grup baru.\nContoh: *${config.prefix}setname Ruang Diskusi Komunitas*`
           );
         }
 
@@ -1906,7 +1952,7 @@ export async function processBotMessage(
 
         if (!argsText) {
           return failReply(
-            `Masukkan teks deskripsi baru.\nContoh: *${config.prefix}setdesc Diskusi santai komunitas Gepa Corner*`
+            `Masukkan teks deskripsi baru.\nContoh: *${config.prefix}setdesc Ruang diskusi santai anggota komunitas*`
           );
         }
 
@@ -1979,7 +2025,7 @@ export async function processBotMessage(
         if (ctx.waGroupOps) {
           newCode = await ctx.waGroupOps.revokeGroupInviteCode();
         } else {
-          newCode = `GpCrnr${Math.random()
+          newCode = `Invite${Math.random()
             .toString(36)
             .slice(2, 10)
             .toUpperCase()}`;

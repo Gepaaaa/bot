@@ -25,8 +25,9 @@ import type {
   SimulatorMessage,
 } from '../shared/types.ts';
 import type { SendSimulatorPayload } from '../hooks/useBotRealtime.ts';
+import { OFFICIAL_OWNER_NUMBER } from '../shared/commands.ts';
 import { resolveBackendMediaUrl } from '../lib/apiBase.ts';
-import { ResilientImage, SAMPLE_CAT_IMAGE_URL } from './GepaAvatar.tsx';
+import { ResilientImage, SAMPLE_CAT_IMAGE_URL } from './BrandMedia.tsx';
 
 interface ChatSimulatorViewProps {
   config: BotConfig;
@@ -554,7 +555,7 @@ export function ChatSimulatorView({
         <div className="px-5 py-4 border-b border-zinc-200/80 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 rounded-xl bg-emerald-600/10 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 flex items-center justify-center font-display font-bold text-sm shrink-0">
-              {chatMode === 'private' ? 'GB' : 'GC'}
+              {chatMode === 'private' ? 'WB' : 'GC'}
             </div>
             <div className="min-w-0">
               <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
@@ -737,7 +738,7 @@ export function ChatSimulatorView({
                     <div className="flex items-center gap-2 text-xs text-rose-700 dark:text-rose-400 italic">
                       <Trash2 className="w-3.5 h-3.5 shrink-0" />
                       <span>
-                        Pesan tautan dihapus otomatis oleh GepaBot Antilink
+                        Pesan tautan dihapus otomatis oleh {config.botName} Antilink
                       </span>
                     </div>
                   ) : (
@@ -898,7 +899,7 @@ export function ChatSimulatorView({
                           >
                             <ResilientImage
                               src={msg.media.url}
-                              alt="Stiker WebP GepaBot"
+                              alt="Stiker WebP"
                               className="w-40 h-40 object-contain"
                               fallbackLabel="Stiker WebP"
                             />
@@ -912,7 +913,7 @@ export function ChatSimulatorView({
                             <span aria-hidden="true">·</span>
                             <a
                               href={mediaUrl}
-                              download={msg.media.fileName || 'gepa-sticker.webp'}
+                              download={msg.media.fileName || 'wabot-sticker.webp'}
                               className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 hover:underline font-medium whitespace-nowrap"
                             >
                               <Download className="w-3 h-3" />
@@ -1065,7 +1066,7 @@ export function ChatSimulatorView({
                   {/* Floating Emoji Reaction Badge */}
                   {msg.reaction && (
                     <div
-                      title="Reaksi dari GepaBot"
+                      title="Reaksi otomatis bot"
                       className={`absolute -bottom-3 ${
                         isUser ? 'right-3' : 'left-3'
                       } px-2 py-0.5 rounded-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-xs leading-none select-none shadow-xs`}
@@ -1146,7 +1147,7 @@ export function ChatSimulatorView({
                     <div className="font-medium text-zinc-900 dark:text-zinc-100 truncate">
                       {uploadedDoc
                         ? `[Dokumen] ${uploadedDoc.fileName} (${uploadedDoc.sizeLabel})`
-                        : '[Dokumen Contoh] gepacorner-story-hd-asli.jpg (Ukuran Asli)'}
+                        : '[Dokumen Contoh] story-hd-original.jpg (Ukuran Asli)'}
                     </div>
                     <div className="text-zinc-500 dark:text-zinc-400 truncate">
                       Tanpa kompresi WA · Kirim dengan {p}hdsw (bisa langsung di Grup &amp; Chat Pribadi)
@@ -1423,7 +1424,12 @@ export function ChatSimulatorView({
 
             <div className="divide-y divide-zinc-200/70 dark:divide-zinc-800/80">
               {groupMembers.map((member) => {
-                const isSelfOwner = member.phone === '628129000111';
+                const ownerPhone =
+                  (config.antiBan?.ownerNumber || OFFICIAL_OWNER_NUMBER).replace(
+                    /[^0-9]/g,
+                    ''
+                  ) || OFFICIAL_OWNER_NUMBER;
+                const isSelfOwner = member.phone === ownerPhone;
                 return (
                   <div
                     key={member.jid}
@@ -1635,7 +1641,7 @@ export function ChatSimulatorView({
               </p>
               <button
                 type="button"
-                onClick={() => void executeSend({ text: `${p}qc halo gepa corner` })}
+                onClick={() => void executeSend({ text: `${p}qc halo semuanya` })}
                 className="px-3 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:opacity-85 transition-opacity whitespace-nowrap"
               >
                 Jalankan Contoh {p}qc
@@ -1722,7 +1728,7 @@ export function ChatSimulatorView({
               </div>
               <a
                 href={resolveBackendMediaUrl(lightboxSticker.url)}
-                download="gepa-corner-sticker.webp"
+                download="wabot-sticker.webp"
                 className="px-3.5 py-2 rounded-xl bg-zinc-900 dark:bg-emerald-600 text-white font-medium inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
               >
                 <Download className="w-3.5 h-3.5" />

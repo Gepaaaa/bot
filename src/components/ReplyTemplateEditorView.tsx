@@ -10,6 +10,8 @@ import {
   buildBotMenuText,
   DEFAULT_REACTIONS,
   DEFAULT_TEMPLATES,
+  formatPhoneDisplay,
+  OFFICIAL_OWNER_NUMBER,
   renderBotTemplate,
 } from '../shared/commands.ts';
 import type {
@@ -207,6 +209,8 @@ const TEMPLATE_ITEMS: TemplateMetaItem[] = [
     availableVars: [
       'botName',
       'ownerName',
+      'ownerNumber',
+      'ownerDisplay',
       'prefix',
       'packName',
       'authorName',
@@ -222,7 +226,7 @@ const TEMPLATE_ITEMS: TemplateMetaItem[] = [
     sampleCommandSuffix: 'menu',
     triggerDescription:
       'Baris penutup di bagian paling bawah daftar perintah .menu.',
-    availableVars: ['website', 'ownerName', 'botName', 'prefix'],
+    availableVars: ['ownerNumber', 'ownerDisplay', 'website', 'ownerName', 'botName', 'prefix'],
   },
   {
     key: 'pingReply',
@@ -236,6 +240,8 @@ const TEMPLATE_ITEMS: TemplateMetaItem[] = [
       'latency',
       'uptime',
       'prefix',
+      'ownerNumber',
+      'ownerDisplay',
       'packName',
       'authorName',
       'website',
@@ -371,20 +377,28 @@ export function ReplyTemplateEditorView({
       : customUserInput.trim();
     const typedCmd = (typedBody.split(/\s+/)[0] || 'tt').toLowerCase();
 
+    const ownerDigits =
+      (config.antiBan?.ownerNumber || OFFICIAL_OWNER_NUMBER).replace(
+        /[^0-9]/g,
+        ''
+      ) || OFFICIAL_OWNER_NUMBER;
+
     return {
       botName: config.botName,
       ownerName: config.ownerName,
-      website: config.ownerWebsite,
+      ownerNumber: ownerDigits,
+      ownerDisplay: formatPhoneDisplay(ownerDigits),
+      website: config.ownerWebsite || `wa.me/${ownerDigits}`,
       prefix: config.prefix,
       packName: config.stickerPackName,
       authorName: config.stickerAuthor,
       platform: 'TikTok HD Tanpa Watermark',
-      title: 'Suasana Sore di Sudut Kreatif Gepa Corner',
-      author: '@gepacorner',
+      title: 'Suasana Sore Sinematik',
+      author: '@kreator',
       duration: '24 detik',
       target: '628577000333',
-      sender: '628129000111',
-      groupName: 'Gepa Corner Lounge',
+      sender: ownerDigits,
+      groupName: 'Ruang Diskusi Komunitas',
       latency: 18,
       uptime: '2j 14m 09d',
       command: typedCmd,
@@ -414,11 +428,18 @@ export function ReplyTemplateEditorView({
           ? rawBody.slice(spaceIdx + 1).trim()
           : '';
 
+      const ownerDigits =
+        (config.antiBan?.ownerNumber || OFFICIAL_OWNER_NUMBER).replace(
+          /[^0-9]/g,
+          ''
+        ) || OFFICIAL_OWNER_NUMBER;
+
       return buildBotMenuText({
         prefix: config.prefix,
         botName: config.botName,
         ownerName: config.ownerName,
-        ownerWebsite: config.ownerWebsite,
+        ownerNumber: ownerDigits,
+        ownerWebsite: config.ownerWebsite || `wa.me/${ownerDigits}`,
         stickerPackName: config.stickerPackName,
         stickerAuthor: config.stickerAuthor,
         disabledCommands: config.disabledCommands,
@@ -426,7 +447,7 @@ export function ReplyTemplateEditorView({
         menuFooterTemplate: draftTemplates.menuFooter,
         query: menuQuery,
         invokedAlias: typedAlias || 'menu',
-        senderName: 'Gepa',
+        senderName: 'Owner',
       });
     }
 
@@ -915,7 +936,7 @@ export function ReplyTemplateEditorView({
 
                 {activeReactionBadge && (
                   <div
-                    title="Reaksi otomatis dari GepaBot"
+                    title="Reaksi otomatis bot"
                     className="absolute -bottom-3 right-3 px-2 py-0.5 rounded-full bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-xs leading-none select-none shadow-xs"
                   >
                     {activeReactionBadge}
@@ -952,8 +973,8 @@ export function ReplyTemplateEditorView({
                       <div className="rounded-xl px-3 py-2 text-xs bg-zinc-100/90 dark:bg-zinc-900/90 border border-zinc-200/80 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400">
                         <div className="font-medium text-zinc-800 dark:text-zinc-200">
                           {selectedKey === 'hdswCaption'
-                            ? 'Dokumen Asli dari Kamu (Gepa)'
-                            : 'Kamu (Gepa)'}
+                            ? 'Dokumen Asli dari Kamu (Owner)'
+                            : 'Kamu (Owner)'}
                         </div>
                         <div className="truncate font-mono text-[11px] opacity-85">
                           {selectedKey === 'hdswCaption'
@@ -974,7 +995,7 @@ export function ReplyTemplateEditorView({
                         </span>
                         <span className="text-[11px] text-zinc-400 font-mono tabular-nums">
                           {selectedKey === 'hdswCaption'
-                            ? 'Tanpa Kompresi · 18.4 MB · Chat Pribadi'
+                            ? 'Tanpa Kompresi · 18.4 MB · Grup & Chat Pribadi'
                             : '1080p HD · 24 detik'}
                         </span>
                       </div>
@@ -984,7 +1005,7 @@ export function ReplyTemplateEditorView({
                     activeMeta.previewMediaBadge === 'audio' && (
                       <div className="rounded-xl px-3.5 py-2.5 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 flex items-center justify-between gap-2 text-xs">
                         <span className="font-medium truncate">
-                          gepabot-audio.mp3
+                          wabot-audio.mp3
                         </span>
                         <span className="font-mono tabular-nums text-zinc-500 shrink-0">
                           00:24

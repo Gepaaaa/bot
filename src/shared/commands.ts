@@ -4,6 +4,22 @@ import type {
   CommandDefinition,
 } from './types.ts';
 
+export const OFFICIAL_OWNER_NUMBER = '6289673533963';
+export const OFFICIAL_OWNER_DISPLAY = '+62 896-7353-3963';
+
+export function formatPhoneDisplay(rawPhone?: string): string {
+  const digits = (rawPhone || OFFICIAL_OWNER_NUMBER).replace(/[^0-9]/g, '');
+  if (!digits) return OFFICIAL_OWNER_DISPLAY;
+  if (digits.startsWith('62') && digits.length >= 11) {
+    const rest = digits.slice(2);
+    const p1 = rest.slice(0, 3);
+    const p2 = rest.slice(3, 7);
+    const p3 = rest.slice(7);
+    return `+62 ${[p1, p2, p3].filter(Boolean).join('-')}`;
+  }
+  return `+${digits}`;
+}
+
 export const DEFAULT_REACTIONS: BotReactionConfig = {
   enabled: true,
   pending: '⏳',
@@ -16,8 +32,9 @@ export const SUSPENSION_RISK_DISABLED_REPLY =
 
 export const DEFAULT_TEMPLATES: BotReplyTemplates = {
   menuHeader:
-    '*{botName}* — {ownerName}\nAwalan aktif: *{prefix}* · Pack Stiker: *{packName}*',
-  menuFooter: '_Dibuat untuk ekosistem {website}_',
+    '*{botName}*\nPrefix: *{prefix}*  ·  Fitur Aktif: *{totalCommands}*\nOwner: *wa.me/{ownerNumber}*',
+  menuFooter:
+    '_Ketik {prefix}menu <1-7> untuk detail kategori · {prefix}owner kontak owner_',
   downloaderCaption:
     '*Unduhan Selesai ({platform})*\nJudul: {title}\nKreator: {author}\nDurasi: {duration}',
   audioCaption:
@@ -30,7 +47,7 @@ export const DEFAULT_TEMPLATES: BotReplyTemplates = {
   hdswGroupConfirm:
     '*Media HD Siap Status WA ({mediaKind} · {fileSize})*\nSilakan langsung tekan *Teruskan (Forward)* pesan media ini ke *Status Saya*, *@{sender}*!',
   pingReply:
-    '*{botName} Aktif*\nKecepatan respons: *{latency} ms*\nMasa aktif mesin: *{uptime}*\nAwalan perintah: *{prefix}*\nPack Stiker: *{packName}* ({authorName})',
+    '*{botName} Aktif*\n• Respons: *{latency} ms*\n• Uptime: *{uptime}*\n• Prefix: *{prefix}*\n• Owner: *{ownerDisplay}*',
   kickSuccess:
     '*Moderasi Grup*\nAnggota *@{target}* berhasil dikeluarkan dari grup oleh admin.',
   addSuccess:
@@ -46,7 +63,7 @@ export const DEFAULT_TEMPLATES: BotReplyTemplates = {
   antilinkWarn:
     'Peringatan Moderasi Grup: Tautan dari *@{sender}* otomatis dihapus karena fitur *{prefix}antilink* sedang aktif.',
   welcomeMsg:
-    'Selamat datang *@{target}* di *{groupName}*! Ketik *{prefix}menu* untuk melihat fitur *{botName}*.',
+    'Selamat datang *@{target}* di *{groupName}*! Ketik *{prefix}menu* untuk melihat daftar perintah *{botName}*.',
   goodbyeMsg:
     'Sampai jumpa *@{target}*, terima kasih sudah pernah bergabung di *{groupName}*.',
   unknownCommand:
@@ -66,7 +83,6 @@ export function renderBotTemplate(
     }
   );
 
-  // Support convenient @user, @sender, @group, @subject shorthands used by WA group admins
   const userTarget = variables.target ?? variables.sender;
   if (userTarget !== undefined) {
     rendered = rendered.replace(/@user\b/gi, `@${userTarget}`);
@@ -154,8 +170,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     aliases: ['cc', 'ccdl'],
     category: 'downloader',
     usage: 'capcut <link template>',
-    description:
-      'Download video pratinjau template CapCut tanpa watermark.',
+    description: 'Download video pratinjau template CapCut tanpa watermark.',
     example: 'capcut https://www.capcut.com/t/Zs8Example/',
   },
   {
@@ -196,7 +211,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     usage: 'qc <teks> (atau reply pesan)',
     description:
       'Buat stiker gelembung chat WhatsApp (Quote Chat) lengkap nama, warna pengirim, avatar, dan jam pesan.',
-    example: 'qc ngopi santai dulu di gepa corner',
+    example: 'qc ngopi santai dulu malam ini',
   },
   {
     id: 'iqc',
@@ -223,7 +238,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     usage: 'bratwhite <teks>',
     description:
       'Buat stiker teks otomatis gaya Brat versi latar putih bersih.',
-    example: 'bratwhite ngopi di gepa corner',
+    example: 'bratwhite tetap tenang walau sibuk',
   },
   {
     id: 'bratcolor',
@@ -248,8 +263,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     aliases: ['text2pic', 'stikerteks'],
     category: 'sticker',
     usage: 'ttp <teks>',
-    description:
-      'Buat stiker tipografi teks tebal berlatar transparan tajam.',
+    description: 'Buat stiker tipografi teks tebal berlatar transparan tajam.',
     example: 'ttp GAS MABAR MALAM INI',
   },
   {
@@ -257,8 +271,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     aliases: ['animttp', 'pelangi'],
     category: 'sticker',
     usage: 'attp <teks>',
-    description:
-      'Buat stiker teks animasi berkedip warna-warni RGB transparan.',
+    description: 'Buat stiker teks animasi berkedip warna-warni RGB transparan.',
     example: 'attp MANTAP JIWA',
   },
   {
@@ -288,7 +301,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     usage: 'wm <pack> | <author> (reply stiker)',
     description:
       'Ganti nama Pack & Author (EXIF) pada stiker statis maupun stiker bergerak yang di-reply.',
-    example: 'wm Koleksi Gepa | @gepacorner',
+    example: 'wm Koleksi Stiker | 6289673533963',
     requiresMedia: true,
     mediaKindHint: 'sticker',
   },
@@ -365,8 +378,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     aliases: ['grayscale', 'bw', 'hitamputih'],
     category: 'media',
     usage: 'hitamkan (kirim/reply foto)',
-    description:
-      'Ubah foto menjadi nuansa monokrom hitam-putih kontras tinggi.',
+    description: 'Ubah foto menjadi nuansa monokrom hitam-putih kontras tinggi.',
     example: 'hitamkan',
     requiresMedia: true,
     mediaKindHint: 'image',
@@ -400,7 +412,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     usage: 'qrcode <teks atau link>',
     description:
       'Buat gambar kode QR tajam siap pindai dari teks atau tautan apa pun.',
-    example: 'qrcode https://gepacorner.my.id',
+    example: 'qrcode https://wa.me/6289673533963',
   },
 
   // ================= AUDIO & EFEK SUARA =================
@@ -471,8 +483,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     aliases: ['slowed', 'reverb'],
     category: 'audio',
     usage: 'slow (reply audio / VN)',
-    description:
-      'Ubah lagu atau Voice Note menjadi nuansa Slowed + Reverb kalem.',
+    description: 'Ubah lagu atau Voice Note menjadi nuansa Slowed + Reverb kalem.',
     example: 'slow',
     requiresMedia: true,
     mediaKindHint: 'audio',
@@ -504,8 +515,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     aliases: ['baliksuara'],
     category: 'audio',
     usage: 'reverse (reply audio / VN)',
-    description:
-      'Putar balik gelombang audio/Voice Note dari akhir ke awal.',
+    description: 'Putar balik gelombang audio/Voice Note dari akhir ke awal.',
     example: 'reverse',
     requiresMedia: true,
     mediaKindHint: 'audio',
@@ -567,7 +577,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     category: 'group',
     usage: 'setname <nama baru>',
     description: 'Ganti nama/judul grup WhatsApp secara langsung.',
-    example: 'setname Gepa Corner Official',
+    example: 'setname Ruang Diskusi Komunitas',
     groupOnly: true,
   },
   {
@@ -577,7 +587,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     usage: 'setdesc <teks deskripsi>',
     description: 'Perbarui teks deskripsi aturan atau informasi grup.',
     example:
-      'setdesc Ruang diskusi santai anggota Gepa Corner. Dilarang spam link.',
+      'setdesc Ruang diskusi santai anggota komunitas. Dilarang spam link.',
     groupOnly: true,
   },
   {
@@ -594,8 +604,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     aliases: ['resetlink', 'revokelink'],
     category: 'group',
     usage: 'revoke',
-    description:
-      'Hanguskan link undangan grup lama dan buat kode tautan baru.',
+    description: 'Hanguskan link undangan grup lama dan buat kode tautan baru.',
     example: 'revoke',
     groupOnly: true,
   },
@@ -617,7 +626,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     usage: 'tagall <pesan>',
     description:
       'Dinonaktifkan otomatis karena mention massal seluruh anggota berisiko tinggi menyebabkan grup ditangguhkan WhatsApp.',
-    example: 'tagall Absen hadir anggota Gepa Corner',
+    example: 'tagall Absen hadir anggota komunitas',
     groupOnly: true,
     suspensionRisk: true,
   },
@@ -756,8 +765,17 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     category: 'utility',
     usage: 'menu [kategori / fitur]',
     description:
-      'Tampilkan daftar fitur ringkas, sub-menu kategori (downloader/stiker/media/audio/grup/set), atau panduan suatu command.',
+      'Tampilkan ringkasan menu rapi, sub-menu kategori (1–7), atau panduan detail suatu command.',
     example: 'menu',
+  },
+  {
+    id: 'owner',
+    aliases: ['creator', 'pemilik'],
+    category: 'utility',
+    usage: 'owner',
+    description:
+      'Tampilkan informasi dan kontak WhatsApp resmi Owner Bot (+62 896-7353-3963).',
+    example: 'owner',
   },
   {
     id: 'ping',
@@ -765,7 +783,7 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     category: 'utility',
     usage: 'ping',
     description:
-      'Cek kecepatan respons bot, masa aktif sesi, dan identitas Gepa Corner.',
+      'Cek kecepatan respons bot, masa aktif sesi server, dan informasi owner.',
     example: 'ping',
   },
 ];
@@ -777,7 +795,7 @@ interface CompactCommandMeta {
 }
 
 const COMPACT_COMMAND_META: Record<string, CompactCommandMeta> = {
-  aio: { shortUsage: 'aio <link>', shortDesc: 'Auto-download link sosmed apa saja' },
+  aio: { shortUsage: 'aio <link>', shortDesc: 'Auto-unduh link sosmed apa saja' },
   tt: { shortUsage: 'tt <link>', shortDesc: 'Video/slide TikTok tanpa WM' },
   ttslide: { shortUsage: 'ttslide <link>', shortDesc: 'Album slide foto TikTok + MP3' },
   ig: { shortUsage: 'ig <link>', shortDesc: 'Reels & postingan Instagram' },
@@ -787,7 +805,7 @@ const COMPACT_COMMAND_META: Record<string, CompactCommandMeta> = {
   capcut: { shortUsage: 'capcut <link>', shortDesc: 'Template CapCut tanpa WM' },
   mf: { shortUsage: 'mf <link>', shortDesc: 'Unduh berkas langsung MediaFire' },
   yt: { shortUsage: 'yt <link>', shortDesc: 'Video YouTube & Shorts' },
-  s: { shortUsage: 's', shortDesc: 'Foto/video pendek jadi stiker WebP' },
+  s: { shortUsage: 's', shortDesc: 'Foto/video pendek ke stiker WebP' },
   qc: { shortUsage: 'qc <teks/reply>', shortDesc: 'Stiker gelembung chat WA' },
   iqc: { shortUsage: 'iqc <teks/reply>', shortDesc: 'Stiker gelembung iMessage iOS' },
   brat: { shortUsage: 'brat <teks>', shortDesc: 'Stiker teks hijau Brat' },
@@ -801,7 +819,7 @@ const COMPACT_COMMAND_META: Record<string, CompactCommandMeta> = {
   wm: { shortUsage: 'wm <pack|author>', shortDesc: 'Ganti nama pack/author stiker' },
   toimg: { shortUsage: 'toimg', shortDesc: 'Ubah stiker kembali jadi foto' },
   tovid: { shortUsage: 'tovid', shortDesc: 'Ubah stiker gerak jadi video MP4' },
-  hdsw: { shortUsage: 'hdsw', shortDesc: 'Dokumen asli jadi Status HD (Grup/PC)' },
+  hdsw: { shortUsage: 'hdsw', shortDesc: 'Dokumen asli ke Status HD (Grup/PC)' },
   hd: { shortUsage: 'hd', shortDesc: 'Pertajam & upscale resolusi foto 2×' },
   rvo: { shortUsage: 'rvo', shortDesc: 'Buka media View Once sekali lihat' },
   toptv: { shortUsage: 'toptv', shortDesc: 'Ubah video jadi Video Note bulat' },
@@ -842,7 +860,8 @@ const COMPACT_COMMAND_META: Record<string, CompactCommandMeta> = {
   setantilink: { shortUsage: 'setantilink <teks>', shortDesc: 'Edit peringatan antilink' },
   cekset: { shortUsage: 'cekset', shortDesc: 'Lihat status & teks grup' },
   resetset: { shortUsage: 'resetset', shortDesc: 'Reset teks grup ke bawaan' },
-  menu: { shortUsage: 'menu [kategori]', shortDesc: 'Daftar fitur & panduan' },
+  menu: { shortUsage: 'menu [1-7]', shortDesc: 'Daftar fitur & panduan kategori' },
+  owner: { shortUsage: 'owner', shortDesc: 'Kontak resmi Owner Bot' },
   ping: { shortUsage: 'ping', shortDesc: 'Cek kecepatan & status bot' },
 };
 
@@ -852,7 +871,7 @@ interface CompactMenuRow {
   summary: string;
 }
 
-interface MenuSectionSpec {
+export interface MenuSectionSpec {
   key: 'downloader' | 'stiker' | 'media' | 'audio' | 'grup' | 'set' | 'info';
   code: string;
   title: string;
@@ -861,25 +880,25 @@ interface MenuSectionSpec {
   compactRows: CompactMenuRow[];
 }
 
-const MENU_SECTIONS: MenuSectionSpec[] = [
+export const MENU_SECTIONS: MenuSectionSpec[] = [
   {
     key: 'downloader',
     code: '01',
-    title: 'Downloader Multi-Platform',
+    title: 'DOWNLOADER',
     keywords: ['1', '01', 'dl', 'download', 'downloader', 'unduh', 'sosmed'],
     ids: ['aio', 'tt', 'ttslide', 'ig', 'fb', 'tw', 'pin', 'capcut', 'mf', 'yt'],
     compactRows: [
-      { ids: ['aio'], argHint: '<link>', summary: 'Auto-download semua sosmed' },
-      { ids: ['tt', 'ttslide'], argHint: '<link>', summary: 'TikTok HD & Slide Foto' },
-      { ids: ['ig', 'fb', 'tw'], argHint: '<link>', summary: 'Reels IG, FB & X/Twitter' },
-      { ids: ['pin', 'capcut', 'mf'], argHint: '<link>', summary: 'Pinterest, CapCut & MediaFire' },
-      { ids: ['yt'], argHint: '<link>', summary: 'YouTube Video & Shorts' },
+      { ids: ['aio'], argHint: '<link>', summary: 'Auto-unduh semua sosmed' },
+      { ids: ['tt', 'ttslide'], summary: 'Video & slide foto TikTok HD' },
+      { ids: ['ig', 'fb', 'tw'], summary: 'Reels IG, FB & X/Twitter' },
+      { ids: ['pin', 'capcut', 'mf'], summary: 'Pinterest, CapCut & MediaFire' },
+      { ids: ['yt'], argHint: '<link>', summary: 'Video YouTube & Shorts' },
     ],
   },
   {
     key: 'stiker',
     code: '02',
-    title: 'Studio Stiker & Maker',
+    title: 'STUDIO STIKER',
     keywords: ['2', '02', 'stiker', 'sticker', 'maker', 'brat', 'qc'],
     ids: [
       's',
@@ -898,32 +917,32 @@ const MENU_SECTIONS: MenuSectionSpec[] = [
       'tovid',
     ],
     compactRows: [
-      { ids: ['s'], summary: 'Foto / video pendek jadi stiker' },
-      { ids: ['qc', 'iqc'], argHint: '<teks/reply>', summary: 'Stiker bubble chat WA & iOS' },
-      { ids: ['brat', 'bratwhite', 'bratcolor'], summary: 'Stiker Brat hijau/putih/warna' },
-      { ids: ['bratvid', 'ttp', 'attp'], summary: 'Stiker teks & animasi bergerak' },
-      { ids: ['meme', 'emojimix'], summary: 'Meme foto & gabung 2 emoji' },
-      { ids: ['wm', 'toimg', 'tovid'], summary: 'Ganti EXIF, stiker ke foto/MP4' },
+      { ids: ['s'], summary: 'Foto / video ke stiker WebP' },
+      { ids: ['qc', 'iqc'], summary: 'Stiker bubble chat WA & iPhone' },
+      { ids: ['brat', 'bratwhite', 'bratcolor'], summary: 'Stiker teks gaya Brat' },
+      { ids: ['bratvid', 'ttp', 'attp'], summary: 'Stiker teks & animasi RGB' },
+      { ids: ['meme', 'emojimix'], summary: 'Stiker meme & mix 2 emoji' },
+      { ids: ['wm', 'toimg', 'tovid'], summary: 'Ubah EXIF & konversi stiker' },
     ],
   },
   {
     key: 'media',
     code: '03',
-    title: 'Perkakas Media & Status HD',
+    title: 'PERKAKAS MEDIA',
     keywords: ['3', '03', 'media', 'tools', 'hd', 'sw', 'hdsw', 'foto'],
     ids: ['hdsw', 'hd', 'rvo', 'toptv', 'hitamkan', 'imgedit', 'tourl', 'qrcode'],
     compactRows: [
-      { ids: ['hdsw'], summary: 'Dokumen asli jadi Status HD (Grup & PC)' },
+      { ids: ['hdsw'], summary: 'Dokumen ke Status HD (Grup & PC)' },
       { ids: ['hd', 'hitamkan'], summary: 'Upscale foto 2× & hitam-putih' },
-      { ids: ['imgedit'], argHint: 'blur|invert|mirror', summary: 'Filter efek gambar instan' },
+      { ids: ['imgedit'], summary: 'Filter blur, invert, mirror, sepia' },
       { ids: ['rvo', 'toptv'], summary: 'Buka ViewOnce & video bulat PTV' },
-      { ids: ['tourl', 'qrcode'], summary: 'Upload jadi URL & buat QR Code' },
+      { ids: ['tourl', 'qrcode'], summary: 'Link media publik & kode QR' },
     ],
   },
   {
     key: 'audio',
     code: '04',
-    title: 'Audio, Musik & Efek Suara',
+    title: 'AUDIO & MUSIK',
     keywords: ['4', '04', 'audio', 'musik', 'music', 'vn', 'sound', 'efek'],
     ids: [
       'play',
@@ -939,7 +958,7 @@ const MENU_SECTIONS: MenuSectionSpec[] = [
     ],
     compactRows: [
       { ids: ['play'], argHint: '<judul>', summary: 'Cari lagu & kirim MP3' },
-      { ids: ['mp3', 'tomp3', 'tovn'], summary: 'Ekstrak MP3 & ubah ke Voice Note' },
+      { ids: ['mp3', 'tomp3', 'tovn'], summary: 'Ekstrak MP3 & Voice Note' },
       { ids: ['bass', 'nightcore', 'slow'], summary: 'Efek Bass, Nightcore & Slowed' },
       { ids: ['fast', 'robot', 'reverse'], summary: 'Efek Speedup, Robot & Reverse' },
     ],
@@ -947,34 +966,32 @@ const MENU_SECTIONS: MenuSectionSpec[] = [
   {
     key: 'grup',
     code: '05',
-    title: 'Moderasi Admin Grup',
+    title: 'ADMIN GRUP',
     keywords: ['5', '05', 'grup', 'group', 'admin', 'moderasi', 'mod', 'gc'],
     ids: [
       'kick',
-      'add',
       'promote',
       'demote',
       'group',
-      'hidetag',
-      'tagall',
       'setname',
       'setdesc',
       'linkgc',
       'revoke',
+      'add',
+      'hidetag',
+      'tagall',
     ],
     compactRows: [
-      { ids: ['kick'], argHint: '<@tag/reply>', summary: 'Keluarkan anggota grup' },
-      { ids: ['promote', 'demote'], summary: 'Atur jabatan admin grup' },
+      { ids: ['kick', 'promote', 'demote'], summary: 'Kelola anggota & admin' },
       { ids: ['group'], argHint: 'open|close', summary: 'Buka / kunci chat grup' },
-      { ids: ['setname', 'setdesc'], summary: 'Ubah nama & deskripsi' },
-      { ids: ['linkgc', 'revoke'], summary: 'Ambil / reset link grup' },
-      { ids: ['add', 'hidetag', 'tagall'], summary: 'Dikunci cegah suspend grup' },
+      { ids: ['setname', 'setdesc'], summary: 'Ubah nama & deskripsi grup' },
+      { ids: ['linkgc', 'revoke'], summary: 'Ambil / reset tautan grup' },
     ],
   },
   {
     key: 'set',
     code: '06',
-    title: 'Otomasi & Teks Grup',
+    title: 'OTOMASI GRUP',
     keywords: ['6', '06', 'set', 'teks', 'custom', 'otomasi', 'setting', 'sambutan'],
     ids: [
       'welcome',
@@ -991,22 +1008,22 @@ const MENU_SECTIONS: MenuSectionSpec[] = [
       'resetset',
     ],
     compactRows: [
-      { ids: ['welcome', 'out', 'antilink'], argHint: 'on|off', summary: 'Sakelar sambutan & antilink' },
-      { ids: ['setwelcome', 'setout'], summary: 'Edit teks masuk / keluar' },
-      { ids: ['setpromote', 'setdemote'], summary: 'Edit teks jabatan admin' },
-      { ids: ['setopen', 'setclose', 'setantilink'], summary: 'Edit teks grup & link' },
-      { ids: ['cekset', 'resetset'], summary: 'Cek / reset teks grup' },
+      { ids: ['welcome', 'out', 'antilink'], summary: 'Sakelar sambutan & antilink' },
+      { ids: ['setwelcome', 'setout'], summary: 'Atur teks masuk & keluar' },
+      { ids: ['setpromote', 'setdemote'], summary: 'Atur teks jabatan admin' },
+      { ids: ['cekset', 'resetset'], summary: 'Lihat / reset setelan grup' },
     ],
   },
   {
     key: 'info',
     code: '07',
-    title: 'Info & Panduan Detail',
+    title: 'INFO & BANTUAN',
     keywords: ['7', '07', 'info', 'utilitas', 'utility', 'bot', 'bantuan'],
-    ids: ['menu', 'ping'],
+    ids: ['menu', 'owner', 'ping'],
     compactRows: [
-      { ids: ['menu'], argHint: '<downloader|stiker|media|audio|grup>', summary: 'Detail kategori' },
-      { ids: ['allmenu', 'ping'], summary: 'Daftar penuh & cek respons' },
+      { ids: ['menu'], argHint: '<1-7>', summary: 'Panduan detail per kategori' },
+      { ids: ['allmenu'], summary: 'Daftar lengkap semua perintah' },
+      { ids: ['owner', 'ping'], summary: 'Kontak owner & cek kecepatan' },
     ],
   },
 ];
@@ -1015,6 +1032,7 @@ export interface BuildBotMenuOptions {
   prefix: string;
   botName: string;
   ownerName: string;
+  ownerNumber?: string;
   ownerWebsite: string;
   stickerPackName: string;
   stickerAuthor: string;
@@ -1030,12 +1048,17 @@ const MENU_DIVIDER = '───────────────────�
 
 export function buildBotMenuText(opts: BuildBotMenuOptions): string {
   const p = opts.prefix || '.';
+  const cleanOwnerNumber =
+    (opts.ownerNumber || OFFICIAL_OWNER_NUMBER).replace(/[^0-9]/g, '') ||
+    OFFICIAL_OWNER_NUMBER;
   const disabledSet = new Set(opts.disabledCommands || []);
+
   const isSuspensionLocked = (id: string) => {
     const canonical = id === 'allmenu' ? 'menu' : id;
     const found = COMMAND_CATALOG.find((c) => c.id === canonical);
     return Boolean(found?.suspensionRisk);
   };
+
   const isEnabled = (id: string) => {
     const canonical = id === 'allmenu' ? 'menu' : id;
     if (isSuspensionLocked(canonical)) return false;
@@ -1045,13 +1068,16 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
   const totalActive = COMMAND_CATALOG.filter(
     (c) => !c.suspensionRisk && !disabledSet.has(c.id)
   ).length;
+
   const templateVars = {
     botName: opts.botName,
     ownerName: opts.ownerName,
+    ownerNumber: cleanOwnerNumber,
+    ownerDisplay: formatPhoneDisplay(cleanOwnerNumber),
     prefix: p,
     packName: opts.stickerPackName,
     authorName: opts.stickerAuthor,
-    website: opts.ownerWebsite,
+    website: opts.ownerWebsite || `wa.me/${cleanOwnerNumber}`,
     totalCommands: totalActive,
     sender: opts.senderName || 'Pengguna',
   };
@@ -1068,7 +1094,7 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
     opts.invokedAlias === 'allmenu' ||
     ['all', 'semua', 'lengkap', 'full', 'allmenu'].includes(normalizedQuery);
 
-  // 1. Sub-menu by category
+  // 1. Sub-menu by category (.menu 1, .menu downloader, etc.)
   if (!wantsFullList && normalizedQuery) {
     const matchedSection = MENU_SECTIONS.find((sec) =>
       sec.keywords.includes(normalizedQuery)
@@ -1076,8 +1102,8 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
 
     if (matchedSection) {
       const lines: string[] = [
-        `*${opts.botName}* — Panduan Kategori`,
-        `*${matchedSection.code}. ${matchedSection.title}*`,
+        `*${opts.botName}* · Kategori ${matchedSection.code}`,
+        `*${matchedSection.title}*`,
         MENU_DIVIDER,
       ];
 
@@ -1086,56 +1112,52 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
         if (!cmd) continue;
         const meta = COMPACT_COMMAND_META[id];
         const statusNote = cmd.suspensionRisk
-          ? ' _(nonaktif: cegah grup ditangguhkan)_'
+          ? ' _(dikunci aman)_'
           : isEnabled(id)
           ? ''
           : ' _(nonaktif)_';
         const aliasText =
           cmd.aliases.length > 0
-            ? ` _(alias: ${cmd.aliases
+            ? ` · alias: ${cmd.aliases
                 .slice(0, 3)
                 .map((a) => `${p}${a}`)
-                .join(', ')})_`
+                .join(', ')}`
             : '';
         const exampleText = meta?.compactExample || cmd.example;
 
-        lines.push(
-          `▸ *${p}${meta?.shortUsage || cmd.usage}*${aliasText}${statusNote}`
-        );
+        lines.push(`• *${p}${meta?.shortUsage || cmd.usage}*${statusNote}`);
         lines.push(`  ${cmd.description}`);
         if (!cmd.suspensionRisk) {
-          lines.push(`  Contoh: *${p}${exampleText}*`);
+          lines.push(`  _Contoh: ${p}${exampleText}${aliasText}_`);
         }
         lines.push('');
       }
 
       if (matchedSection.key === 'grup') {
-        lines.push(`*Tips Aman Anti-Suspend Grup:*`);
+        lines.push(`*Catatan Keamanan Grup:*`);
+        lines.push(`• Gunakan *${p}linkgc* untuk mengundang anggota baru.`);
         lines.push(
-          `◦ Undang member baru lewat *${p}linkgc* (bukan *${p}add*).`
-        );
-        lines.push(
-          `◦ Untuk pengumuman penting, gunakan *${p}group close* tanpa mention massal.`
+          `• Gunakan *${p}group close* untuk pengumuman penting tanpa spam tag.`
         );
         lines.push('');
       }
 
       if (matchedSection.key === 'set') {
-        lines.push(`*Variabel Teks Otomatis Grup:*`);
-        lines.push(`◦ *@user* / *@sender* — Mention anggota terkait`);
-        lines.push(`◦ *@group* — Nama grup WhatsApp`);
-        lines.push(
-          `◦ Ketik *${p}setwelcome reset* (dll.) untuk kembali ke bawaan.`
-        );
+        lines.push(`*Variabel Otomatis:*`);
+        lines.push(`• *@user* / *@sender* — Mention anggota`);
+        lines.push(`• *@group* — Nama grup WhatsApp`);
         lines.push('');
       }
 
+      if (lines[lines.length - 1] === '') {
+        lines.pop();
+      }
       lines.push(MENU_DIVIDER);
-      lines.push(`Ketik *${p}menu* untuk kembali ke ringkasan utama.`);
+      lines.push(`_Ketik ${p}menu untuk kembali ke menu utama._`);
       return lines.join('\n');
     }
 
-    // 2. Single-command detail card
+    // 2. Single-command detail card (.menu qc, .menu hdsw, etc.)
     const matchedCmd = COMMAND_CATALOG.find(
       (c) => c.id === normalizedQuery || c.aliases.includes(normalizedQuery)
     );
@@ -1145,42 +1167,43 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
       const aliasList =
         matchedCmd.aliases.length > 0
           ? matchedCmd.aliases.map((a) => `${p}${a}`).join(', ')
-          : 'Tidak ada';
+          : '-';
       const scopeLabel = matchedCmd.groupOnly
         ? 'Khusus Grup WhatsApp'
         : 'Chat Pribadi & Grup';
       const statusLabel = matchedCmd.suspensionRisk
-        ? 'Dinonaktifkan (berpotensi grup ditangguhkan)'
+        ? 'Dikunci (Proteksi Anti-Suspend Grup)'
         : isEnabled(matchedCmd.id)
         ? 'Aktif'
-        : 'Dinonaktifkan';
+        : 'Nonaktif';
 
       return [
-        `*Panduan Perintah: ${p}${matchedCmd.id}*`,
+        `*Detail Perintah · ${p}${matchedCmd.id}*`,
         MENU_DIVIDER,
-        `◦ *Fungsi:* ${matchedCmd.description}`,
-        `◦ *Format:* *${p}${matchedCmd.usage}*`,
-        `◦ *Contoh:* *${p}${meta?.compactExample || matchedCmd.example}*`,
-        `◦ *Alias:* ${aliasList}`,
-        `◦ *Ruang:* ${scopeLabel}`,
-        `◦ *Status:* ${statusLabel}`,
+        `• *Fungsi:* ${matchedCmd.description}`,
+        `• *Format:* *${p}${matchedCmd.usage}*`,
+        `• *Contoh:* *${p}${meta?.compactExample || matchedCmd.example}*`,
+        `• *Alias:* ${aliasList}`,
+        `• *Ruang:* ${scopeLabel}`,
+        `• *Status:* ${statusLabel}`,
         MENU_DIVIDER,
-        `Ketik *${p}menu* untuk kembali ke daftar fitur.`,
+        `_Ketik ${p}menu untuk kembali ke daftar utama._`,
       ].join('\n');
     }
 
     // 3. Unknown sub-menu filter fallback
     return [
-      `Sub-menu atau perintah *${opts.query?.trim()}* tidak ditemukan.`,
+      `Kategori atau fitur *${opts.query?.trim()}* tidak ditemukan.`,
       '',
-      `*Pilihan Sub-Menu ${opts.botName}:*`,
-      `◦ *${p}menu downloader* — AIO, TikTok, Slide, IG, FB, X, Pin, YT`,
-      `◦ *${p}menu stiker* — Stiker foto/video, QC, Brat, ATTP, WM, ToImg`,
-      `◦ *${p}menu media* — Status HD (.hdsw), Upscale HD, RVO, PTV, QR`,
-      `◦ *${p}menu audio* — Play Lagu, MP3, VN, Bass, Nightcore, Slowed`,
-      `◦ *${p}menu grup* — Moderasi & admin grup`,
-      `◦ *${p}menu set* — Otomasi & edit teks grup`,
-      `◦ *${p}allmenu* — Daftar lengkap satu per satu`,
+      `*Daftar Kategori ${opts.botName}:*`,
+      `• *${p}menu 1* — Downloader Sosmed`,
+      `• *${p}menu 2* — Studio Stiker`,
+      `• *${p}menu 3* — Perkakas Media & Status HD`,
+      `• *${p}menu 4* — Audio & Efek Suara`,
+      `• *${p}menu 5* — Admin Grup`,
+      `• *${p}menu 6* — Otomasi & Teks Grup`,
+      `• *${p}menu 7* — Info & Kontak Owner`,
+      `• *${p}allmenu* — Daftar lengkap semua fitur`,
     ].join('\n');
   }
 
@@ -1193,14 +1216,14 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
     }
 
     for (const sec of MENU_SECTIONS) {
-      lines.push(`*${sec.code}. ${sec.title}*`);
+      lines.push(`*${sec.code} · ${sec.title}*`);
       for (const id of sec.ids) {
         const cmd = COMMAND_CATALOG.find((c) => c.id === id);
-        if (!cmd) continue;
+        if (!cmd || cmd.suspensionRisk) continue;
         const meta = COMPACT_COMMAND_META[id];
-        const statusNote = isEnabled(id) ? '' : ' _(nonaktif)_';
+        const statusNote = isEnabled(id) ? '' : ' _(off)_';
         lines.push(
-          `◦ *${p}${meta?.shortUsage || cmd.usage}* — ${
+          `• *${p}${meta?.shortUsage || cmd.usage}* — ${
             meta?.shortDesc || cmd.description
           }${statusNote}`
         );
@@ -1212,14 +1235,14 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
       lines.pop();
     }
     lines.push(MENU_DIVIDER);
-    lines.push(`Ketik *${p}menu <nama_fitur>* untuk contoh & alias detail.`);
+    lines.push(`_Ketik ${p}menu <nama_fitur> untuk contoh & alias lengkap._`);
     if (footer) {
       lines.push(footer);
     }
     return lines.join('\n');
   }
 
-  // 5. Default Compact & Scannable Overview (.menu)
+  // 5. Default Clean & Tidy Overview (.menu)
   const lines: string[] = [];
   if (header) {
     lines.push(header);
@@ -1227,10 +1250,16 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
   }
 
   for (const sec of MENU_SECTIONS) {
-    lines.push(`*${sec.code}. ${sec.title}*`);
-    for (const row of sec.compactRows) {
-      const allDisabled = row.ids.every((id) => !isEnabled(id));
-      const cmdLabels = row.ids
+    const visibleRows = sec.compactRows.filter((row) =>
+      row.ids.some((id) => !isSuspensionLocked(id))
+    );
+    if (visibleRows.length === 0) continue;
+
+    lines.push(`*${sec.code} · ${sec.title}*`);
+    for (const row of visibleRows) {
+      const activeIds = row.ids.filter((id) => !isSuspensionLocked(id));
+      const allDisabled = activeIds.every((id) => !isEnabled(id));
+      const cmdLabels = activeIds
         .map((id) => {
           const singleOff = !allDisabled && !isEnabled(id);
           return singleOff ? `*${p}${id}* _(off)_` : `*${p}${id}*`;
@@ -1238,7 +1267,7 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
         .join(' / ');
       const argPart = row.argHint ? ` ${row.argHint}` : '';
       const rowOffSuffix = allDisabled ? ' _(nonaktif)_' : '';
-      lines.push(`◦ ${cmdLabels}${argPart} — ${row.summary}${rowOffSuffix}`);
+      lines.push(`• ${cmdLabels}${argPart} — ${row.summary}${rowOffSuffix}`);
     }
     lines.push('');
   }

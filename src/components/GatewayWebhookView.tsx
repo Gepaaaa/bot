@@ -25,6 +25,7 @@ import {
   Webhook,
   Zap,
 } from 'lucide-react';
+import { OFFICIAL_OWNER_NUMBER } from '../shared/commands.ts';
 import { buildApiUrl, getActiveBackendBaseUrl } from '../lib/apiBase.ts';
 import type {
   AutoResponderRule,
@@ -60,9 +61,11 @@ export function GatewayWebhookView({
   const [consoleEndpoint, setConsoleEndpoint] = useState<
     'send-text' | 'send-media' | 'send-poll' | 'check-number'
   >('send-text');
-  const [targetPhone, setTargetPhone] = useState('628129000111');
+  const [targetPhone, setTargetPhone] = useState(
+    config.antiBan?.ownerNumber || OFFICIAL_OWNER_NUMBER
+  );
   const [messageText, setMessageText] = useState(
-    'Halo! Ini adalah pesan otomatis yang dikirim via OpenWA REST API Gateway GepaBot.'
+    'Halo! Ini adalah pesan otomatis yang dikirim via OpenWA REST API Gateway.'
   );
   const [mediaUrl, setMediaUrl] = useState(() => {
     const base =
@@ -76,7 +79,9 @@ export function GatewayWebhookView({
   const [mediaCaption, setMediaCaption] = useState('Gambar dikirim via OpenWA API');
   const [pollTitle, setPollTitle] = useState('Apakah sistem anti-ban OpenWA ini sangat membantu?');
   const [pollOptions, setPollOptions] = useState(['Sangat Membantu 👍', 'Keren Banget 🔥', 'Cukup']);
-  const [checkNumberInput, setCheckNumberInput] = useState('628129000111');
+  const [checkNumberInput, setCheckNumberInput] = useState(
+    config.antiBan?.ownerNumber || OFFICIAL_OWNER_NUMBER
+  );
 
   const [apiLoading, setApiLoading] = useState(false);
   const [apiResponse, setApiResponse] = useState<any | null>(null);

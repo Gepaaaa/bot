@@ -4,6 +4,7 @@ import type { WebSocket } from 'ws';
 import {
   DEFAULT_REACTIONS,
   DEFAULT_TEMPLATES,
+  OFFICIAL_OWNER_NUMBER,
 } from '../src/shared/commands.ts';
 import type {
   AntiBanConfig,
@@ -46,11 +47,11 @@ export const DEFAULT_AUTORESPONDER_RULES: AutoResponderRule[] = [
     createdAt: 1714500000000,
   },
   {
-    id: 'rule-web',
-    trigger: 'website',
-    matchType: 'contains',
+    id: 'rule-owner',
+    trigger: 'owner',
+    matchType: 'exact',
     replyText:
-      'Kunjungi website resmi kreator kami di https://gepacorner.my.id untuk artikel, panduan, dan update terbaru!',
+      'Kontak resmi Owner {botName}: https://wa.me/6289673533963 (+62 896-7353-3963)',
     scope: 'all',
     enabled: true,
     hitCount: 0,
@@ -73,17 +74,17 @@ export const DEFAULT_ANTIBAN_CONFIG: AntiBanConfig = {
   callRejectNotice:
     'Maaf, bot ini berjalan secara otomatis dan tidak menerima panggilan telepon atau video WhatsApp.',
   ownerOnlyMode: false,
-  ownerNumber: '',
+  ownerNumber: OFFICIAL_OWNER_NUMBER,
   browserProfile: 'windows_chrome',
 };
 
 const DEFAULT_CONFIG: BotConfig = {
   prefix: '.',
-  botName: 'GepaBot',
-  ownerName: 'Gepa — Personal Corner',
-  ownerWebsite: 'gepacorner.my.id',
-  stickerPackName: 'Gepa Corner',
-  stickerAuthor: 'gepacorner.my.id',
+  botName: 'WABot',
+  ownerName: 'Owner Bot',
+  ownerWebsite: `wa.me/${OFFICIAL_OWNER_NUMBER}`,
+  stickerPackName: 'WA Sticker',
+  stickerAuthor: OFFICIAL_OWNER_NUMBER,
   autoRead: true,
   selfMode: false,
   disabledCommands: [],
@@ -103,9 +104,9 @@ const DEFAULT_CONFIG: BotConfig = {
 
 const INITIAL_GROUP_MEMBERS: SimulatorMember[] = [
   {
-    jid: '628129000111@s.whatsapp.net',
-    name: 'Gepa (Owner)',
-    phone: '628129000111',
+    jid: `${OFFICIAL_OWNER_NUMBER}@s.whatsapp.net`,
+    name: 'Owner Bot',
+    phone: OFFICIAL_OWNER_NUMBER,
     isAdmin: true,
   },
   {
@@ -135,11 +136,11 @@ const INITIAL_GROUP_MEMBERS: SimulatorMember[] = [
 ];
 
 const INITIAL_GROUP_STATE: GroupSimulatorState = {
-  subject: 'Gepa Corner Lounge',
+  subject: 'Ruang Diskusi Komunitas',
   description:
-    'Ruang diskusi komunitas & berbagi karya Gepa Corner. Dilarang kirim spam link.',
+    'Ruang diskusi komunitas & berbagi media. Dilarang mengirim spam tautan.',
   isAnnouncementOnly: false,
-  inviteCode: 'GpCrnr2026Official',
+  inviteCode: 'Komunitas2026Official',
 };
 
 const INITIAL_MESSAGES: SimulatorMessage[] = [
@@ -147,21 +148,26 @@ const INITIAL_MESSAGES: SimulatorMessage[] = [
     id: 'msg-welcome-private',
     chatMode: 'private',
     sender: 'bot',
-    senderName: 'GepaBot',
+    senderName: 'WABot',
     senderPhone: 'Bot Engine',
-    text: 'Halo! Selamat datang di ruang uji GepaBot (Gepa Corner).\n\nKetik *.menu* untuk melihat semua fitur, kirim dokumen foto/video dengan *.hdsw* agar jadi media ukuran asli siap teruskan ke Status WA, atau uji *.tt <link tiktok>* dan *.brat santai dulu*.',
+    text: 'Halo! Selamat datang di ruang uji WABot.\n\nKetik *.menu* untuk melihat daftar perintah yang sudah dirapikan, *.owner* untuk info kontak owner, kirim dokumen foto/video dengan *.hdsw* agar jadi media ukuran asli siap diteruskan ke Status WA, atau uji *.tt <link tiktok>* dan *.qc*.',
     timestamp: Date.now() - 60000,
   },
   {
     id: 'msg-welcome-group',
     chatMode: 'group',
     sender: 'bot',
-    senderName: 'GepaBot',
+    senderName: 'WABot',
     senderPhone: 'Bot Engine',
-    text: 'Grup Komunitas *Gepa Corner Lounge* aktif.\nAdmin grup bisa mengatur *.setwelcome*, *.setout*, *.out on/off*, *.setpromote*, *.setantilink*, *.cekset*, serta moderasi *.kick*, *.promote*, *.demote*, dan *.group close/open*.',
+    text: 'Grup *Ruang Diskusi Komunitas* aktif.\nAdmin & Owner dapat mengelola grup serta menguji fitur stiker, perkakas media (*.hdsw*, *.rvo*, *.toptv*), maupun moderasi *.kick*, *.promote*, dan *.demote*.',
     timestamp: Date.now() - 55000,
   },
 ];
+
+function hasLegacyBranding(value?: string): boolean {
+  if (!value) return false;
+  return /gepa/i.test(value);
+}
 
 class BotStateStore {
   public waState: WAConnectionState = {
@@ -217,6 +223,8 @@ class BotStateStore {
     try {
       if (fs.existsSync(STATE_FILE)) {
         const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+        let migrated = false;
+
         if (raw.config) {
           this.config = {
             ...DEFAULT_CONFIG,
@@ -250,7 +258,73 @@ class BotStateStore {
               ? raw.config.autoResponder
               : [...DEFAULT_AUTORESPONDER_RULES],
           };
+
+          // Clean up any legacy persisted identity strings automatically
+          if (hasLegacyBranding(this.config.botName)) {
+            this.config.botName = DEFAULT_CONFIG.botName;
+            migrated = true;
+          }
+          if (hasLegacyBranding(this.config.ownerName)) {
+            this.config.ownerName = DEFAULT_CONFIG.ownerName;
+            migrated = true;
+          }
+          if (hasLegacyBranding(this.config.ownerWebsite)) {
+            this.config.ownerWebsite = DEFAULT_CONFIG.ownerWebsite;
+            migrated = true;
+          }
+          if (hasLegacyBranding(this.config.stickerPackName)) {
+            this.config.stickerPackName = DEFAULT_CONFIG.stickerPackName;
+            migrated = true;
+          }
+          if (hasLegacyBranding(this.config.stickerAuthor)) {
+            this.config.stickerAuthor = DEFAULT_CONFIG.stickerAuthor;
+            migrated = true;
+          }
+
+          const currentOwner = (this.config.antiBan.ownerNumber || '').replace(
+            /[^0-9]/g,
+            ''
+          );
+          if (!currentOwner || currentOwner === '628129000111') {
+            this.config.antiBan.ownerNumber = OFFICIAL_OWNER_NUMBER;
+            migrated = true;
+          }
+
+          // Upgrade legacy menu/ping templates so the new clean menu takes effect immediately
+          const legacyMenuHeader =
+            hasLegacyBranding(this.config.templates.menuHeader) ||
+            this.config.templates.menuHeader.includes('Pack Stiker: *{packName}*');
+          if (legacyMenuHeader) {
+            this.config.templates.menuHeader = DEFAULT_TEMPLATES.menuHeader;
+            migrated = true;
+          }
+          const legacyMenuFooter =
+            hasLegacyBranding(this.config.templates.menuFooter) ||
+            this.config.templates.menuFooter.includes('Dibuat untuk ekosistem');
+          if (legacyMenuFooter) {
+            this.config.templates.menuFooter = DEFAULT_TEMPLATES.menuFooter;
+            migrated = true;
+          }
+          const legacyPing =
+            hasLegacyBranding(this.config.templates.pingReply) ||
+            this.config.templates.pingReply.includes('Pack Stiker: *{packName}*');
+          if (legacyPing) {
+            this.config.templates.pingReply = DEFAULT_TEMPLATES.pingReply;
+            migrated = true;
+          }
+
+          const cleanedRules = (this.config.autoResponder || []).filter(
+            (r) => !hasLegacyBranding(r.replyText) && !hasLegacyBranding(r.trigger)
+          );
+          if (cleanedRules.length !== (this.config.autoResponder || []).length) {
+            const hasOwnerRule = cleanedRules.some((r) => r.trigger === 'owner');
+            this.config.autoResponder = hasOwnerRule
+              ? cleanedRules
+              : [...cleanedRules, DEFAULT_AUTORESPONDER_RULES[1]];
+            migrated = true;
+          }
         }
+
         if (raw.stats) {
           this.stats = {
             ...this.stats,
@@ -261,8 +335,26 @@ class BotStateStore {
             },
           };
         }
+
         if (Array.isArray(raw.logs)) {
-          this.logs = raw.logs.slice(0, 60);
+          const sanitizedLogs: CommandExecutionLog[] = [];
+          for (const l of raw.logs as CommandExecutionLog[]) {
+            if (hasLegacyBranding(l.summary)) {
+              migrated = true;
+              continue;
+            }
+            if (hasLegacyBranding(l.sender)) {
+              sanitizedLogs.push({ ...l, sender: 'Kamu (Owner)' });
+              migrated = true;
+            } else {
+              sanitizedLogs.push(l);
+            }
+          }
+          this.logs = sanitizedLogs.slice(0, 60);
+        }
+
+        if (migrated) {
+          this.saveToDisk();
         }
       }
     } catch {

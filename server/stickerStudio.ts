@@ -18,7 +18,7 @@ function escapeXml(input: string): string {
 }
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gepabot-stk-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wabot-stk-'));
   try {
     return await fn(dir);
   } finally {
@@ -36,9 +36,9 @@ export async function injectWhatsAppExif(
     await img.load(webpBuffer);
 
     const jsonPayload = JSON.stringify({
-      'sticker-pack-id': 'id.my.gepacorner.gepabot',
-      'sticker-pack-name': packName || 'Gepa Corner',
-      'sticker-pack-publisher': author || 'gepacorner.my.id',
+      'sticker-pack-id': 'com.wabot.sticker.pack',
+      'sticker-pack-name': packName || 'WA Sticker',
+      'sticker-pack-publisher': author || '6289673533963',
       emojis: ['✨', '🔥'],
     });
 
@@ -415,7 +415,7 @@ export async function createBratAnimatedSticker(
 }
 
 function buildTtpSvg(text: string, fillHex: string, strokeHex = '#000000'): string {
-  const clean = text.trim() || 'GEPABOT';
+  const clean = text.trim() || 'STIKER';
   const len = clean.length;
   const fontSize = len > 45 ? 48 : len > 24 ? 62 : len > 12 ? 78 : 96;
   const maxChars = len > 45 ? 16 : len > 24 ? 12 : 10;

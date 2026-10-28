@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DEFAULT_REACTIONS, DEFAULT_TEMPLATES } from '../shared/commands.ts';
+import {
+  DEFAULT_REACTIONS,
+  DEFAULT_TEMPLATES,
+  OFFICIAL_OWNER_DISPLAY,
+  OFFICIAL_OWNER_NUMBER,
+} from '../shared/commands.ts';
 import {
   buildApiUrl,
   buildRealtimeWsUrl,
@@ -32,11 +37,11 @@ const INITIAL_WA_STATE: WAConnectionState = {
 
 const INITIAL_CONFIG: BotConfig = {
   prefix: '.',
-  botName: 'GepaBot',
-  ownerName: 'Gepa — Personal Corner',
-  ownerWebsite: 'gepacorner.my.id',
-  stickerPackName: 'Gepa Corner',
-  stickerAuthor: 'gepacorner.my.id',
+  botName: 'WABot',
+  ownerName: 'Owner Bot',
+  ownerWebsite: `wa.me/${OFFICIAL_OWNER_NUMBER}`,
+  stickerPackName: 'WA Sticker',
+  stickerAuthor: OFFICIAL_OWNER_NUMBER,
   autoRead: true,
   selfMode: false,
   disabledCommands: [],
@@ -63,7 +68,7 @@ const INITIAL_CONFIG: BotConfig = {
     callRejectNotice:
       'Maaf, bot ini berjalan secara otomatis dan tidak menerima panggilan telepon atau video WhatsApp.',
     ownerOnlyMode: false,
-    ownerNumber: '',
+    ownerNumber: OFFICIAL_OWNER_NUMBER,
     browserProfile: 'windows_chrome',
   },
   lockSettingsManualOnly: true,
@@ -79,18 +84,17 @@ const INITIAL_CONFIG: BotConfig = {
       trigger: 'halo',
       matchType: 'contains',
       replyText:
-        'Halo {sender}! Ada yang bisa {botName} bantu hari ini? Ketik *{prefix}menu* untuk melihat seluruh fitur.',
+        'Halo {sender}! Ada yang bisa {botName} bantu hari ini? Ketik *{prefix}menu* untuk melihat daftar perintah.',
       scope: 'all',
       enabled: true,
       hitCount: 0,
       createdAt: 1714500000000,
     },
     {
-      id: 'rule-web',
-      trigger: 'website',
-      matchType: 'contains',
-      replyText:
-        'Kunjungi website resmi kreator kami di https://gepacorner.my.id untuk artikel, panduan, dan update terbaru!',
+      id: 'rule-owner',
+      trigger: 'owner',
+      matchType: 'exact',
+      replyText: `Kontak resmi Owner {botName}: https://wa.me/${OFFICIAL_OWNER_NUMBER} (${OFFICIAL_OWNER_DISPLAY})`,
       scope: 'all',
       enabled: true,
       hitCount: 0,
@@ -100,11 +104,11 @@ const INITIAL_CONFIG: BotConfig = {
 };
 
 const INITIAL_GROUP_STATE: GroupSimulatorState = {
-  subject: 'Gepa Corner Lounge',
+  subject: 'Ruang Diskusi Komunitas',
   description:
-    'Ruang diskusi komunitas kreator & teman-teman gepacorner.my.id. Gunakan awalan titik (.) untuk memakai fitur GepaBot.',
+    'Ruang diskusi komunitas & berbagi media harian. Gunakan awalan titik (.) untuk menjalankan fitur bot.',
   isAnnouncementOnly: false,
-  inviteCode: 'GepaCornerInvite2026',
+  inviteCode: 'KomunitasInvite2026',
 };
 
 export interface SendSimulatorPayload {

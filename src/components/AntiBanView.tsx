@@ -16,6 +16,7 @@ import {
   Sparkles,
   Users,
 } from 'lucide-react';
+import { OFFICIAL_OWNER_NUMBER } from '../shared/commands.ts';
 import type { AntiBanConfig, BotConfig, BrowserProfileType } from '../shared/types.ts';
 
 interface AntiBanViewProps {
@@ -57,7 +58,9 @@ export function AntiBanView({ config, stats, onUpdateConfig }: AntiBanViewProps)
       'Maaf, bot ini berjalan secara otomatis dan tidak menerima panggilan telepon atau video WhatsApp.'
   );
   const [ownerOnlyMode, setOwnerOnlyMode] = useState(antiBan?.ownerOnlyMode ?? false);
-  const [ownerNumber, setOwnerNumber] = useState(antiBan?.ownerNumber ?? '');
+  const [ownerNumber, setOwnerNumber] = useState(
+    antiBan?.ownerNumber || OFFICIAL_OWNER_NUMBER
+  );
   const [browserProfile, setBrowserProfile] = useState<BrowserProfileType>(
     antiBan?.browserProfile ?? 'windows_chrome'
   );
@@ -82,7 +85,7 @@ export function AntiBanView({ config, stats, onUpdateConfig }: AntiBanViewProps)
       setAutoRejectCalls(config.antiBan.autoRejectCalls);
       setCallNotice(config.antiBan.callRejectNotice);
       setOwnerOnlyMode(config.antiBan.ownerOnlyMode);
-      setOwnerNumber(config.antiBan.ownerNumber);
+      setOwnerNumber(config.antiBan.ownerNumber || OFFICIAL_OWNER_NUMBER);
       setBrowserProfile(config.antiBan.browserProfile);
     }
   }, [config.antiBan, config.lockSettingsManualOnly]);
@@ -250,12 +253,11 @@ Sincerely,
               )}
             </div>
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                  Perisai Anti-Ban WhatsApp
-                </span>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
-                  {enabled ? 'AKTIF' : 'NONAKTIF'}
+              <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                <span>Perisai Anti-Ban WhatsApp</span>
+                <span aria-hidden="true">·</span>
+                <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                  {enabled ? 'Aktif' : 'Nonaktif'}
                 </span>
               </div>
               <h2 className="text-xl sm:text-2xl font-bold font-display text-zinc-900 dark:text-zinc-100">
@@ -267,12 +269,11 @@ Sincerely,
             </div>
           </div>
 
-          {/* Risk Level Badge */}
+          {/* Risk Level Summary */}
           <div className="flex flex-col sm:flex-row lg:flex-col gap-3 shrink-0">
             <div className="p-4 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-zinc-900/60 min-w-[220px]">
               <div className="text-xs text-zinc-500 dark:text-zinc-400">Status Keamanan Akun</div>
-              <div className={`text-base font-semibold flex items-center gap-2 mt-0.5 ${risk.color}`}>
-                <span className="w-2.5 h-2.5 rounded-full bg-current animate-pulse" />
+              <div className={`text-base font-semibold mt-0.5 ${risk.color}`}>
                 {risk.label}
               </div>
               <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
@@ -666,17 +667,33 @@ Sincerely,
             )}
           </div>
 
-          {/* Owner Only Mode */}
+          {/* Official Owner Number & Owner Only Mode */}
           <div className="space-y-3 pt-2">
-            <div className="p-4 rounded-xl border border-purple-200/70 dark:border-purple-900/40 bg-purple-500/5 space-y-3">
-              <label className="flex items-center justify-between cursor-pointer">
+            <div className="p-4 rounded-xl border border-purple-200/70 dark:border-purple-900/40 bg-purple-500/5 space-y-3.5">
+              <div>
+                <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 block">
+                  Nomor WhatsApp Owner Utama (Bebas Cooldown &amp; Hak Penuh)
+                </span>
+                <input
+                  type="text"
+                  placeholder="6289673533963"
+                  value={ownerNumber}
+                  onChange={(e) => setOwnerNumber(e.target.value)}
+                  className="w-full mt-1.5 px-3 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-mono tabular-nums text-zinc-900 dark:text-zinc-100"
+                />
+                <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 block">
+                  Nomor Owner resmi (default: 6289673533963) selalu dikecualikan dari batas spam dan tetap diizinkan saat Mode Khusus Owner diaktifkan.
+                </span>
+              </div>
+
+              <label className="pt-3 border-t border-purple-200/60 dark:border-purple-900/40 flex items-center justify-between cursor-pointer gap-4">
                 <div>
                   <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
                     <Lock className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                     Mode Khusus Owner (Self-Only / Single User)
                   </div>
                   <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">
-                    Saat aktif, bot HANYA menjawab perintah dari nomor WhatsApp Anda sendiri. Pesan dari orang lain diabaikan diam-diam.
+                    Saat aktif, bot HANYA menjawab perintah dari nomor Owner di atas. Pesan dari orang lain diabaikan diam-diam.
                   </p>
                 </div>
                 <input
@@ -686,24 +703,6 @@ Sincerely,
                   className="w-5 h-5 rounded text-purple-600 focus:ring-purple-500 dark:bg-zinc-800 cursor-pointer shrink-0"
                 />
               </label>
-
-              {ownerOnlyMode && (
-                <div>
-                  <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                    Nomor WhatsApp Pemilik (Owner)
-                  </span>
-                  <input
-                    type="text"
-                    placeholder="Contoh: 6281234567890"
-                    value={ownerNumber}
-                    onChange={(e) => setOwnerNumber(e.target.value)}
-                    className="w-full mt-1 px-3 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-mono text-zinc-900 dark:text-zinc-100"
-                  />
-                  <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 block">
-                    Gunakan kode negara (awalan 62). Bot juga selalu menerima perintah dari nomor HP yang discan sendiri.
-                  </span>
-                </div>
-              )}
             </div>
           </div>
 

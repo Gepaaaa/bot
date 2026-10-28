@@ -1,4 +1,4 @@
-# fly.toml app configuration file for GepaBot (WhatsApp Baileys Engine + Dashboard)
+# fly.toml app configuration file for WABot (WhatsApp Baileys Engine + Dashboard)
 
 app = 'bot--ztdpa'
 primary_region = 'ams'
@@ -12,7 +12,7 @@ primary_region = 'ams'
 
 # Persistent storage so .baileys_auth (WhatsApp session) survives machine restarts & deploys
 [mounts]
-  source = 'gepabot_data'
+  source = 'wabot_data'
   destination = '/data'
 
 [http_service]

@@ -441,7 +441,7 @@ class WhatsAppSessionManager {
                 setTimeout(async () => {
                   try {
                     await sock.sendMessage(callerJid, {
-                      text: `🛡️ *Perlindungan Anti-Ban GepaBot*\n\n${noticeText}`,
+                      text: `🛡️ *Perlindungan Otomatis ${botStore.config.botName}*\n\n${noticeText}`,
                     });
                   } catch {
                     // Ignore notice failure
@@ -1212,27 +1212,40 @@ class WhatsAppSessionManager {
       .toLowerCase()
       .startsWith(botStore.config.prefix.toLowerCase());
 
+    const normalizeWaPhone = (raw: string) => {
+      let d = raw.replace(/[^0-9]/g, '');
+      if (d.startsWith('08')) d = '62' + d.slice(1);
+      else if (d.startsWith('8') && d.length >= 9) d = '62' + d;
+      return d;
+    };
+
+    const ownerNumberDigits = normalizeWaPhone(
+      botStore.config.antiBan?.ownerNumber || '6289673533963'
+    );
+    const normalizedSenderPhone = normalizeWaPhone(senderPhone);
+    const isOwner =
+      Boolean(msg.key.fromMe) ||
+      Boolean(
+        ownerNumberDigits &&
+          normalizedSenderPhone &&
+          normalizedSenderPhone === ownerNumberDigits
+      );
+
     // Anti-Ban: Owner-Only Mode check
     if (
       botStore.config.antiBan?.enabled &&
       botStore.config.antiBan?.ownerOnlyMode
     ) {
-      const ownerNumberDigits = (
-        botStore.config.antiBan.ownerNumber || ''
-      ).replace(/[^0-9]/g, '');
-      const isFromMe = Boolean(msg.key.fromMe);
-      const isOwner =
-        isFromMe || (ownerNumberDigits && senderPhone === ownerNumberDigits);
       if (!isOwner) {
         return;
       }
     }
 
-    // Anti-Ban: User & Group Command Rate Limiter
+    // Anti-Ban: User & Group Command Rate Limiter (Bot Owner is exempt)
     if (
       botStore.config.antiBan?.enabled &&
       isPrefixCommand &&
-      !msg.key.fromMe
+      !isOwner
     ) {
       const now = Date.now();
       const userKey = senderPhone || senderJid;
@@ -1296,7 +1309,7 @@ class WhatsAppSessionManager {
       await this.sendReaction(sock, msg, botStore.config.reactions.pending);
     }
 
-    let isAdmin = !isGroup || Boolean(msg.key.fromMe);
+    let isAdmin = !isGroup || isOwner;
     let isBotGroupAdmin: boolean | undefined;
     let groupName: string | undefined;
     let groupMembers: SimulatorMember[] | undefined;
@@ -1408,10 +1421,14 @@ class WhatsAppSessionManager {
             p.phone === senderPhone
         );
         if (foundSender) {
-          isAdmin = foundSender.isAdmin || Boolean(msg.key.fromMe);
           if (/^[0-9]{8,16}$/.test(foundSender.phone)) {
             senderPhone = foundSender.phone;
           }
+          const resolvedIsOwner =
+            isOwner ||
+            (Boolean(ownerNumberDigits) &&
+              normalizeWaPhone(senderPhone) === ownerNumberDigits);
+          isAdmin = foundSender.isAdmin || resolvedIsOwner;
         }
       } catch {
         // Default non-admin if group metadata fails

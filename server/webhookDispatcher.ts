@@ -33,7 +33,7 @@ class WebhookDispatcher {
     const payloadString = JSON.stringify(payload);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'User-Agent': 'GepaBot-OpenWA-Gateway/1.0',
+      'User-Agent': 'WABot-OpenWA-Gateway/1.0',
     };
 
     if (webhook.secret) {
@@ -106,7 +106,7 @@ class WebhookDispatcher {
     const payloadString = JSON.stringify(payload);
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'User-Agent': 'GepaBot-OpenWA-Gateway/1.0',
+      'User-Agent': 'WABot-OpenWA-Gateway/1.0',
     };
 
     if (secret) {

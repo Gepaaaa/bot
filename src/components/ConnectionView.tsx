@@ -112,7 +112,7 @@ export function ConnectionView({
       const ct = res.headers.get('content-type') || '';
       if (!res.ok || !ct.includes('application/json')) {
         throw new Error(
-          'Endpoint /api/health tidak mengembalikan JSON GepaBot. Pastikan server Node.js (npm start) sedang berjalan di URL tersebut.'
+          'Endpoint /api/health tidak mengembalikan JSON Server Bot. Pastikan server Node.js (npm start) sedang berjalan di URL tersebut.'
         );
       }
       onUpdateBackendUrl(normalized);
@@ -430,7 +430,7 @@ export function ConnectionView({
                 <code className="font-mono text-emerald-700 dark:text-emerald-400">
                   {config.prefix}
                 </code>{' '}
-                otomatis dijawab oleh GepaBot.
+                otomatis dijawab oleh {config.botName}.
               </span>
             </li>
           </ol>
@@ -507,7 +507,7 @@ export function ConnectionView({
               type="text"
               value={serverInput}
               onChange={(e) => setServerInput(e.target.value)}
-              placeholder="Contoh: https://gepabot-server.up.railway.app atau https://bot.domainkamu.com"
+              placeholder="Contoh: https://bot--ztdpa.fly.dev atau https://bot.domainkamu.com"
               className="flex-1 px-4 py-2.5 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 font-mono text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
             />
             <button
@@ -571,7 +571,7 @@ export function ConnectionView({
               03. VPS Linux / Docker Mandiri
             </div>
             <p>
-              Jalankan <code className="font-mono">docker build -t gepabot . &amp;&amp; docker run -d -p 3000:3000 -v gepa_auth:/app/baileys_auth gepabot</code> agar sesi tautan WhatsApp tidak terputus saat container di-restart.
+              Jalankan <code className="font-mono">docker build -t wabot . &amp;&amp; docker run -d -p 3000:3000 -v wabot_data:/data -e DATA_DIR=/data wabot</code> agar sesi tautan WhatsApp tidak terputus saat container di-restart.
             </p>
           </div>
         </div>

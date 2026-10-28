@@ -9,7 +9,7 @@ import sharp from 'sharp';
 const execFileAsync = promisify(execFile);
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gepabot-media-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wabot-media-'));
   try {
     return await fn(dir);
   } finally {
