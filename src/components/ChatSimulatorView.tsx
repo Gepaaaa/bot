@@ -426,9 +426,52 @@ export function ChatSimulatorView({
 
   const p = config.prefix;
 
+  const findLatestStickerMsg = () =>
+    [...filteredMessages].reverse().find((m) => m.media?.type === 'sticker');
+
   const quickActions =
     chatMode === 'private'
       ? [
+          {
+            label: `${p}s (Foto -> Stiker)`,
+            run: () =>
+              void executeSend({
+                text: `${p}s`,
+                useSampleCat: true,
+              }),
+          },
+          {
+            label: `${p}qc (Bubble Chat WA)`,
+            run: () =>
+              void executeSend({
+                text: `${p}qc santai dulu malam ini`,
+              }),
+          },
+          {
+            label: `${p}toimg (Stiker -> PNG)`,
+            run: () => {
+              const target = findLatestStickerMsg();
+              if (target) {
+                setReplyTarget(target);
+                void executeSend({ replyToId: target.id, text: `${p}toimg` });
+              } else {
+                void executeSend({ text: `${p}toimg` });
+              }
+            },
+          },
+          {
+            label: `${p}wm (Ganti Watermark)`,
+            run: () => {
+              const target = findLatestStickerMsg();
+              const wmCmd = `${p}wm Ryo Yamada | 6289673533963`;
+              if (target) {
+                setReplyTarget(target);
+                void executeSend({ replyToId: target.id, text: wmCmd });
+              } else {
+                void executeSend({ text: wmCmd });
+              }
+            },
+          },
           {
             label: `${p}hdsw (Dokumen Asli -> SW)`,
             run: () =>
@@ -438,24 +481,17 @@ export function ChatSimulatorView({
               }),
           },
           {
-            label: `${p}qc (Bubble Chat)`,
-            run: () =>
-              void executeSend({
-                text: `${p}qc info ngopi malam ini gas ga?`,
-              }),
-          },
-          {
-            label: `${p}iqc (iPhone Chat)`,
-            run: () =>
-              void executeSend({
-                text: `${p}iqc santai dulu kawan`,
-              }),
-          },
-          {
             label: `${p}bratvid (Brat Animasi)`,
             run: () =>
               void executeSend({
                 text: `${p}bratvid lagi sibuk ngoding bot`,
+              }),
+          },
+          {
+            label: `${p}attp (Teks RGB)`,
+            run: () =>
+              void executeSend({
+                text: `${p}attp MANTAP BANGET`,
               }),
           },
           {
@@ -919,6 +955,51 @@ export function ChatSimulatorView({
                               <Download className="w-3 h-3" />
                               Simpan .webp
                             </a>
+                          </div>
+                          {/* Quick Tooling Buttons for this sticker */}
+                          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReplyTarget(msg);
+                                void executeSend({
+                                  replyToId: msg.id,
+                                  text: `${config.prefix}toimg`,
+                                });
+                              }}
+                              className="px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 hover:text-emerald-700 dark:hover:text-emerald-400 border border-zinc-200/60 dark:border-zinc-700/60 transition-colors"
+                              title="Ubah stiker ini kembali jadi gambar PNG"
+                            >
+                              {config.prefix}toimg
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReplyTarget(msg);
+                                void executeSend({
+                                  replyToId: msg.id,
+                                  text: `${config.prefix}wm Ryo Yamada | 6289673533963`,
+                                });
+                              }}
+                              className="px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 hover:text-emerald-700 dark:hover:text-emerald-400 border border-zinc-200/60 dark:border-zinc-700/60 transition-colors"
+                              title="Ganti Pack Name & Author (EXIF) stiker ini"
+                            >
+                              {config.prefix}wm
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReplyTarget(msg);
+                                void executeSend({
+                                  replyToId: msg.id,
+                                  text: `${config.prefix}tovid`,
+                                });
+                              }}
+                              className="px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 hover:text-emerald-700 dark:hover:text-emerald-400 border border-zinc-200/60 dark:border-zinc-700/60 transition-colors"
+                              title="Ubah stiker animasi menjadi video MP4"
+                            >
+                              {config.prefix}tovid
+                            </button>
                           </div>
                         </div>
                       )}

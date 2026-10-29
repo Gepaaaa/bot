@@ -47,7 +47,9 @@ export function ConnectionView({
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedPing, setCopiedPing] = useState(false);
   const [copiedTermux, setCopiedTermux] = useState(false);
-  const [hostGuideMode, setHostGuideMode] = useState<'termux' | 'wispbyte'>('termux');
+  const [hostGuideMode, setHostGuideMode] = useState<
+    'termux' | 'koyeb_render' | 'huggingface' | 'oracle'
+  >('termux');
 
   const [serverInput, setServerInput] = useState(backendUrl);
   const [probingServer, setProbingServer] = useState(false);
@@ -480,24 +482,40 @@ export function ConnectionView({
               </span>
             </div>
             <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-              {hostGuideMode === 'termux'
-                ? 'Server Pribadi 24/7 Pakai HP Android Nganggur (Termux — Paling Stabil & Anti-Ban)'
-                : 'Jalankan Bot 24/7 di Wispbyte Cloud (Tanpa Kartu Kredit)'}
+              {hostGuideMode === 'termux' &&
+                'Server Pribadi 24/7 Pakai HP Android Nganggur (Termux — Bebas Biaya & Paling Anti-Ban)'}
+              {hostGuideMode === 'koyeb_render' &&
+                'Cloud Container Gratis: Koyeb / Render (+ Auto Keep-Alive /ping)'}
+              {hostGuideMode === 'huggingface' &&
+                'Hugging Face Spaces: Docker Container 24/7 Gratis (16GB RAM, Tanpa Kartu Kredit)'}
+              {hostGuideMode === 'oracle' &&
+                'Oracle Cloud Always Free: VPS Ubuntu 24/7 (4 Core, 24GB RAM, IP Publik Sendiri)'}
             </h3>
             <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">
-              {hostGuideMode === 'termux' ? (
+              {hostGuideMode === 'termux' && (
                 <>
                   Punya HP Android yang tidak terpakai? Jadikan server bot pribadi 24/7 selamanya memakai skrip otomatis <code className="font-mono">termux.sh</code>. Memakai IP WiFi rumah (jauh lebih aman dari banned WA), RAM jauh lebih lega, sesi tersimpan permanen di memori HP, dan layar HP dimatikan pun bot tetap aktif nonstop.
                 </>
-              ) : (
+              )}
+              {hostGuideMode === 'koyeb_render' && (
                 <>
-                  Project ini sudah dilengkapi <code className="font-mono">esbuild</code> &amp; <code className="font-mono">index.js</code> otomatis. Jika muncul popup <em>Missing Package Detected</em> di Wispbyte, cukup klik tombol biru <strong>Add to Startup</strong> lalu klik <strong>Start</strong> di Console.
+                  WhatsApp Baileys membutuhkan koneksi WebSocket yang terus menyala (tidak bisa di Vercel/serverless). Di Koyeb atau Render, jalankan service Node.js dan pasang URL <code className="font-mono">/ping</code> ke <strong>cron-job.org</strong> atau <strong>UptimeRobot</strong> setiap 10 menit agar server tidak pernah sleep/mati.
+                </>
+              )}
+              {hostGuideMode === 'huggingface' && (
+                <>
+                  Hugging Face Spaces menyediakan container Docker gratis dengan spesifikasi 2 vCPU dan 16GB RAM yang berjalan nonstop 24/7 tanpa membutuhkan kartu kredit sama sekali. Cukup fork repo ke Space bertipe Docker.
+                </>
+              )}
+              {hostGuideMode === 'oracle' && (
+                <>
+                  Opsi cloud gratis terbaik di dunia: Oracle Cloud Always Free memberikan VPS compute ARM (Ampere A1) gratis selamanya dengan 4 OCPU, 24GB RAM, OS Ubuntu, dan IP statis murni. Bot tidak akan pernah tertidur atau dimatikan pihak ketiga.
                 </>
               )}
             </p>
           </div>
 
-          <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 shrink-0 self-start">
+          <div className="flex flex-wrap items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 shrink-0 self-start">
             <button
               type="button"
               onClick={() => setHostGuideMode('termux')}
@@ -511,19 +529,41 @@ export function ConnectionView({
             </button>
             <button
               type="button"
-              onClick={() => setHostGuideMode('wispbyte')}
+              onClick={() => setHostGuideMode('koyeb_render')}
               className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
-                hostGuideMode === 'wispbyte'
+                hostGuideMode === 'koyeb_render'
                   ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
                   : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
               }`}
             >
-              Cloud Wispbyte
+              Koyeb / Render
+            </button>
+            <button
+              type="button"
+              onClick={() => setHostGuideMode('huggingface')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
+                hostGuideMode === 'huggingface'
+                  ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+              }`}
+            >
+              Hugging Face (Docker)
+            </button>
+            <button
+              type="button"
+              onClick={() => setHostGuideMode('oracle')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
+                hostGuideMode === 'oracle'
+                  ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+              }`}
+            >
+              Oracle VPS (Always Free)
             </button>
           </div>
         </div>
 
-        {hostGuideMode === 'termux' ? (
+        {hostGuideMode === 'termux' && (
           <div className="pt-4 border-t border-zinc-200/80 dark:border-zinc-800 grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
             <div className="space-y-1.5">
               <div className="font-semibold text-zinc-900 dark:text-zinc-100">
@@ -577,30 +617,24 @@ export function ConnectionView({
               </p>
             </div>
           </div>
-        ) : (
+        )}
+
+        {hostGuideMode === 'koyeb_render' && (
           <div className="pt-4 border-t border-zinc-200/80 dark:border-zinc-800 grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
             <div className="space-y-1.5">
               <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                01. Buat Server Node.js Gratis (0 Kartu)
+                01. Hubungkan Repo ke Koyeb / Render
               </div>
               <p>
-                Login ke <strong className="text-zinc-800 dark:text-zinc-200">wispbyte.com</strong> memakai akun Discord atau Email. Klik <strong>Create Server &rarr; Free Tier (24/7, 512MB) &rarr; Node.js</strong> (pilih Node 20/22).
+                Daftar akun di <strong className="text-zinc-800 dark:text-zinc-200">koyeb.com</strong> atau <strong className="text-zinc-800 dark:text-zinc-200">render.com</strong>. Buat Web Service baru, pilih repository GitHub bot kamu, set build command <code className="font-mono">npm install &amp;&amp; npm run build</code> dan start command <code className="font-mono">npm start</code>.
               </p>
             </div>
             <div className="space-y-1.5">
               <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                02. Clone GitHub &amp; Klik Add to Startup
+                02. Set Variabel Lingkungan &amp; Salin /ping
               </div>
               <p>
-                Buka tab <strong>GitHub</strong>, tempel link repo GitHub lalu klik <strong>Clone</strong>. Buka tab <strong>Console</strong> dan klik <strong>Start</strong> (jika muncul popup <em>Missing Package esbuild</em>, klik tombol biru <strong>Add to Startup</strong>).
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                03. Ketik Nomor WA di Console &amp; Tinggal!
-              </div>
-              <p>
-                Ketik nomor WA bot (misal <code className="font-mono">6281234567890</code>) langsung di kotak <strong>Type a command...</strong> bawah Console lalu Enter. Masukkan 8 kode Pairing ke HP, lalu tutup browser.
+                Tambahkan Env Var <code className="font-mono">PORT=3000</code> dan <code className="font-mono">DATA_DIR=/tmp</code>. Setelah deploy aktif, bot sudah memiliki endpoint ringan <code className="font-mono">/ping</code> yang siap dipanggil.
               </p>
               <button
                 type="button"
@@ -632,6 +666,72 @@ export function ConnectionView({
                   </>
                 )}
               </button>
+            </div>
+            <div className="space-y-1.5">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                03. Pasang Keep-Alive di cron-job.org
+              </div>
+              <p>
+                Buka <strong className="text-zinc-800 dark:text-zinc-200">cron-job.org</strong> (100% gratis), buat cron baru yang memanggil URL <code className="font-mono">https://nama-app.koyeb.app/ping</code> setiap <strong>10 menit</strong>. Ini menjaga WebSocket Baileys tetap ON 24/7 tanpa idle sleep!
+              </p>
+            </div>
+          </div>
+        )}
+
+        {hostGuideMode === 'huggingface' && (
+          <div className="pt-4 border-t border-zinc-200/80 dark:border-zinc-800 grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+            <div className="space-y-1.5">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                01. Buat Hugging Face Space (Docker)
+              </div>
+              <p>
+                Daftar gratis di <strong className="text-zinc-800 dark:text-zinc-200">huggingface.co</strong>. Klik profile &rarr; <strong>New Space</strong>. Pilih SDK <strong>Docker &rarr; Blank</strong>, beri nama repo, dan pilih lisensi open-source.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                02. Masukkan Dockerfile Ringan
+              </div>
+              <p>
+                Pakai image resmi <code className="font-mono">node:20-bookworm-slim</code> dengan FFmpeg. Container Hugging Face tidak memiliki batas idle sleep selama service web port 7860/3000 mengekspos respons HTTP.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                03. Buka Logs &amp; Tautkan Nomor
+              </div>
+              <p>
+                Buka tab <strong>Logs / App</strong> pada Space kamu. Masukkan Pairing Code 8 digit yang muncul ke WhatsApp di HP kamu. Bot langsung on 24/7 dengan jatah 16GB RAM gratis!
+              </p>
+            </div>
+          </div>
+        )}
+
+        {hostGuideMode === 'oracle' && (
+          <div className="pt-4 border-t border-zinc-200/80 dark:border-zinc-800 grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+            <div className="space-y-1.5">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                01. Buat Akun Oracle Cloud Always Free
+              </div>
+              <p>
+                Buka <strong className="text-zinc-800 dark:text-zinc-200">cloud.oracle.com</strong> dan daftar Always Free. Buat Compute Instance ARM Ampere A1 (Ubuntu 22.04 LTS atau 24.04 LTS). Gratis 4 core dan 24GB RAM selamanya.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                02. Jalankan dengan PM2 (Auto-Restart)
+              </div>
+              <p>
+                SSH ke VPS kamu, install Node.js dan PM2: <code className="font-mono">sudo apt update &amp;&amp; sudo apt install -y nodejs npm ffmpeg &amp;&amp; sudo npm i -g pm2</code>. Clone repo kamu lalu jalankan <code className="font-mono">pm2 start server.ts --name wabot --interpreter tsx</code> dan <code className="font-mono">pm2 startup</code>.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                03. Bot Aktif Selamanya (Tanpa Sleep)
+              </div>
+              <p>
+                Karena berupa dedicated VPS Linux murni, koneksi WebSocket TCP ke server WhatsApp tidak pernah terputus, memori sesi permanen di SSD, dan kamu bisa menutup terminal SSH tanpa khawatir bot mati.
+              </p>
             </div>
           </div>
         )}
