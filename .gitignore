@@ -8,4 +8,6 @@ coverage/
 !.env.example
 .baileys_auth/
 .bot-state.json
+.wabot-state.json
+server.mjs
 

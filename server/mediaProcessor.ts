@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import QRCode from 'qrcode';
 import sharp from 'sharp';
+import { getFfmpegBin } from './ffmpegBin.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -99,7 +100,7 @@ export async function convertVideoToPtv(videoBuffer: Buffer): Promise<Buffer> {
     await fs.writeFile(inPath, videoBuffer);
 
     await execFileAsync(
-      'ffmpeg',
+      getFfmpegBin(),
       [
         '-y',
         '-i',
@@ -142,7 +143,7 @@ export async function extractOrConvertAudio(
     if (target === 'vn') {
       const outPath = path.join(dir, 'out.ogg');
       await execFileAsync(
-        'ffmpeg',
+        getFfmpegBin(),
         [
           '-y',
           '-i',
@@ -169,7 +170,7 @@ export async function extractOrConvertAudio(
 
     const outPath = path.join(dir, 'out.mp3');
     await execFileAsync(
-      'ffmpeg',
+      getFfmpegBin(),
       [
         '-y',
         '-i',
@@ -228,7 +229,7 @@ export async function applyAudioEffect(
     }
 
     await execFileAsync(
-      'ffmpeg',
+      getFfmpegBin(),
       [
         '-y',
         '-i',
@@ -332,7 +333,7 @@ export async function getOrCreateSampleVideoBuffer(): Promise<Buffer> {
   cachedSampleVideo = await withTempDir(async (dir) => {
     const out = path.join(dir, 'sample.mp4');
     await execFileAsync(
-      'ffmpeg',
+      getFfmpegBin(),
       [
         '-y',
         '-f',
@@ -367,7 +368,7 @@ export async function getOrCreateSampleAudioBuffer(): Promise<Buffer> {
   cachedSampleAudio = await withTempDir(async (dir) => {
     const out = path.join(dir, 'sample.mp3');
     await execFileAsync(
-      'ffmpeg',
+      getFfmpegBin(),
       [
         '-y',
         '-f',

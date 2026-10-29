@@ -25,6 +25,7 @@ import {
 } from './commandEngine.ts';
 import { fetchRemoteBuffer } from './mediaDownloader.ts';
 import { botStore } from './stateStore.ts';
+import { cloudSync } from './cloudSync.ts';
 import { groupCache } from './groupCache.ts';
 import { queueEngine } from './queueEngine.ts';
 import { resolveDataDir } from './storagePath.ts';
@@ -199,7 +200,7 @@ class WhatsAppSessionManager {
     return false;
   }
 
-  public async initAutoResume(): Promise<void> {
+  public async initAutoResume(): Promise<boolean> {
     try {
       const credsPath = path.join(AUTH_DIR, 'creds.json');
       const raw = await fs.readFile(credsPath, 'utf-8');
@@ -216,10 +217,12 @@ class WhatsAppSessionManager {
       if (hasValidSession) {
         this.manualDisconnect = false;
         await this.launchSocket({ mode: 'resume' });
+        return true;
       }
     } catch {
       // No saved session to auto-resume
     }
+    return false;
   }
 
   private destroyActiveSocketOnly() {
@@ -262,6 +265,7 @@ class WhatsAppSessionManager {
       } catch {
         // Ignore missing directory
       }
+      await cloudSync.clearAuth();
     }
 
     botStore.updateWAState({
@@ -284,6 +288,7 @@ class WhatsAppSessionManager {
     this.destroyActiveSocketOnly();
     try {
       await this.pendingCredsSave;
+      await cloudSync.flushAllNow(AUTH_DIR);
     } catch {
       // Ignore flush error on exit
     }
@@ -374,13 +379,22 @@ class WhatsAppSessionManager {
       await fs.mkdir(AUTH_DIR, { recursive: true });
 
       if (!this.authContext) {
-        this.authContext = await useMultiFileAuthState(AUTH_DIR);
+        const loaded = await useMultiFileAuthState(AUTH_DIR);
+        const origKeysSet = loaded.state.keys.set.bind(loaded.state.keys);
+        loaded.state.keys.set = async (data) => {
+          await origKeysSet(data);
+          cloudSync.scheduleAuthSync(AUTH_DIR);
+        };
+        this.authContext = loaded;
       }
       const { state, saveCreds } = this.authContext;
 
       const queueSaveCreds = () => {
         this.pendingCredsSave = this.pendingCredsSave
-          .then(() => saveCreds())
+          .then(async () => {
+            await saveCreds();
+            cloudSync.scheduleAuthSync(AUTH_DIR);
+          })
           .catch(() => {});
         return this.pendingCredsSave;
       };
@@ -479,6 +493,20 @@ class WhatsAppSessionManager {
             statusMessage: null,
             lastError: null,
           });
+          console.log(
+            [
+              '',
+              '============================================================',
+              `[WABot 24/7] PAIRING CODE WHATSAPP (+${options.phoneNumber}):`,
+              '',
+              `   >>>   ${formatted}   <<<`,
+              '',
+              'Buka WhatsApp di HP -> Perangkat Tertaut -> Tautkan Perangkat',
+              '-> "Tautkan dengan nomor telepon saja" -> Masukkan 8 kode di atas!',
+              '============================================================',
+              '',
+            ].join('\n')
+          );
         } catch (err) {
           this.pairingRequested = false;
           const msg =
@@ -490,6 +518,7 @@ class WhatsAppSessionManager {
             statusMessage: null,
             lastError: `Gagal membuat Pairing Code: ${msg}`,
           });
+          console.error(`[WABot 24/7] Gagal membuat Pairing Code: ${msg}`);
         }
       };
 
@@ -563,6 +592,17 @@ class WhatsAppSessionManager {
             statusMessage: null,
             lastError: null,
           });
+          console.log(
+            [
+              '',
+              '============================================================',
+              `[WABot 24/7] BERHASIL TERHUBUNG KE WHATSAPP (+${phone} - ${name})!`,
+              'Sesi tersimpan permanen di server. Kamu bisa tutup halaman ini,',
+              'bot akan tetap menyala dan membalas otomatis 24/7!',
+              '============================================================',
+              '',
+            ].join('\n')
+          );
           void webhookDispatcher.dispatch('session.status', {
             status: 'connected',
             user: { id: rawId, name, phone },

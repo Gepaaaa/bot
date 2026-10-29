@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import sharp from 'sharp';
 import WebP from 'node-webpmux';
+import { getFfmpegBin } from './ffmpegBin.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -95,7 +96,7 @@ export async function videoToAnimatedStickerWebp(
     await fs.writeFile(inPath, videoBuffer);
 
     await execFileAsync(
-      'ffmpeg',
+      getFfmpegBin(),
       [
         '-y',
         '-i',
@@ -153,7 +154,7 @@ export async function animatedWebpToMp4(webpBuffer: Buffer): Promise<Buffer> {
         .toFile(singlePng);
 
       await execFileAsync(
-        'ffmpeg',
+        getFfmpegBin(),
         [
           '-y',
           '-loop',
@@ -210,7 +211,7 @@ export async function animatedWebpToMp4(webpBuffer: Buffer): Promise<Buffer> {
 
     const outMp4 = path.join(dir, 'out.mp4');
     await execFileAsync(
-      'ffmpeg',
+      getFfmpegBin(),
       [
         '-y',
         '-framerate',
@@ -388,7 +389,7 @@ export async function createBratAnimatedSticker(
 
     const outPath = path.join(dir, 'bratvid.webp');
     await execFileAsync(
-      'ffmpeg',
+      getFfmpegBin(),
       [
         '-y',
         '-framerate',
@@ -473,7 +474,7 @@ export async function createAttpSticker(
 
     const outPath = path.join(dir, 'attp.webp');
     await execFileAsync(
-      'ffmpeg',
+      getFfmpegBin(),
       [
         '-y',
         '-framerate',

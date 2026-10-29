@@ -16,22 +16,27 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Create /data directory so persistent Fly.io Volume mounts cleanly
-RUN mkdir -p /data
+# Create writable /data directory for persistent volumes or non-root containers
+RUN mkdir -p /data && chmod 777 /data
 
-# Copy package manifests and install dependencies (--legacy-peer-deps resolves Vite 8 vs esbuild peer check)
+# Copy package manifests and install dependencies
 COPY package*.json ./
 RUN npm install --legacy-peer-deps --no-audit --no-fund
 
-# Copy project source and build frontend assets
+# Copy project source, build frontend assets, and bundle server into pure ESM JS
+# (eliminates ~120 MB tsx/TypeScript runtime RAM overhead on 512 MB free cloud plans)
 COPY . .
-RUN npm run build
+RUN npm run build && \
+    ./node_modules/.bin/esbuild server.ts \
+      --bundle \
+      --platform=node \
+      --format=esm \
+      --packages=external \
+      --outfile=server.mjs
 
 ENV NODE_ENV=production
 ENV PORT=8080
-ENV DATA_DIR=/data
 
 EXPOSE 8080
 
-# Run tsx directly without npx wrapper (saves ~90 MB RAM to prevent OOM restarts)
-CMD ["./node_modules/.bin/tsx", "server.ts"]
+CMD ["node", "--max-old-space-size=384", "server.mjs"]

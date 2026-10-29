@@ -181,7 +181,7 @@ export default function App() {
                     : 'Mesin Server Bot Belum Merespon'}
                 </div>
                 <p className="text-xs text-amber-800/90 dark:text-amber-300/90 leading-relaxed">
-                  Pastikan mesin server 24/7 (Fly.io / VPS) aktif dan terhubung di menu Koneksi WA agar semua sesi serta perintah WhatsApp berjalan penuh.
+                  Gunakan server Node.js 24/7 murni gratis tanpa kartu kredit (Wispbyte) sesuai panduan di tab Koneksi WA agar sesi dan perintah WhatsApp tetap aktif nonstop walau browser ditutup.
                 </p>
               </div>
             </div>

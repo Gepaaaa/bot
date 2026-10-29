@@ -45,6 +45,7 @@ export function ConnectionView({
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedPing, setCopiedPing] = useState(false);
 
   const [serverInput, setServerInput] = useState(backendUrl);
   const [probingServer, setProbingServer] = useState(false);
@@ -454,13 +455,13 @@ export function ConnectionView({
         </div>
       </div>
 
-      {/* Dedicated 24/7 Hosting & Vercel Split-Architecture Section */}
+      {/* Pure Free 24/7 Zero-Credit-Card Hosting Section */}
       <div className="bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-6 space-y-6">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-          <div className="space-y-1 max-w-2xl">
-            <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+          <div className="space-y-1.5 max-w-3xl">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
               <Server className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>Arsitektur Server Bot 24/7 &amp; Solusi Deploy Vercel</span>
+              <span>100% Pure Gratis · Tanpa Kartu Kredit · Tanpa Buka Web</span>
               <span aria-hidden="true">·</span>
               <span
                 className={
@@ -477,15 +478,83 @@ export function ConnectionView({
               </span>
             </div>
             <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-              Kenapa Deploy di Vercel Saja Belum Bisa Menjalankan Bot WhatsApp?
+              Jalankan Bot 24/7 Nonstop di Wispbyte (Murni Gratis &amp; Tanpa Kartu Kredit)
             </h3>
             <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">
-              Vercel hanya menghosting tampilan web statis &amp; fungsi Serverless yang otomatis mati dalam beberapa detik setelah request selesai. Sedangkan koneksi WhatsApp Multi-Device (Baileys) membutuhkan proses Node.js yang hidup 24 jam nonstop (persistent TCP/WebSocket) serta mesin <strong>FFmpeg</strong> untuk stiker bergerak, video bulat, dan efek audio.
+              Project ini sudah dilengkapi <code className="font-mono">index.js</code> otomatis, FFmpeg bawaan, serta fitur <strong>Direct Console Pairing</strong>. Kamu cukup daftar pakai Discord/Email di Wispbyte (tanpa kartu kredit/debit sama sekali, tanpa klik renew harian, tanpa nonton iklan), lalu ketik nomor WA langsung di Console—bot langsung jalan 24/7 penuh selama 2 minggu nonstop.
             </p>
+          </div>
+
+          <a
+            href="https://wispbyte.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-4 py-2.5 rounded-xl bg-zinc-900 dark:bg-emerald-600 text-white text-xs font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-2 whitespace-nowrap shrink-0 self-start"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            Buka Wispbyte.com
+          </a>
+        </div>
+
+        {/* 3 Zero-Hassle Cardless Steps */}
+        <div className="pt-4 border-t border-zinc-200/80 dark:border-zinc-800 grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+          <div className="space-y-1.5">
+            <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+              01. Buat Server Node.js Gratis (0 Kartu)
+            </div>
+            <p>
+              Login ke <strong className="text-zinc-800 dark:text-zinc-200">wispbyte.com</strong> memakai akun Discord atau Email (murni gratis tanpa kartu kredit). Klik <strong>Create Server &rarr; Free Tier (24/7, 512MB) &rarr; Node.js</strong> (pilih Node 20/22).
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+              02. Clone dari GitHub &amp; Klik Start
+            </div>
+            <p>
+              Di menu kiri server Wispbyte, buka tab <strong>GitHub</strong>, tempel link repo GitHub project ini lalu klik <strong>Clone</strong>. Setelah itu buka tab <strong>Console</strong> dan klik tombol <strong>Start</strong> (tidak perlu ubah setting/env apa pun).
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+              03. Ketik Nomor WA di Console &amp; Tinggal!
+            </div>
+            <p>
+              Begitu muncul tulisan <em>Mesin Aktif</em>, ketik nomor WA bot (misal <code className="font-mono">6281234567890</code>) langsung di kotak <strong>Type a command...</strong> bawah Console lalu Enter. Masukkan 8 kode Pairing yang muncul ke HP, lalu tutup browser—server jalan 24/7 sendiri (cukup login ke panel 14 hari sekali).
+            </p>
+            <button
+              type="button"
+              onClick={async () => {
+                const base = (
+                  backendUrl ||
+                  (typeof window !== 'undefined' ? window.location.origin : '')
+                ).replace(/\/+$/, '');
+                const pingUrl = `${base}/ping`;
+                try {
+                  await navigator.clipboard.writeText(pingUrl);
+                  setCopiedPing(true);
+                  setTimeout(() => setCopiedPing(false), 2000);
+                } catch {
+                  // Ignore clipboard restrictions
+                }
+              }}
+              className="mt-1 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-[#FAF9F6] dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 font-medium inline-flex items-center gap-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            >
+              {copiedPing ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  URL /ping Tersalin
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  Salin Endpoint /ping
+                </>
+              )}
+            </button>
           </div>
         </div>
 
-        {/* External Bot Server Connector Form */}
+        {/* Optional External Bot Server Connector Form */}
         <form
           onSubmit={handleSaveBackendServer}
           className="pt-4 border-t border-zinc-200/80 dark:border-zinc-800 space-y-3"
@@ -493,7 +562,7 @@ export function ConnectionView({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <label className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 flex items-center gap-1.5">
               <Globe className="w-3.5 h-3.5 text-emerald-600" />
-              Hubungkan Dashboard Ini ke URL Server Bot Eksternal (Opsional untuk Pengguna Vercel)
+              Opsional: Hubungkan ke URL Server Bot Eksternal (Jika Ingin Mengontrol dari Web Ini)
             </label>
             {backendUrl && (
               <span className="text-xs font-mono text-emerald-700 dark:text-emerald-400">
@@ -507,7 +576,7 @@ export function ConnectionView({
               type="text"
               value={serverInput}
               onChange={(e) => setServerInput(e.target.value)}
-              placeholder="Contoh: https://bot--ztdpa.fly.dev atau https://bot.domainkamu.com"
+              placeholder="Contoh: https://url-server-bot-kamu.app"
               className="flex-1 px-4 py-2.5 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 font-mono text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
             />
             <button
@@ -547,34 +616,6 @@ export function ConnectionView({
             </div>
           )}
         </form>
-
-        {/* 3 Concrete Hosting Options */}
-        <div className="pt-4 border-t border-zinc-200/80 dark:border-zinc-800 grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-          <div className="space-y-1">
-            <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-              01. Full-Stack Cloud Run / Railway / Render
-            </div>
-            <p>
-              Repositori ini sudah dilengkapi <code className="font-mono">Dockerfile</code> siap pakai berisi Node.js 22 + FFmpeg. Deploy langsung ke Railway, Render, Fly.io, atau Cloud Run agar dashboard &amp; mesin WA menyala 24/7 dalam satu URL.
-            </p>
-          </div>
-          <div className="space-y-1">
-            <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-              02. Split Vercel (UI) + Server Bot (Backend)
-            </div>
-            <p>
-              Jika dashboard tetap di-deploy di Vercel (<code className="font-mono">vercel.json</code> sudah disiapkan), jalankan backend di Railway/VPS lalu tempel URL HTTPS servernya pada kolom di atas atau isi env <code className="font-mono">VITE_BACKEND_URL</code> di Vercel.
-            </p>
-          </div>
-          <div className="space-y-1">
-            <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-              03. VPS Linux / Docker Mandiri
-            </div>
-            <p>
-              Jalankan <code className="font-mono">docker build -t wabot . &amp;&amp; docker run -d -p 3000:3000 -v wabot_data:/data -e DATA_DIR=/data wabot</code> agar sesi tautan WhatsApp tidak terputus saat container di-restart.
-            </p>
-          </div>
-        </div>
       </div>
     </div>
   );

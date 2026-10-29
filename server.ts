@@ -2,6 +2,7 @@ import 'dotenv/config';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
+import readline from 'node:readline';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import {
@@ -10,6 +11,7 @@ import {
   processBotMessage,
   shouldSendPendingReaction,
 } from './server/commandEngine.ts';
+import { cloudSync } from './server/cloudSync.ts';
 import { gatewayRouter } from './server/gatewayRouter.ts';
 import {
   getOrCreateSampleAudioBuffer,
@@ -21,7 +23,65 @@ import { waManager } from './server/waManager.ts';
 import { renderBotTemplate } from './src/shared/commands.ts';
 import type { BotConfig, SimulatorMessage } from './src/shared/types.ts';
 
-const PORT = Number(process.env.PORT || 3000);
+function resolveListenConfig(): { port: number; host: string; explicitCliPort: boolean } {
+  const args = process.argv.slice(2);
+  let cliPort: number | undefined;
+  let host = '0.0.0.0';
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if ((arg === '--port' || arg === '-p') && args[i + 1]) {
+      const parsed = Number(args[i + 1]);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        cliPort = parsed;
+      }
+      i++;
+    } else if (arg.startsWith('--port=')) {
+      const parsed = Number(arg.slice('--port='.length));
+      if (Number.isFinite(parsed) && parsed > 0) {
+        cliPort = parsed;
+      }
+    } else if (arg === '--host' && args[i + 1] && !args[i + 1].startsWith('-')) {
+      host = args[i + 1];
+      i++;
+    } else if (arg.startsWith('--host=')) {
+      const val = arg.slice('--host='.length).trim();
+      if (val) host = val;
+    }
+  }
+
+  if (cliPort !== undefined) {
+    return { port: cliPort, host, explicitCliPort: true };
+  }
+
+  // Support Pterodactyl / Wispbyte panels automatically via SERVER_PORT
+  const pterodactylPort = Number(process.env.SERVER_PORT || 0);
+  if (Number.isFinite(pterodactylPort) && pterodactylPort > 0) {
+    return {
+      port: pterodactylPort,
+      host,
+      explicitCliPort: false,
+    };
+  }
+
+  // In development (e.g. AI Studio container where Cloud Run sets PORT=8080 for nginx),
+  // always default to port 3000 unless APP_PORT is explicitly configured.
+  if (process.env.NODE_ENV !== 'production') {
+    return {
+      port: Number(process.env.APP_PORT || 3000),
+      host,
+      explicitCliPort: false,
+    };
+  }
+
+  return {
+    port: Number(process.env.PORT || 3000),
+    host,
+    explicitCliPort: false,
+  };
+}
+
+const LISTEN_CONFIG = resolveListenConfig();
 
 function classifySimulatorDocKind(
   mimeType: string,
@@ -129,16 +189,38 @@ async function startServer() {
   }, 25000);
   wsHeartbeatInterval.unref();
 
+  const externalSelfUrl = (
+    process.env.KEEPALIVE_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
+    process.env.PUBLIC_SERVER_URL ||
+    ''
+  )
+    .trim()
+    .replace(/\/+$/, '');
+
+  // Ultra-lightweight 4-byte keep-alive endpoint (<2 MB/month bandwidth when pinged every 5-10 mins)
+  app.get('/ping', (_req, res) => {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(200).send('pong');
+  });
+
   // --- REST API ROUTES ---
   app.get('/api/health', (_req, res) => {
     const activeDataDir = resolveDataDir();
+    const cloudDbSync = cloudSync.isEnabled();
     res.json({
       ok: true,
       engine: 'WABot Stateful Engine',
       waStatus: botStore.waState.status,
       uptimeSeconds: Math.floor(process.uptime()),
       dataDir: activeDataDir,
-      persistentMount: activeDataDir === '/data' || Boolean(process.env.DATA_DIR),
+      cloudDbSync,
+      keepAliveActive: Boolean(externalSelfUrl),
+      persistentMount:
+        activeDataDir === '/data' ||
+        Boolean(process.env.DATA_DIR) ||
+        cloudDbSync,
       timestamp: Date.now(),
     });
   });
@@ -946,7 +1028,11 @@ async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR === 'true' ? false : { server },
+        watch: process.env.DISABLE_HMR === 'true' ? null : undefined,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -958,16 +1044,147 @@ async function startServer() {
     });
   }
 
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`WABot server running on http://0.0.0.0:${PORT}`);
-    void waManager.initAutoResume();
+  let activePort = LISTEN_CONFIG.port;
+  let retriedFallbackPort = false;
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (
+      err.code === 'EADDRINUSE' &&
+      !LISTEN_CONFIG.explicitCliPort &&
+      activePort !== 3000 &&
+      !retriedFallbackPort
+    ) {
+      retriedFallbackPort = true;
+      activePort = 3000;
+      console.warn(
+        `Port ${LISTEN_CONFIG.port} is already in use, falling back to port 3000...`
+      );
+      server.listen(activePort, LISTEN_CONFIG.host);
+      return;
+    }
+    console.error('Fatal HTTP server error:', err);
+    process.exit(1);
   });
+
+  // Automatic 9-minute external keep-alive ping when hosted on Render Free (prevents 15-min idle sleep)
+  let selfKeepAliveInterval: ReturnType<typeof setInterval> | null = null;
+  if (externalSelfUrl && /^https?:\/\//i.test(externalSelfUrl)) {
+    const pingEndpoint = externalSelfUrl.endsWith('/ping')
+      ? externalSelfUrl
+      : `${externalSelfUrl}/ping`;
+    selfKeepAliveInterval = setInterval(() => {
+      fetch(pingEndpoint, {
+        headers: { 'User-Agent': 'WABot-SelfKeepAlive/1.0' },
+        signal: AbortSignal.timeout(15000),
+      }).catch(() => {
+        // Ignore transient self-ping network hiccups
+      });
+    }, 9 * 60 * 1000);
+    selfKeepAliveInterval.unref();
+  }
+
+  server.listen(activePort, LISTEN_CONFIG.host, () => {
+    console.log(`WABot server running on http://${LISTEN_CONFIG.host}:${activePort}`);
+    void (async () => {
+      try {
+        await cloudSync.initAndRestore(resolveDataDir());
+        if (cloudSync.isEnabled()) {
+          botStore.reloadFromDisk();
+        }
+        const resumed = await waManager.initAutoResume();
+        if (!resumed) {
+          const envPhone = (process.env.PAIRING_PHONE || '').trim();
+          if (envPhone) {
+            console.log(
+              `[WABot 24/7] Meminta Pairing Code otomatis untuk nomor ${envPhone}...`
+            );
+            await waManager.connectWithPairingCode(envPhone);
+          } else {
+            console.log(
+              [
+                '',
+                '============================================================',
+                '[WABot 24/7] Mesin Aktif! Belum ada nomor WhatsApp tertaut.',
+                '-> CARA CEPAT (TANPA BUKA WEB): Ketik nomor WA bot kamu',
+                '   langsung di kolom Console bawah (contoh: 6281234567890)',
+                '   lalu tekan Enter untuk mendapat 8-digit Pairing Code!',
+                '-> Perintah Console lain: "status" | "logout"',
+                '============================================================',
+                '',
+              ].join('\n')
+            );
+          }
+        }
+      } catch (err) {
+        console.error('Auto-resume initialization error:', err);
+      }
+    })();
+  });
+
+  // Interactive Console Listener for Wispbyte / Pterodactyl ("Type a command..." input box)
+  if (process.stdin && !process.stdin.destroyed) {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      terminal: false,
+    });
+    rl.on('line', (rawLine) => {
+      const line = rawLine.trim();
+      if (!line) return;
+      const lower = line.toLowerCase();
+
+      if (lower === 'status') {
+        const st = botStore.waState;
+        console.log(
+          `[WABot Status] WA=${st.status} | User=${
+            st.connectedUser?.phone ? '+' + st.connectedUser.phone : '-'
+          } | Prefix=${botStore.config.prefix} | Uptime=${Math.floor(
+            process.uptime()
+          )}s`
+        );
+        return;
+      }
+
+      if (lower === 'logout' || lower === 'disconnect' || lower === 'reset') {
+        console.log('[WABot 24/7] Memutuskan & mereset sesi WhatsApp...');
+        void waManager.disconnect(true).then(() => {
+          console.log(
+            '[WABot 24/7] Sesi direset. Ketik nomor WA baru (contoh: 6281234567890) untuk menautkan ulang.'
+          );
+        });
+        return;
+      }
+
+      const phoneCandidate = lower.startsWith('pair ')
+        ? line.slice(5).trim()
+        : line;
+      const digitsOnly = phoneCandidate.replace(/[^0-9]/g, '');
+      if (
+        digitsOnly.length >= 9 &&
+        digitsOnly.length <= 16 &&
+        /^[+\d\s()-]+$/.test(phoneCandidate)
+      ) {
+        console.log(
+          `[WABot 24/7] Meminta 8-digit Pairing Code ke server WhatsApp untuk ${digitsOnly}...`
+        );
+        void waManager.connectWithPairingCode(digitsOnly).catch((err) => {
+          console.error(
+            '[WABot 24/7] Gagal meminta Pairing Code:',
+            err instanceof Error ? err.message : err
+          );
+        });
+      }
+    });
+  }
 
   const handleShutdown = async (signal: string) => {
     console.log(`Received ${signal}, flushing bot state & closing WA socket...`);
     clearInterval(wsHeartbeatInterval);
+    if (selfKeepAliveInterval) {
+      clearInterval(selfKeepAliveInterval);
+    }
     botStore.saveToDisk();
     await waManager.shutdownGracefully();
+    await cloudSync.flushAllNow(path.join(resolveDataDir(), '.baileys_auth'));
     server.close(() => {
       process.exit(0);
     });
@@ -977,5 +1194,9 @@ async function startServer() {
   process.on('SIGTERM', () => void handleShutdown('SIGTERM'));
   process.on('SIGINT', () => void handleShutdown('SIGINT'));
 }
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled Rejection in WABot server:', reason);
+});
 
 void startServer();

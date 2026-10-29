@@ -1,0 +1,25 @@
+# Blueprint 1-Klik Gratis Render.com (Tanpa Kartu Kredit · 24/7 Auto Keep-Alive + Auto Simpan Sesi WA)
+# Cara pakai:
+# 1. Buka https://dashboard.render.com -> Login pakai GitHub (100% Gratis, tanpa kartu kredit)
+# 2. Klik "New +" -> pilih "Blueprint" -> pilih repository GitHub bot ini -> klik "Apply"
+# 3. Selesai! Server Node.js + FFmpeg + Database penyimpan sesi WA otomatis dibuat & terhubung sendiri.
+
+services:
+  - type: web
+    name: wabot-24x7
+    runtime: docker
+    plan: free
+    healthCheckPath: /ping
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: wabot-session-db
+          property: connectionString
+
+databases:
+  - name: wabot-session-db
+    databaseName: wabot_session
+    user: wabot_user
+    plan: free

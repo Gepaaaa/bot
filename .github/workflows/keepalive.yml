@@ -1,0 +1,22 @@
+name: Keep WABot Awake 24/7
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping WABot Server (/ping)
+        env:
+          BOT_SERVER_URL: ${{ vars.BOT_SERVER_URL }}
+        run: |
+          if [ -z "$BOT_SERVER_URL" ]; then
+            echo "BOT_SERVER_URL variable not set yet — skipping external ping cleanly."
+            exit 0
+          fi
+          TARGET="${BOT_SERVER_URL%/}/ping"
+          echo "Pinging $TARGET ..."
+          curl -fsSL --max-time 25 "$TARGET" || true

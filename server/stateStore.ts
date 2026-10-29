@@ -23,6 +23,7 @@ import type {
   WAConnectionState,
   WebhookConfig,
 } from '../src/shared/types.ts';
+import { cloudSync } from './cloudSync.ts';
 import { queueEngine } from './queueEngine.ts';
 import { resolveDataDir } from './storagePath.ts';
 import { webhookDispatcher } from './webhookDispatcher.ts';
@@ -217,6 +218,11 @@ class BotStateStore {
     this.loadFromDisk();
   }
 
+  public reloadFromDisk() {
+    this.loadFromDisk();
+    this.broadcast('state:init', this.getSnapshot());
+  }
+
   private loadFromDisk() {
     try {
       if (fs.existsSync(STATE_FILE)) {
@@ -308,23 +314,22 @@ class BotStateStore {
   }
 
   public saveToDisk() {
+    const serialized = JSON.stringify(
+      {
+        config: this.config,
+        stats: this.stats,
+        logs: this.logs.slice(0, 50),
+      },
+      null,
+      2
+    );
     try {
       fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-      fs.writeFileSync(
-        STATE_FILE,
-        JSON.stringify(
-          {
-            config: this.config,
-            stats: this.stats,
-            logs: this.logs.slice(0, 50),
-          },
-          null,
-          2
-        )
-      );
+      fs.writeFileSync(STATE_FILE, serialized);
     } catch {
       // Ignore write failures
     }
+    cloudSync.scheduleStateSync(serialized);
   }
 
   public attachClient(ws: WebSocket) {
