@@ -46,6 +46,8 @@ export function ConnectionView({
   const [localError, setLocalError] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedPing, setCopiedPing] = useState(false);
+  const [copiedTermux, setCopiedTermux] = useState(false);
+  const [hostGuideMode, setHostGuideMode] = useState<'termux' | 'wispbyte'>('termux');
 
   const [serverInput, setServerInput] = useState(backendUrl);
   const [probingServer, setProbingServer] = useState(false);
@@ -478,81 +480,161 @@ export function ConnectionView({
               </span>
             </div>
             <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-              Jalankan Bot 24/7 Nonstop di Wispbyte (Murni Gratis &amp; Tanpa Kartu Kredit)
+              {hostGuideMode === 'termux'
+                ? 'Server Pribadi 24/7 Pakai HP Android Nganggur (Termux — Paling Stabil & Anti-Ban)'
+                : 'Jalankan Bot 24/7 di Wispbyte Cloud (Tanpa Kartu Kredit)'}
             </h3>
             <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">
-              Project ini sudah dilengkapi <code className="font-mono">index.js</code> otomatis, FFmpeg bawaan, serta fitur <strong>Direct Console Pairing</strong>. Kamu cukup daftar pakai Discord/Email di Wispbyte (tanpa kartu kredit/debit sama sekali, tanpa klik renew harian, tanpa nonton iklan), lalu ketik nomor WA langsung di Console—bot langsung jalan 24/7 penuh selama 2 minggu nonstop.
-            </p>
-          </div>
-
-          <a
-            href="https://wispbyte.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-4 py-2.5 rounded-xl bg-zinc-900 dark:bg-emerald-600 text-white text-xs font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-2 whitespace-nowrap shrink-0 self-start"
-          >
-            <Globe className="w-3.5 h-3.5" />
-            Buka Wispbyte.com
-          </a>
-        </div>
-
-        {/* 3 Zero-Hassle Cardless Steps */}
-        <div className="pt-4 border-t border-zinc-200/80 dark:border-zinc-800 grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-          <div className="space-y-1.5">
-            <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-              01. Buat Server Node.js Gratis (0 Kartu)
-            </div>
-            <p>
-              Login ke <strong className="text-zinc-800 dark:text-zinc-200">wispbyte.com</strong> memakai akun Discord atau Email (murni gratis tanpa kartu kredit). Klik <strong>Create Server &rarr; Free Tier (24/7, 512MB) &rarr; Node.js</strong> (pilih Node 20/22).
-            </p>
-          </div>
-          <div className="space-y-1.5">
-            <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-              02. Clone dari GitHub &amp; Klik Start
-            </div>
-            <p>
-              Di menu kiri server Wispbyte, buka tab <strong>GitHub</strong>, tempel link repo GitHub project ini lalu klik <strong>Clone</strong>. Setelah itu buka tab <strong>Console</strong> dan klik tombol <strong>Start</strong> (tidak perlu ubah setting/env apa pun).
-            </p>
-          </div>
-          <div className="space-y-1.5">
-            <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-              03. Ketik Nomor WA di Console &amp; Tinggal!
-            </div>
-            <p>
-              Begitu muncul tulisan <em>Mesin Aktif</em>, ketik nomor WA bot (misal <code className="font-mono">6281234567890</code>) langsung di kotak <strong>Type a command...</strong> bawah Console lalu Enter. Masukkan 8 kode Pairing yang muncul ke HP, lalu tutup browser—server jalan 24/7 sendiri (cukup login ke panel 14 hari sekali).
-            </p>
-            <button
-              type="button"
-              onClick={async () => {
-                const base = (
-                  backendUrl ||
-                  (typeof window !== 'undefined' ? window.location.origin : '')
-                ).replace(/\/+$/, '');
-                const pingUrl = `${base}/ping`;
-                try {
-                  await navigator.clipboard.writeText(pingUrl);
-                  setCopiedPing(true);
-                  setTimeout(() => setCopiedPing(false), 2000);
-                } catch {
-                  // Ignore clipboard restrictions
-                }
-              }}
-              className="mt-1 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-[#FAF9F6] dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 font-medium inline-flex items-center gap-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-            >
-              {copiedPing ? (
+              {hostGuideMode === 'termux' ? (
                 <>
-                  <Check className="w-3.5 h-3.5 text-emerald-600" />
-                  URL /ping Tersalin
+                  Punya HP Android yang tidak terpakai? Jadikan server bot pribadi 24/7 selamanya memakai skrip otomatis <code className="font-mono">termux.sh</code>. Memakai IP WiFi rumah (jauh lebih aman dari banned WA), RAM jauh lebih lega, sesi tersimpan permanen di memori HP, dan layar HP dimatikan pun bot tetap aktif nonstop.
                 </>
               ) : (
                 <>
-                  <Copy className="w-3.5 h-3.5" />
-                  Salin Endpoint /ping
+                  Project ini sudah dilengkapi <code className="font-mono">esbuild</code> &amp; <code className="font-mono">index.js</code> otomatis. Jika muncul popup <em>Missing Package Detected</em> di Wispbyte, cukup klik tombol biru <strong>Add to Startup</strong> lalu klik <strong>Start</strong> di Console.
                 </>
               )}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 shrink-0 self-start">
+            <button
+              type="button"
+              onClick={() => setHostGuideMode('termux')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
+                hostGuideMode === 'termux'
+                  ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+              }`}
+            >
+              HP Nganggur (Termux)
+            </button>
+            <button
+              type="button"
+              onClick={() => setHostGuideMode('wispbyte')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap ${
+                hostGuideMode === 'wispbyte'
+                  ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+              }`}
+            >
+              Cloud Wispbyte
             </button>
           </div>
         </div>
+
+        {hostGuideMode === 'termux' ? (
+          <div className="pt-4 border-t border-zinc-200/80 dark:border-zinc-800 grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+            <div className="space-y-1.5">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                01. Install Termux Resmi (F-Droid)
+              </div>
+              <p>
+                Di HP Android nganggur, unduh APK <strong>Termux</strong> dari <strong className="text-zinc-800 dark:text-zinc-200">f-droid.org</strong> (jangan versi Play Store lama). Di Pengaturan HP &rarr; Aplikasi &rarr; Termux &rarr; Baterai, pilih <strong>Tidak Dibatasi</strong>.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                02. Tempel 1 Perintah Otomatis
+              </div>
+              <p>
+                Buka Termux, ganti <code className="font-mono">LINK_GITHUB_KAMU</code> dengan URL repo GitHub kamu lalu jalankan. Skrip <code className="font-mono">termux.sh</code> otomatis mengunci <em>WakeLock</em>, menginstal Node 22 + FFmpeg, dan menyalakan bot.
+              </p>
+              <button
+                type="button"
+                onClick={async () => {
+                  const cmd =
+                    'pkg update -y && pkg install git -y && git clone LINK_GITHUB_KAMU wabot && cd wabot && bash termux.sh';
+                  try {
+                    await navigator.clipboard.writeText(cmd);
+                    setCopiedTermux(true);
+                    setTimeout(() => setCopiedTermux(false), 2000);
+                  } catch {
+                    // Ignore clipboard restrictions
+                  }
+                }}
+                className="mt-1 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-[#FAF9F6] dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 font-medium inline-flex items-center gap-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                {copiedTermux ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    Perintah Termux Tersalin
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    Salin Perintah Termux
+                  </>
+                )}
+              </button>
+            </div>
+            <div className="space-y-1.5">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                03. Ketik Nomor WA &amp; Matikan Layar
+              </div>
+              <p>
+                Ketik nomor WA bot (<code className="font-mono">628...</code>) langsung di layar Termux, masukkan 8 digit Pairing Code ke WA, lalu matikan layar HP sambil dicolok charger. Kalau nanti HP sempat mati, cukup buka Termux &amp; ketik <code className="font-mono">bot</code>.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="pt-4 border-t border-zinc-200/80 dark:border-zinc-800 grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+            <div className="space-y-1.5">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                01. Buat Server Node.js Gratis (0 Kartu)
+              </div>
+              <p>
+                Login ke <strong className="text-zinc-800 dark:text-zinc-200">wispbyte.com</strong> memakai akun Discord atau Email. Klik <strong>Create Server &rarr; Free Tier (24/7, 512MB) &rarr; Node.js</strong> (pilih Node 20/22).
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                02. Clone GitHub &amp; Klik Add to Startup
+              </div>
+              <p>
+                Buka tab <strong>GitHub</strong>, tempel link repo GitHub lalu klik <strong>Clone</strong>. Buka tab <strong>Console</strong> dan klik <strong>Start</strong> (jika muncul popup <em>Missing Package esbuild</em>, klik tombol biru <strong>Add to Startup</strong>).
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                03. Ketik Nomor WA di Console &amp; Tinggal!
+              </div>
+              <p>
+                Ketik nomor WA bot (misal <code className="font-mono">6281234567890</code>) langsung di kotak <strong>Type a command...</strong> bawah Console lalu Enter. Masukkan 8 kode Pairing ke HP, lalu tutup browser.
+              </p>
+              <button
+                type="button"
+                onClick={async () => {
+                  const base = (
+                    backendUrl ||
+                    (typeof window !== 'undefined' ? window.location.origin : '')
+                  ).replace(/\/+$/, '');
+                  const pingUrl = `${base}/ping`;
+                  try {
+                    await navigator.clipboard.writeText(pingUrl);
+                    setCopiedPing(true);
+                    setTimeout(() => setCopiedPing(false), 2000);
+                  } catch {
+                    // Ignore clipboard restrictions
+                  }
+                }}
+                className="mt-1 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-[#FAF9F6] dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 font-medium inline-flex items-center gap-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                {copiedPing ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    URL /ping Tersalin
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    Salin Endpoint /ping
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Optional External Bot Server Connector Form */}
         <form
