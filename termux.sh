@@ -56,9 +56,32 @@ else
 fi
 
 if [ "$NEED_NODE" -eq 1 ]; then
-  echo "[Ubuntu] Menginstal Node.js 22 LTS..."
-  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-  apt-get install -y nodejs
+  ARCH=$(dpkg --print-architecture 2>/dev/null || uname -m)
+  echo "[Ubuntu] Memasang Node.js untuk arsitektur ($ARCH)..."
+
+  if [ "$ARCH" = "armhf" ] || [ "$ARCH" = "armv7l" ] || [ "$ARCH" = "arm" ]; then
+    echo "[Ubuntu] Arsitektur 32-bit (armhf) terdeteksi. Menggunakan build Node.js resmi untuk ARMv7..."
+    apt-get update -y
+    apt-get install -y xz-utils curl tar ca-certificates || true
+
+    # Unduh binary resmi Node.js v20 LTS langsung dari nodejs.org (bebas ketergantungan NodeSource)
+    NODE_ARM_FILE=$(curl -fsSL https://nodejs.org/dist/latest-v20.x/ | grep -o 'node-v20\.[0-9]*\.[0-9]*-linux-armv7l\.tar\.xz' | head -n1 || echo "")
+    if [ -n "$NODE_ARM_FILE" ]; then
+      echo "[Ubuntu] Mengunduh https://nodejs.org/dist/latest-v20.x/$NODE_ARM_FILE..."
+      curl -fsSL "https://nodejs.org/dist/latest-v20.x/$NODE_ARM_FILE" -o /tmp/node-arm.tar.xz
+      tar -xJf /tmp/node-arm.tar.xz -C /usr/local --strip-components=1
+      rm -f /tmp/node-arm.tar.xz
+    else
+      # Cadangan: pasang dari repository bawaan Ubuntu
+      echo "[Ubuntu] Mengunduh via apt Ubuntu..."
+      apt-get install -y nodejs npm
+    fi
+  else
+    # 64-bit (arm64 / amd64) aman menggunakan NodeSource LTS resmi
+    echo "[Ubuntu] Menginstal Node.js 22 LTS via NodeSource..."
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+    apt-get install -y nodejs
+  fi
 fi
 
 echo "[WABot] Menginstal dependensi project (npm install)..."
