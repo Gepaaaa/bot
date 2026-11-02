@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
@@ -1021,6 +1022,127 @@ async function startServer() {
             ? err.message
             : 'Gagal menjalankan simulasi pesan.',
       });
+    }
+  });
+
+  // 1. Download Project Source Bundle (tar.gz) directly from this running applet
+  app.get('/api/project-bundle.tar.gz', (_req, res) => {
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="wabot-project.tar.gz"'
+    );
+    const tar = spawn('tar', [
+      '--exclude=node_modules',
+      '--exclude=.git',
+      '--exclude=.aistudio',
+      '--exclude=data',
+      '--exclude=dist',
+      '--exclude=.env',
+      '-czf',
+      '-',
+      '.',
+    ]);
+    tar.stdout.pipe(res);
+    tar.stderr.on('data', (d) => console.error('[TAR]', d.toString()));
+  });
+
+  // 2. Direct 1-liner Termux installer that downloads THIS project directly
+  app.get(['/api/termux-install', '/termux-install'], (req, res) => {
+    const host = req.get('host') || 'localhost:3000';
+    const proto =
+      req.headers['x-forwarded-proto'] ||
+      (req.secure ? 'https' : 'http');
+    const origin = `${proto}://${host}`;
+
+    const script = `#!/data/data/com.termux/files/usr/bin/bash
+# ==============================================================================
+#  WABot 24/7 & Web Panel — Termux Auto-Installer (Dari Project Ini Langsung)
+#  Host: ${origin}
+# ==============================================================================
+set -e
+
+echo ""
+echo "============================================================"
+echo "  🚀 MEMASANG PROJECT WABOT KE TERMUX ANDROID"
+echo "  Sumber: ${origin}"
+echo "============================================================"
+echo ""
+
+# 1. WakeLock
+echo "⚡ [1/5] Mengaktifkan Termux WakeLock..."
+termux-wake-lock 2>/dev/null || true
+
+# 2. Package updates & core tools
+echo "📦 [2/5] Memperbarui paket Termux & menginstal Node.js LTS, FFmpeg, Curl, Tar..."
+pkg update -y
+pkg install -y nodejs-lts ffmpeg curl tar ncurses-utils
+
+# 3. PM2 Process Manager
+echo "⚙️ [3/5] Menyiapkan PM2 Process Manager..."
+if ! command -v pm2 >/dev/null 2>&1; then
+  npm install -g pm2 --no-audit --no-fund || true
+fi
+
+# 4. Download source code project ini langsung ke ~/wabot
+echo "📥 [4/5] Mengunduh seluruh berkas project bot ke ~/wabot..."
+mkdir -p "$HOME/wabot"
+cd "$HOME/wabot"
+curl -sSL "${origin}/api/project-bundle.tar.gz" | tar -xz
+
+# 5. Pasang dependensi & engine stiker WASM
+echo "📥 [5/5] Memasang library Node.js & Sharp WASM..."
+npm install --legacy-peer-deps --no-audit --no-fund
+npm install @img/sharp-wasm32 --no-audit --no-fund 2>/dev/null || true
+
+# Buat shortcut 'bot'
+cat > /data/data/com.termux/files/usr/bin/bot << 'EOF'
+#!/data/data/com.termux/files/usr/bin/bash
+termux-wake-lock 2>/dev/null || true
+echo "============================================================"
+echo "  WABot 24/7 Console Monitor"
+echo "  🌐 Kelola di Browser HP: http://localhost:3000"
+echo "  Tekan CTRL + C untuk menutup log (bot tetap ON)"
+echo "============================================================"
+pm2 logs wabot
+EOF
+chmod +x /data/data/com.termux/files/usr/bin/bot 2>/dev/null || true
+
+# Jalankan bot dengan PM2
+pm2 delete wabot 2>/dev/null || true
+pm2 start index.js --name "wabot"
+pm2 save 2>/dev/null || true
+
+WIFI_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet\\s)\\d+(\\.\\d+){3}' | head -n1 || echo "")
+
+echo ""
+echo "============================================================"
+echo "  🎉 BERHASIL! PROJECT INI SUDAH AKTIF 24/7 DI HP KAMU!"
+echo "============================================================"
+echo "  🌐 Buka Google Chrome di HP:  http://localhost:3000"
+if [ -n "$WIFI_IP" ]; then
+echo "  💻 Buka dari Laptop/PC:       http://$WIFI_IP:3000"
+fi
+echo "  📱 Buka log kapan saja:       ketik 'bot'"
+echo "============================================================"
+echo ""
+sleep 1
+pm2 logs wabot
+`;
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(script);
+  });
+
+  // 3. Serve termux.sh statically
+  app.get('/termux.sh', async (_req, res) => {
+    try {
+      const termuxShPath = path.join(process.cwd(), 'termux.sh');
+      const content = await fs.readFile(termuxShPath, 'utf-8');
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.send(content);
+    } catch {
+      res.status(404).send('# termux.sh not found');
     }
   });
 

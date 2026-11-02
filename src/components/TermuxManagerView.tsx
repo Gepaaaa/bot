@@ -28,6 +28,7 @@ export function TermuxManagerView({
   config,
   onNavigateToConnection,
 }: TermuxManagerViewProps) {
+  const [copiedDirectInstall, setCopiedDirectInstall] = useState(false);
   const [copiedOneShot, setCopiedOneShot] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
   const [copiedGit, setCopiedGit] = useState(false);
@@ -38,11 +39,15 @@ export function TermuxManagerView({
 
   const [isLocalhost, setIsLocalhost] = useState(false);
   const [currentHost, setCurrentHost] = useState('');
+  const [originUrl, setOriginUrl] = useState(
+    'https://ais-pre-zxm2hfackhflczswcx624t-404922539023.asia-southeast1.run.app'
+  );
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const h = window.location.hostname;
       setCurrentHost(window.location.host);
+      setOriginUrl(window.location.origin);
       setIsLocalhost(
         h === 'localhost' ||
           h === '127.0.0.1' ||
@@ -53,7 +58,10 @@ export function TermuxManagerView({
     }
   }, []);
 
-  // 1-Baris Sapu Jagad: Pasti jalan 100% di Termux yang baru di-reinstall
+  // Perintah 1-Baris Langsung dari Project Ini (Bukan Repo GitHub Luar)
+  const directInstallCommand = `curl -sL "${originUrl}/api/termux-install" | bash`;
+
+  // 1-Baris Sapu Jagad untuk Git
   const oneShotAllInOneCommand =
     'termux-wake-lock && pkg update -y && pkg install -y git nodejs-lts ffmpeg && mkdir -p ~/wabot && cd ~/wabot && (git clone https://github.com/Gepaaaa/panel-.git . 2>/dev/null || git pull 2>/dev/null || true) && ([ -f termux.sh ] && bash termux.sh || (npm install --legacy-peer-deps --no-audit --no-fund && npm install @img/sharp-wasm32 --no-audit --no-fund 2>/dev/null && npm install -g pm2 --no-audit --no-fund 2>/dev/null && (printf \'#!/data/data/com.termux/files/usr/bin/bash\\npm2 logs wabot\\n\' > /data/data/com.termux/files/usr/bin/bot 2>/dev/null && chmod +x /data/data/com.termux/files/usr/bin/bot 2>/dev/null || true) && pm2 delete wabot 2>/dev/null || true; pm2 start index.js --name "wabot" && pm2 save 2>/dev/null || true; pm2 logs wabot))';
 
@@ -236,74 +244,94 @@ export function TermuxManagerView({
         </div>
       </div>
 
-      {/* 1-SHOT AUTO-INSTALLER HERO BOX (DARI REPO PANEL) */}
+      {/* 1-SHOT AUTO-INSTALLER HERO BOX (DARI PROJECT INI LANGSUNG) */}
       <div className="p-6 rounded-2xl bg-zinc-900/95 border-2 border-emerald-500/60 shadow-2xl space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <span className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 font-bold text-sm">
-              ⚡
+              🚀
             </span>
             <div>
               <h3 className="text-sm sm:text-base font-bold text-white">
-                Satu Kali Prompt di Termux (Setelah Reinstall)
+                Metode 1 (Paling Direkomendasikan): Pasang Langsung dari Project Ini
               </h3>
-              <p className="text-xs text-zinc-400">
-                1 baris perintah lengkap: install dependensi, clone repo, start bot PM2 24/7, &amp; buka localhost
+              <p className="text-xs text-emerald-400 font-medium">
+                100% Mengunduh kode &amp; fitur bot lengkap yang ada di project ini (Bukan repo luar)
               </p>
             </div>
           </div>
           <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/50">
-            100% AUTO-RUN
+            DARI PROJECT INI
           </span>
         </div>
 
         <p className="text-xs text-zinc-300 leading-relaxed">
-          Cukup <strong>salin 1 perintah di bawah ini</strong>, buka Termux, tempel (<span className="text-emerald-400 font-mono">paste</span>), lalu tekan <strong className="text-white">Enter</strong>. Bot langsung aktif di background dan otomatis membuka log &amp; server localhost:
+          Perintah ini <strong>langsung mengunduh seluruh berkas dari project ini</strong> (termasuk engine stiker, antarmuka localhost:3000, PM2 daemon, dan Baileys v7), mengekstraknya ke <code className="text-emerald-400 font-mono">~/wabot</code>, dan menjalankannya otomatis:
         </p>
 
-        {/* Primary One-Shot All-In-One Command */}
+        {/* Primary Direct Project Installer Command */}
         <div className="space-y-2">
           <div className="relative">
             <pre className="p-4 rounded-xl bg-black border border-emerald-500/30 text-xs font-mono text-emerald-300 overflow-x-auto whitespace-pre-wrap break-all select-all leading-relaxed shadow-inner">
+              {directInstallCommand}
+            </pre>
+          </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleCopy(directInstallCommand, setCopiedDirectInstall)}
+              className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-emerald-700/30 active:scale-95 transition-all"
+            >
+              {copiedDirectInstall ? (
+                <>
+                  <Check className="w-5 h-5 text-white" />
+                  <span>Perintah Berhasil Disalin! Paste di Termux</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-5 h-5" />
+                  <span>Salin Perintah Pasang Project Ini</span>
+                </>
+              )}
+            </button>
+            <a
+              href={`${originUrl}/api/project-bundle.tar.gz`}
+              download="wabot-project.tar.gz"
+              className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold border border-zinc-700 active:scale-95 transition-all whitespace-nowrap"
+            >
+              <ExternalLink className="w-4 h-4 text-emerald-400" />
+              <span>Download Berkas (.tar.gz)</span>
+            </a>
+          </div>
+        </div>
+
+        {/* Penjelasan Kenapa Sebelumnya Clone Repo Lain */}
+        <div className="pt-3 border-t border-zinc-800 text-xs space-y-1.5 text-zinc-400">
+          <p className="font-semibold text-zinc-300">
+            💡 Mengapa sebelumnya yang di-clone adalah <code className="text-amber-400 font-mono">Gepaaaa/panel-</code>?
+          </p>
+          <p className="leading-relaxed">
+            Karena sebelumnya kamu meminta menghubungkan dengan link GitHub tersebut (<code className="text-zinc-300">https://github.com/Gepaaaa/panel-</code>). Namun karena seluruh perbaikan kode, fitur stiker, dan panel localhost baru saja dibuat di <strong>project ini</strong> dan belum kamu push ke GitHub milikmu, maka repository di GitHub masih berisi file lama. Dengan <strong>Metode 1 di atas</strong>, Termux langsung mengambil file terbaru dari project ini tanpa tergantung GitHub luar!
+          </p>
+        </div>
+
+        {/* Git Clone Method */}
+        <div className="pt-3 border-t border-zinc-800/80 space-y-1.5">
+          <div className="flex items-center justify-between text-xs text-zinc-400">
+            <span>Metode 2: Gunakan Git Clone (Jika kamu ingin pakai Repo GitHub kamu sendiri)</span>
+            <span className="font-mono text-[10px]">GIT CLONE</span>
+          </div>
+          <div className="relative">
+            <pre className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs font-mono text-zinc-300 overflow-x-auto whitespace-pre-wrap break-all select-all leading-relaxed">
               {oneShotAllInOneCommand}
             </pre>
           </div>
           <button
             type="button"
             onClick={() => handleCopy(oneShotAllInOneCommand, setCopiedOneShot)}
-            className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-emerald-700/30 active:scale-95 transition-all"
-          >
-            {copiedOneShot ? (
-              <>
-                <Check className="w-5 h-5 text-white" />
-                <span>Perintah Berhasil Disalin! Langsung Paste di Termux</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-5 h-5" />
-                <span>Salin Perintah Ini (1 Kali Jalan di Termux)</span>
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* Git Clone Method */}
-        <div className="pt-3 border-t border-zinc-800/80 space-y-1.5">
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span>Metode 2: Git Clone Manual ke Folder ~/wabot</span>
-            <span className="font-mono text-[10px]">GIT CLONE</span>
-          </div>
-          <div className="relative">
-            <pre className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs font-mono text-zinc-300 overflow-x-auto whitespace-pre-wrap break-all select-all leading-relaxed">
-              {gitCommand}
-            </pre>
-          </div>
-          <button
-            type="button"
-            onClick={() => handleCopy(gitCommand, setCopiedGit)}
             className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold active:scale-95 transition-all"
           >
-            {copiedGit ? (
+            {copiedOneShot ? (
               <>
                 <Check className="w-4 h-4 text-emerald-400" />
                 <span>Perintah Git Disalin!</span>
