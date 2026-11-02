@@ -1085,6 +1085,7 @@ async function startServer() {
 
   server.listen(activePort, LISTEN_CONFIG.host, () => {
     console.log(`WABot server running on http://${LISTEN_CONFIG.host}:${activePort}`);
+    console.log(`🌐 Web Control Panel: http://localhost:${activePort} (atau http://127.0.0.1:${activePort})`);
     void (async () => {
       try {
         await cloudSync.initAndRestore(resolveDataDir());

@@ -575,16 +575,16 @@ export function ConnectionView({
             </div>
             <div className="space-y-1.5">
               <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                02. Tempel 1 Perintah Otomatis
+                02. Tempel 1 Perintah Otomatis (1-Kali Jalan)
               </div>
               <p>
-                Buka Termux, ganti <code className="font-mono">LINK_GITHUB_KAMU</code> dengan URL repo GitHub kamu lalu jalankan. Skrip <code className="font-mono">termux.sh</code> otomatis mengunci <em>WakeLock</em>, menginstal Node 22 + FFmpeg, dan menyalakan bot.
+                Buka Termux, cukup salin dan jalankan perintah 1-baris ini. Skrip <code className="font-mono">termux.sh</code> otomatis mengaktifkan <em>WakeLock</em>, memasang Node LTS, FFmpeg, PM2, dan menyalakan Web Panel di <code className="font-mono">http://localhost:3000</code>.
               </p>
               <button
                 type="button"
                 onClick={async () => {
                   const cmd =
-                    'pkg update -y && pkg install git -y && git clone LINK_GITHUB_KAMU wabot && cd wabot && bash termux.sh';
+                    'curl -sL https://raw.githubusercontent.com/Gepaaaa/panel-/main/termux.sh | bash';
                   try {
                     await navigator.clipboard.writeText(cmd);
                     setCopiedTermux(true);
@@ -598,22 +598,22 @@ export function ConnectionView({
                 {copiedTermux ? (
                   <>
                     <Check className="w-3.5 h-3.5 text-emerald-600" />
-                    Perintah Termux Tersalin
+                    Perintah 1-Baris Tersalin
                   </>
                 ) : (
                   <>
                     <Copy className="w-3.5 h-3.5" />
-                    Salin Perintah Termux
+                    Salin Perintah 1-Baris Termux
                   </>
                 )}
               </button>
             </div>
             <div className="space-y-1.5">
               <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                03. Ketik Nomor WA &amp; Matikan Layar
+                03. Kelola via Localhost (Browser HP)
               </div>
               <p>
-                Ketik nomor WA bot (<code className="font-mono">628...</code>) langsung di layar Termux, masukkan 8 digit Pairing Code ke WA, lalu matikan layar HP sambil dicolok charger. Kalau nanti HP sempat mati, cukup buka Termux &amp; ketik <code className="font-mono">bot</code>.
+                Setelah bot aktif di Termux, buka Chrome di HP dan ketik <strong className="text-emerald-600 dark:text-emerald-400 font-mono">http://localhost:3000</strong> untuk mengatur bot, scan QR / pairing, atau ketik <code className="font-mono">bot</code> di Termux untuk cek log 24/7.
               </p>
             </div>
           </div>

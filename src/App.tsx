@@ -13,11 +13,13 @@ import { ReplyTemplateEditorView } from './components/ReplyTemplateEditorView.ts
 import { SettingsView } from './components/SettingsView.tsx';
 import { AntiBanView } from './components/AntiBanView.tsx';
 import { GatewayWebhookView } from './components/GatewayWebhookView.tsx';
+import { TermuxManagerView } from './components/TermuxManagerView.tsx';
 
 type ActiveWorkspace =
   | 'simulator'
   | 'catalog'
   | 'connection'
+  | 'termux'
   | 'security'
   | 'settings';
 
@@ -99,6 +101,7 @@ export default function App() {
     { id: 'simulator', label: 'Simulator' },
     { id: 'catalog', label: 'Menu & Fitur' },
     { id: 'connection', label: 'Koneksi WA' },
+    { id: 'termux', label: 'Pasang di Termux' },
     { id: 'security', label: 'Keamanan & API' },
     { id: 'settings', label: 'Pengaturan' },
   ];
@@ -323,6 +326,14 @@ export default function App() {
             onConnectPairing={connectPairing}
             onDisconnect={disconnectWA}
             onUpdateConfig={updateConfig}
+          />
+        )}
+
+        {activeTab === 'termux' && (
+          <TermuxManagerView
+            waState={waState}
+            config={config}
+            onNavigateToConnection={() => setActiveTab('connection')}
           />
         )}
 
