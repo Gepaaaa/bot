@@ -100,7 +100,7 @@ print_status() {
         }
         console.log("============================================================");
       } catch {
-        console.log("[!] Server belum merespons di port 3000. Coba ketik: bot restart");
+        console.log("[!] Server belum merespons di port 3000. Coba ketik: bot restart (atau cek error: bot logs)");
       }
     })();
   '
@@ -293,10 +293,11 @@ case "${1:-menu}" in
   update)
     if [ -d "$HOME/wabot/.git" ]; then
       echo "[Update] Mengambil pembaruan terbaru dari Git..."
-      (cd "$HOME/wabot" && git pull && rm -f server.bundle.mjs)
+      (cd "$HOME/wabot" && git pull)
+      (cd "$HOME/wabot" && npm install --omit=dev --no-optional --legacy-peer-deps --no-audit --no-fund 2>/dev/null || true)
       pkg install -y cloudflared 2>/dev/null || true
       pm2 restart wabot
-      sleep 2
+      sleep 3
       print_status
     else
       echo "[i] Folder ~/wabot dipasang dari paket .tar.gz (bukan git clone)."

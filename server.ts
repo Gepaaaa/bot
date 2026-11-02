@@ -73,18 +73,10 @@ function resolveListenConfig(): { port: number; host: string; explicitCliPort: b
     };
   }
 
-  // In development (e.g. AI Studio container where Cloud Run sets PORT=8080 for nginx),
-  // always default to port 3000 unless APP_PORT is explicitly configured.
-  if (process.env.NODE_ENV !== 'production') {
-    return {
-      port: Number(process.env.APP_PORT || 3000),
-      host,
-      explicitCliPort: false,
-    };
-  }
-
+  // In development and AI Studio container, always listen on port 3000
+  // unless APP_PORT is explicitly configured.
   return {
-    port: Number(process.env.PORT || 3000),
+    port: Number(process.env.APP_PORT || 3000),
     host,
     explicitCliPort: false,
   };

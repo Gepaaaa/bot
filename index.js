@@ -68,55 +68,67 @@ if (!fs.existsSync(distIndex) && !isArm32) {
 }
 
 // 2. Run in-process (zero duplicate child Node processes, low RAM footprint for 3GB phones).
-//    If source .ts files were updated via `git pull` more recently than `server.bundle.mjs`,
-//    rebuild `server.bundle.mjs` (on 64-bit) or run `server.ts` natively on Node 22+!
 const bundleExists = fs.existsSync(prebuiltServerBundle);
-const bundleFresh = bundleExists && !isSourceNewerThanBundle(prebuiltServerBundle);
 
-if (bundleFresh) {
-  console.log('[WABot Bootstrap] Menjalankan paket server siap pakai (server.bundle.mjs)...');
-  await import(pathToFileURL(prebuiltServerBundle).href);
-} else {
-  let bundledReady = false;
-  if (!isArm32) {
-    try {
-      const { build } = await import('esbuild');
-      console.log('[WABot Bootstrap] Mengompilasi ulang mesin bot terbaru (server.bundle.mjs)...');
-      await build({
-        entryPoints: [path.join(rootDir, 'server.ts')],
-        bundle: true,
-        platform: 'node',
-        format: 'esm',
-        packages: 'external',
-        outfile: prebuiltServerBundle,
-        logLevel: 'warning',
-      });
-      bundledReady = fs.existsSync(prebuiltServerBundle);
-    } catch {
-      bundledReady = false;
+try {
+  if (isArm32) {
+    // 32-bit ARM (Redmi 9C) cannot run native esbuild.
+    // Always use prebuilt server.bundle.mjs and NEVER delete it!
+    if (bundleExists) {
+      console.log('[WABot Bootstrap] Menjalankan server.bundle.mjs (Mode ARMv7 32-bit)...');
+      await import(pathToFileURL(prebuiltServerBundle).href);
+    } else {
+      console.error(
+        '\n[!] Error Kritis: server.bundle.mjs tidak ditemukan di perangkat 32-bit (Redmi 9C).\n' +
+        '    Lakukan pembaruan Git dengan perintah:\n' +
+        '    cd ~/wabot && git pull && pm2 restart wabot\n'
+      );
+      process.exit(1);
     }
-  }
-
-  if (bundledReady) {
-    await import(pathToFileURL(prebuiltServerBundle).href);
-  } else if (majorNode >= 22 && fs.existsSync(path.join(rootDir, 'server.ts'))) {
-    // Delete stale bundle if present so Node 22+ always executes the freshly updated .ts source
-    if (bundleExists && !bundleFresh) {
+  } else {
+    // 64-bit hosts (x86_64 or aarch64)
+    const bundleFresh = bundleExists && !isSourceNewerThanBundle(prebuiltServerBundle);
+    if (bundleFresh) {
+      console.log('[WABot Bootstrap] Menjalankan paket server siap pakai (server.bundle.mjs)...');
+      await import(pathToFileURL(prebuiltServerBundle).href);
+    } else {
+      let bundledReady = false;
       try {
-        fs.unlinkSync(prebuiltServerBundle);
-      } catch {
-        // Ignore
+        const { build } = await import('esbuild');
+        console.log('[WABot Bootstrap] Mengompilasi ulang mesin bot (server.bundle.mjs)...');
+        await build({
+          entryPoints: [path.join(rootDir, 'server.ts')],
+          bundle: true,
+          platform: 'node',
+          format: 'esm',
+          packages: 'external',
+          outfile: prebuiltServerBundle,
+          logLevel: 'warning',
+        });
+        bundledReady = fs.existsSync(prebuiltServerBundle);
+      } catch (err) {
+        console.warn('[WABot Bootstrap] Kompilasi esbuild dilewati:', err?.message || err);
+        bundledReady = false;
+      }
+
+      if (bundledReady) {
+        await import(pathToFileURL(prebuiltServerBundle).href);
+      } else if (bundleExists) {
+        console.log('[WABot Bootstrap] Menggunakan server.bundle.mjs yang tersedia...');
+        await import(pathToFileURL(prebuiltServerBundle).href);
+      } else if (majorNode >= 22 && fs.existsSync(path.join(rootDir, 'server.ts'))) {
+        console.log(
+          `[WABot Bootstrap] Menjalankan server.ts in-process (Node ${process.version})...`
+        );
+        await import(pathToFileURL(path.join(rootDir, 'server.ts')).href);
+      } else {
+        throw new Error(
+          `Node.js ${process.version} terdeteksi tanpa server.bundle.mjs. Jalankan 'git pull' atau 'npm run build:termux'.`
+        );
       }
     }
-    console.log(
-      `[WABot Bootstrap] Menjalankan server.ts terbaru secara in-process (Node ${process.version}, arch=${process.arch})...`
-    );
-    await import(pathToFileURL(path.join(rootDir, 'server.ts')).href);
-  } else if (bundleExists) {
-    await import(pathToFileURL(prebuiltServerBundle).href);
-  } else {
-    throw new Error(
-      `Node.js ${process.version} terdeteksi tanpa server.bundle.mjs. Jalankan 'pkg install nodejs-lts' (Node 22+) di Termux atau gunakan paket siap pakai (.tar.gz).`
-    );
   }
+} catch (err) {
+  console.error('\n[FATAL WABOT BOOTSTRAP ERROR]:', err);
+  process.exit(1);
 }
