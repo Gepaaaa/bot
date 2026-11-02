@@ -194,6 +194,19 @@ case "${1:-menu}" in
     sleep 2
     print_status
     ;;
+  update)
+    if [ -d "$HOME/wabot/.git" ]; then
+      echo "[Update] Mengambil pembaruan terbaru dari Git..."
+      (cd "$HOME/wabot" && git pull && rm -f server.bundle.mjs)
+      pm2 restart wabot
+      sleep 2
+      print_status
+    else
+      echo "[i] Folder ~/wabot dipasang dari paket .tar.gz (bukan git clone)."
+      echo "    Untuk update, unduh ulang wabot-redmi9c-ready.tar.gz ke folder Download lalu jalankan:"
+      echo "    tar -xzf ~/storage/downloads/wabot-redmi9c-ready.tar.gz -C ~/wabot && bot restart"
+    fi
+    ;;
   stop)
     pm2 stop wabot
     ;;
@@ -209,8 +222,9 @@ case "${1:-menu}" in
     echo "  3) Lihat Log Aktivitas Realtime (CTRL+C untuk keluar)"
     echo "  4) Restart Mesin Bot"
     echo "  5) Matikan Bot Sementara"
+    echo "  6) Update Kode Bot Terbaru (git pull + restart)"
     echo "  0) Keluar"
-    printf "\nPilihan [0-5]: "
+    printf "\nPilihan [0-6]: "
     read -r CHOICE
     case "$CHOICE" in
       1) request_pair "" ;;
@@ -218,6 +232,7 @@ case "${1:-menu}" in
       3) pm2 logs wabot ;;
       4) pm2 restart wabot ;;
       5) pm2 stop wabot ;;
+      6) "$0" update ;;
       *) exit 0 ;;
     esac
     ;;

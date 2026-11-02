@@ -94,7 +94,8 @@ export function TermuxManagerView({
   const cleanRepoUrl =
     gitRepoUrl.trim() || 'https://github.com/USERNAME_KAMU/NAMA_REPO_BOT.git';
   const gitCloneRunCmd = `pkg update -y && pkg install -y git && rm -rf ~/wabot && git clone ${cleanRepoUrl} ~/wabot && cd ~/wabot && bash termux.sh`;
-  const gitUpdateCmd = 'cd ~/wabot && git pull && pm2 restart wabot';
+  const gitUpdateCmd =
+    'cd ~/wabot && git pull && rm -f server.bundle.mjs && pm2 restart wabot';
 
   const lanExampleUrl =
     netInfo?.lanUrls && netInfo.lanUrls.length > 0

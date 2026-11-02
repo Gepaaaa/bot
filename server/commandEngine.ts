@@ -656,6 +656,34 @@ export async function processBotMessage(
     };
   };
 
+  const isNativeMp3Buffer = (buf: Buffer, contentType: string): boolean => {
+    if (buf.length < 12) return false;
+    // MP4 / M4A containers have 'ftyp' at byte offset 4 -> must transcode to MP3
+    if (buf.subarray(4, 8).toString('ascii') === 'ftyp') {
+      return false;
+    }
+    // ID3v2 tag header
+    if (buf.subarray(0, 3).toString('ascii') === 'ID3') {
+      return true;
+    }
+    // MPEG audio frame sync word (11 set bits: 0xFF and top 3 bits of byte 1)
+    if (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0) {
+      return true;
+    }
+    return contentType.includes('audio/mpeg') || contentType.includes('audio/mp3');
+  };
+
+  const ensurePlayableMp3Buffer = async (
+    rawBuffer: Buffer,
+    contentType: string
+  ): Promise<Buffer> => {
+    if (isNativeMp3Buffer(rawBuffer, contentType)) {
+      return rawBuffer;
+    }
+    const converted = await extractOrConvertAudio(rawBuffer, 'mp3');
+    return converted.buffer;
+  };
+
   const buildSocialDownloadResponse = async (
     targetUrl: string,
     platformHint: SupportedPlatform | 'auto'
@@ -665,19 +693,17 @@ export async function processBotMessage(
         ? await downloadTikTokMedia(targetUrl)
         : await resolveSocialMedia(targetUrl, platformHint);
 
-    botStore.incrementStat('mediaDownloaded');
-
-    const caption = renderBotTemplate(config.templates.downloaderCaption, {
-      platform: media.platform.toUpperCase(),
-      title: media.title,
-      author: media.author,
-      duration: media.duration ? `${media.duration} detik` : '-',
-      botName: config.botName,
-      prefix: config.prefix,
-    });
-
-    // 1. Multi-photo slide / carousel (TikTok Slide / X Gallery)
+    // 1. Multi-photo slide / carousel (TikTok Slide / IG Carousel / X Gallery)
     if (media.slideImages && media.slideImages.length > 0) {
+      botStore.incrementStat('mediaDownloaded');
+      const caption = renderBotTemplate(config.templates.downloaderCaption, {
+        platform: media.platform.toUpperCase(),
+        title: media.title,
+        author: media.author,
+        duration: media.duration ? `${media.duration} detik` : '-',
+        botName: config.botName,
+        prefix: config.prefix,
+      });
       const proxySlides = media.slideImages.map(
         (u) => `/api/proxy-media?url=${encodeURIComponent(u)}&type=image`
       );
@@ -701,6 +727,7 @@ export async function processBotMessage(
     // 2. Direct file download (MediaFire)
     if (media.fileUrl) {
       const { buffer, contentType } = await fetchRemoteBuffer(media.fileUrl);
+      botStore.incrementStat('mediaDownloaded');
       const fname = media.fileName || 'berkas-unduhan';
       const storedUrl = botStore.storeHdMedia(buffer, contentType, fname);
       return {
@@ -716,9 +743,19 @@ export async function processBotMessage(
       };
     }
 
+    const caption = renderBotTemplate(config.templates.downloaderCaption, {
+      platform: media.platform.toUpperCase(),
+      title: media.title,
+      author: media.author,
+      duration: media.duration ? `${media.duration} detik` : '-',
+      botName: config.botName,
+      prefix: config.prefix,
+    });
+
     // 3. Single photo post (Pinterest / IG / X image)
     if (media.imageUrl && !media.videoUrl) {
       const { buffer, contentType } = await fetchRemoteBuffer(media.imageUrl);
+      botStore.incrementStat('mediaDownloaded');
       const mime = contentType.startsWith('image/')
         ? contentType
         : 'image/jpeg';
@@ -737,15 +774,25 @@ export async function processBotMessage(
       throw new Error('URL media tidak ditemukan pada tautan tersebut.');
     }
 
-    const proxyUrl = `/api/proxy-media?url=${encodeURIComponent(
-      media.videoUrl
-    )}&type=video`;
+    // 4. Video post — download & validate binary buffer now (with automatic fallback URL retry)
+    const { buffer: videoBuf } = await fetchRemoteBuffer(
+      media.videoUrl,
+      35 * 1024 * 1024,
+      media.fallbackVideoUrls || []
+    );
+    botStore.incrementStat('mediaDownloaded');
+    const videoWebUrl = botStore.storeHdMedia(
+      videoBuf,
+      'video/mp4',
+      `wabot-${media.platform}.mp4`
+    );
 
     return {
       handled: true,
       reactionStatus: 'success',
-      videoRemoteUrl: media.videoUrl,
-      videoProxyUrl: proxyUrl,
+      videoBuffer: videoBuf,
+      videoMimeType: 'video/mp4',
+      videoWebUrl,
       mediaTitle: media.title,
       mediaAuthor: media.author,
       mediaDuration: media.duration,
@@ -1202,7 +1249,9 @@ export async function processBotMessage(
           );
         }
 
-        const media = await resolveSocialMedia(targetUrl, 'auto');
+        const media = await resolveSocialMedia(targetUrl, 'auto', {
+          audioOnly: true,
+        });
         const streamUrl = media.audioUrl || media.videoUrl;
         if (!streamUrl) {
           throw new Error(
@@ -1210,16 +1259,29 @@ export async function processBotMessage(
           );
         }
 
+        const fallbacks = media.audioUrl
+          ? [...(media.fallbackAudioUrls || []), ...(media.videoUrl ? [media.videoUrl] : [])]
+          : media.fallbackVideoUrls || [];
+
+        const { buffer: rawStreamBuf, contentType } = await fetchRemoteBuffer(
+          streamUrl,
+          35 * 1024 * 1024,
+          fallbacks
+        );
+        const mp3Buf = await ensurePlayableMp3Buffer(rawStreamBuf, contentType);
         botStore.incrementStat('mediaDownloaded');
-        const proxyUrl = `/api/proxy-media?url=${encodeURIComponent(
-          streamUrl
-        )}&type=audio`;
+        const audioWebUrl = botStore.storeHdMedia(
+          mp3Buf,
+          'audio/mpeg',
+          'wabot-audio.mp3'
+        );
 
         result = {
           handled: true,
           reactionStatus: 'success',
-          audioRemoteUrl: streamUrl,
-          audioProxyUrl: proxyUrl,
+          audioBuffer: mp3Buf,
+          audioMimeType: 'audio/mpeg',
+          audioWebUrl,
           mediaTitle: media.title,
           mediaAuthor: media.author,
           mediaDuration: media.duration,
@@ -1245,16 +1307,26 @@ export async function processBotMessage(
         if (!track.audioUrl) {
           throw new Error('Sumber audio lagu tidak tersedia saat ini.');
         }
+
+        const { buffer: rawAudioBuf, contentType } = await fetchRemoteBuffer(
+          track.audioUrl,
+          35 * 1024 * 1024,
+          track.fallbackAudioUrls || []
+        );
+        const mp3Buf = await ensurePlayableMp3Buffer(rawAudioBuf, contentType);
         botStore.incrementStat('mediaDownloaded');
-        const proxyUrl = `/api/proxy-media?url=${encodeURIComponent(
-          track.audioUrl
-        )}&type=audio`;
+        const audioWebUrl = botStore.storeHdMedia(
+          mp3Buf,
+          'audio/mpeg',
+          'wabot-song.mp3'
+        );
 
         result = {
           handled: true,
           reactionStatus: 'success',
-          audioRemoteUrl: track.audioUrl,
-          audioProxyUrl: proxyUrl,
+          audioBuffer: mp3Buf,
+          audioMimeType: 'audio/mpeg',
+          audioWebUrl,
           mediaTitle: track.title,
           mediaAuthor: track.author,
           mediaDuration: track.duration,

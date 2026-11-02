@@ -632,10 +632,25 @@ class BotStateStore {
   ): string {
     const id = `hd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     this.hdMediaCache.set(id, { buffer, mimeType, fileName });
-    if (this.hdMediaCache.size > 15) {
-      const oldestKey = this.hdMediaCache.keys().next().value;
-      if (oldestKey) this.hdMediaCache.delete(oldestKey);
+
+    // Strict memory budget (max 8 items or 36 MB total) so 3GB RAM phones stay cool 24/7
+    const maxItems = 8;
+    const maxTotalBytes = 36 * 1024 * 1024;
+    let totalBytes = 0;
+    for (const item of this.hdMediaCache.values()) {
+      totalBytes += item.buffer.length;
     }
+    while (
+      this.hdMediaCache.size > 1 &&
+      (this.hdMediaCache.size > maxItems || totalBytes > maxTotalBytes)
+    ) {
+      const oldestKey = this.hdMediaCache.keys().next().value;
+      if (!oldestKey) break;
+      const evicted = this.hdMediaCache.get(oldestKey);
+      if (evicted) totalBytes -= evicted.buffer.length;
+      this.hdMediaCache.delete(oldestKey);
+    }
+
     return `/api/hd-media/${id}`;
   }
 }

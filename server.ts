@@ -16,6 +16,7 @@ import {
 import { cloudSync } from './server/cloudSync.ts';
 import { gatewayRouter } from './server/gatewayRouter.ts';
 import { getActiveImageBackend } from './server/imageAdapter.ts';
+import { buildCdnRequestHeaders } from './server/mediaDownloader.ts';
 import {
   getOrCreateSampleAudioBuffer,
   getOrCreateSampleVideoBuffer,
@@ -398,13 +399,8 @@ async function startServer() {
 
     try {
       const upstream = await fetch(rawUrl, {
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-          Referer: rawUrl.includes('tikwm')
-            ? 'https://www.tikwm.com/'
-            : rawUrl,
-        },
+        headers: buildCdnRequestHeaders(rawUrl),
+        redirect: 'follow',
         signal: controller.signal,
       });
 
