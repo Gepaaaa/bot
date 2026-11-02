@@ -31,6 +31,7 @@ import {
   type ImageFilterMode,
   uploadBufferToPublicUrl,
 } from './mediaProcessor.ts';
+import { remoteTunnel } from './remoteTunnel.ts';
 import { botStore } from './stateStore.ts';
 import {
   animatedWebpToMp4,
@@ -856,6 +857,128 @@ export async function processBotMessage(
             ownerDisplay: formatPhoneDisplay(ownerDigits),
             website: config.ownerWebsite,
           }),
+        };
+        break;
+      }
+
+      case 'panel': {
+        const ownerDigits =
+          normalizePhoneInput(
+            config.antiBan?.ownerNumber || OFFICIAL_OWNER_NUMBER
+          ) || OFFICIAL_OWNER_NUMBER;
+        const botSelfDigits = normalizePhoneInput(
+          botStore.waState.connectedUser?.phone || ''
+        );
+        const senderDigits = normalizePhoneInput(ctx.senderPhone || '');
+        const isAuthorizedOwner =
+          isSenderBotOwner(ctx) ||
+          Boolean(
+            botSelfDigits && senderDigits && botSelfDigits === senderDigits
+          );
+
+        if (!isAuthorizedOwner) {
+          return failReply(
+            `Perintah *${config.prefix}panel* dikhususkan bagi *Owner Bot* (*${formatPhoneDisplay(
+              ownerDigits
+            )}*).\n\nJika ini HP keduamu, pastikan nomor WA HP ini sudah didaftarkan sebagai *Nomor Owner* (ketik \`bot owner 628xxx\` di Termux Redmi 9C atau ubah di Pengaturan Panel).`
+          );
+        }
+
+        if (ctx.isGroup) {
+          return failReply(
+            `Demi keamanan bot kamu, tautan rahasia Web Control Panel tidak dikirim di dalam Grup.\n\nSilakan kirim perintah *${config.prefix}panel* lewat *Chat Pribadi (Japri)* langsung ke nomor bot ini.`
+          );
+        }
+
+        const sub = argsText.trim().toLowerCase();
+
+        if (sub === 'off' || sub === 'stop' || sub === 'mati') {
+          const snap = remoteTunnel.stopTunnel();
+          const lanInfo =
+            snap.lanUrls.length > 0
+              ? snap.lanUrls.join('\n• ')
+              : 'Hubungkan ke Wi-Fi yang sama dengan Redmi 9C';
+          result = {
+            handled: true,
+            reactionStatus: 'success',
+            replyText: [
+              `*Akses Panel Luar Rumah Dimatikan*`,
+              '────────────────────',
+              `Tunnel publik internet telah dihentikan. Orang luar tidak dapat mengakses server.`,
+              '',
+              `*Akses Dalam Rumah (Satu Wi-Fi):*`,
+              `• ${lanInfo}`,
+              '',
+              `_Ketik *${config.prefix}panel* kapan saja untuk menyalakan kembali akses luar rumah._`,
+            ].join('\n'),
+          };
+          break;
+        }
+
+        if (sub === 'resetkey' || sub === 'reset') {
+          remoteTunnel.rotateAccessKey();
+          const snap =
+            remoteTunnel.getSnapshot().status === 'online'
+              ? remoteTunnel.getSnapshot()
+              : await remoteTunnel.startTunnel();
+          result = {
+            handled: true,
+            reactionStatus: 'success',
+            replyText: [
+              `*Kunci Akses Panel Berhasil Diperbarui*`,
+              '────────────────────',
+              snap.magicUrl
+                ? `*Klik Tautan Baru (Otomatis Masuk):*\n${snap.magicUrl}`
+                : `*Kunci Akses Baru:* \`${snap.accessKey}\``,
+              '',
+              `Tautan lama otomatis hangus dan tidak berlaku lagi.`,
+            ].join('\n'),
+          };
+          break;
+        }
+
+        const snap = await remoteTunnel.startTunnel();
+        const lanLines =
+          snap.lanUrls.length > 0
+            ? snap.lanUrls.map((u) => `• ${u}`).join('\n')
+            : `• ${snap.localhostUrl} _(cek Wi-Fi Redmi 9C)_`;
+
+        const lines: string[] = [
+          `*Akses Web Control Panel — ${config.botName}*`,
+          '────────────────────',
+        ];
+
+        if (snap.magicUrl) {
+          lines.push(`*1. Luar Rumah / Beda Jaringan (4G/5G):*`);
+          lines.push(`Klik langsung dari browser HP kedua kamu:`);
+          lines.push(`${snap.magicUrl}`);
+          lines.push(
+            `_(Sudah berisi Kunci Owner — otomatis login tanpa ketik sandi)_`
+          );
+        } else {
+          lines.push(`*1. Luar Rumah / Beda Jaringan (4G/5G):*`);
+          lines.push(
+            `Tunnel belum aktif: ${
+              snap.lastError ||
+              'Jalankan sekali di Termux Redmi 9C: pkg install -y cloudflared'
+            }`
+          );
+        }
+
+        lines.push('');
+        lines.push(`*2. Dalam Rumah (Satu Wi-Fi dgn Redmi 9C):*`);
+        lines.push(lanLines);
+        lines.push('');
+        lines.push(`*Kunci Akses Cadangan:* \`${snap.accessKey}\``);
+        lines.push('────────────────────');
+        lines.push(
+          `_Perintah cepat: *${config.prefix}panel off* (matikan publik) · *${config.prefix}panel resetkey* (ganti kunci)_`
+        );
+
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          replyText: lines.join('\n'),
         };
         break;
       }

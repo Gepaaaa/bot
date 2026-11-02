@@ -21,6 +21,7 @@ import {
   getOrCreateSampleAudioBuffer,
   getOrCreateSampleVideoBuffer,
 } from './server/mediaProcessor.ts';
+import { remoteTunnel } from './server/remoteTunnel.ts';
 import { botStore } from './server/stateStore.ts';
 import { resolveDataDir } from './server/storagePath.ts';
 import { waManager } from './server/waManager.ts';
@@ -168,7 +169,7 @@ async function startServer() {
     );
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Api-Key'
+      'Content-Type, Authorization, X-Api-Key, X-Owner-Key'
     );
     if (req.method === 'OPTIONS') {
       res.status(204).end();
@@ -178,6 +179,7 @@ async function startServer() {
   });
 
   app.use(express.json({ limit: '50mb' }));
+  app.use(remoteTunnel.expressMiddleware);
 
   // WebSocket server mounted on /ws on the same port 3000 HTTP server
   const wss = new WebSocketServer({ noServer: true });
@@ -185,6 +187,11 @@ async function startServer() {
   server.on('upgrade', (request, socket, head) => {
     const reqUrl = request.url || '';
     if (reqUrl.startsWith('/ws')) {
+      if (!remoteTunnel.isAuthorizedWsUpgrade(request)) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
       });
@@ -269,6 +276,37 @@ async function startServer() {
       imageBackend: getActiveImageBackend(),
       memoryRssMb: Math.round(process.memoryUsage().rss / (1024 * 1024)),
     });
+  });
+
+  app.get('/api/remote-tunnel', (_req, res) => {
+    const port = activePort || LISTEN_CONFIG.port;
+    res.json(remoteTunnel.getSnapshot(port));
+  });
+
+  app.post('/api/remote-tunnel/start', async (_req, res) => {
+    try {
+      const port = activePort || LISTEN_CONFIG.port;
+      const snap = await remoteTunnel.startTunnel(port);
+      res.json(snap);
+    } catch (err) {
+      res.status(500).json({
+        ok: false,
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Gagal menyalakan tunnel jarak jauh.',
+      });
+    }
+  });
+
+  app.post('/api/remote-tunnel/stop', (_req, res) => {
+    res.json(remoteTunnel.stopTunnel());
+  });
+
+  app.post('/api/remote-tunnel/rotate-key', (_req, res) => {
+    const port = activePort || LISTEN_CONFIG.port;
+    remoteTunnel.rotateAccessKey();
+    res.json(remoteTunnel.getSnapshot(port));
   });
 
   app.use('/api/gateway', gatewayRouter);
@@ -1137,6 +1175,7 @@ async function startServer() {
         '--exclude=.baileys_auth',
         '--exclude=.bot-state.json',
         '--exclude=.wabot-state.json',
+        '--exclude=.remote-access.json',
         '--exclude=data',
         '--exclude=.env',
         '--exclude=server.mjs',
@@ -1309,6 +1348,16 @@ async function startServer() {
       <div class="meta">Centang fitur yang ingin diaktifkan di WhatsApp:</div>
       <div class="cmd-list" id="cmd-grid"></div>
     </div>
+
+    <div class="card">
+      <h2>5. Akses Panel dari HP Kedua (Dalam &amp; Luar Rumah)</h2>
+      <div class="meta">Buka panel ini dari HP utamamu tanpa harus membawa HP Redmi 9C ke mana-mana:</div>
+      <div id="remote-box" style="margin-top:10px;font-size:12px;color:#d4d4d8;">Memuat info tautan jarak jauh...</div>
+      <div class="row">
+        <button class="btn" onclick="startRemote()">Aktifkan Link Luar Rumah (4G/5G)</button>
+        <button class="btn btn-sec" onclick="stopRemote()">Matikan Link Luar</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -1449,8 +1498,34 @@ async function startServer() {
       await loadState();
     }
 
+    async function loadRemote() {
+      try {
+        const res = await fetch('/api/remote-tunnel');
+        const rt = await res.json();
+        const lan = (rt.lanUrls && rt.lanUrls.length) ? rt.lanUrls.join(' , ') : 'Hubungkan Wi-Fi Redmi 9C';
+        const pub = rt.magicUrl
+          ? ('<div style="margin-top:6px;color:#34d399;word-break:break-all;">Link Luar Rumah (Klik di HP ke-2):<br><b>' + rt.magicUrl + '</b></div>')
+          : ('<div style="margin-top:6px;color:#a1a1aa;">Status Luar Rumah: ' + (rt.lastError || rt.status || 'nonaktif') + ' (Bisa juga ketik <b>.panel</b> dari WA Owner ke bot)</div>');
+        document.getElementById('remote-box').innerHTML =
+          '<div>Satu Wi-Fi di Rumah: <b style="color:#f4f4f5;">' + lan + '</b></div>' + pub;
+      } catch {}
+    }
+
+    async function startRemote() {
+      document.getElementById('remote-box').innerHTML = '<div style="color:#fbbf24;">Menghubungkan Cloudflare Tunnel...</div>';
+      await fetch('/api/remote-tunnel/start', { method: 'POST' });
+      await loadRemote();
+    }
+
+    async function stopRemote() {
+      await fetch('/api/remote-tunnel/stop', { method: 'POST' });
+      await loadRemote();
+    }
+
     loadState();
+    loadRemote();
     setInterval(loadState, 3000);
+    setInterval(loadRemote, 8000);
   </script>
 </body>
 </html>`);
@@ -1498,10 +1573,12 @@ async function startServer() {
   }
 
   server.listen(activePort, LISTEN_CONFIG.host, () => {
+    remoteTunnel.setPort(activePort);
     console.log(`WABot server running on http://${LISTEN_CONFIG.host}:${activePort}`);
     console.log(`🌐 Web Control Panel: http://localhost:${activePort} (atau http://127.0.0.1:${activePort})`);
     void (async () => {
       try {
+        await remoteTunnel.autoResumeIfEnabled(activePort);
         await cloudSync.initAndRestore(resolveDataDir());
         if (cloudSync.isEnabled()) {
           botStore.reloadFromDisk();

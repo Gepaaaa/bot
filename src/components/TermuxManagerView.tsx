@@ -6,7 +6,11 @@ import {
   ExternalLink,
   GitBranch,
   Globe,
+  KeyRound,
+  Lock,
+  Power,
   Radio,
+  RefreshCw,
   ShieldCheck,
   Sliders,
   Smartphone,
@@ -34,6 +38,20 @@ interface NetworkInfoSnapshot {
   memoryRssMb: number;
 }
 
+interface RemoteTunnelInfo {
+  ok: boolean;
+  status: 'stopped' | 'starting' | 'online' | 'error';
+  provider: 'cloudflared' | 'ssh-localhost-run' | null;
+  publicUrl: string | null;
+  magicUrl: string | null;
+  lanUrls: string[];
+  localhostUrl: string;
+  accessKey: string;
+  autoStartTunnel: boolean;
+  cloudflaredInstalled: boolean;
+  lastError: string | null;
+}
+
 export function TermuxManagerView({
   waState,
   config,
@@ -46,7 +64,21 @@ export function TermuxManagerView({
   const [gitRepoUrl, setGitRepoUrl] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [netInfo, setNetInfo] = useState<NetworkInfoSnapshot | null>(null);
+  const [remoteInfo, setRemoteInfo] = useState<RemoteTunnelInfo | null>(null);
+  const [tunnelBusy, setTunnelBusy] = useState(false);
   const [isLocalNetworkHost, setIsLocalNetworkHost] = useState(false);
+
+  const refreshRemoteInfo = async () => {
+    try {
+      const r = await fetch('/api/remote-tunnel');
+      if (r.ok) {
+        const data = (await r.json()) as RemoteTunnelInfo;
+        setRemoteInfo(data);
+      }
+    } catch {
+      // Ignore network hiccups
+    }
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -56,7 +88,8 @@ export function TermuxManagerView({
           h === '127.0.0.1' ||
           h.startsWith('192.168.') ||
           h.startsWith('10.') ||
-          h.startsWith('172.')
+          h.startsWith('172.') ||
+          h.startsWith('100.')
       );
     }
 
@@ -72,10 +105,52 @@ export function TermuxManagerView({
         // Ignore when unreachable
       });
 
+    void refreshRemoteInfo();
+    const poll = setInterval(() => {
+      void refreshRemoteInfo();
+    }, 8000);
+
     return () => {
       cancelled = true;
+      clearInterval(poll);
     };
   }, []);
+
+  const handleStartRemoteTunnel = async () => {
+    setTunnelBusy(true);
+    try {
+      const r = await fetch('/api/remote-tunnel/start', { method: 'POST' });
+      if (r.ok) {
+        setRemoteInfo((await r.json()) as RemoteTunnelInfo);
+      }
+    } finally {
+      setTunnelBusy(false);
+    }
+  };
+
+  const handleStopRemoteTunnel = async () => {
+    setTunnelBusy(true);
+    try {
+      const r = await fetch('/api/remote-tunnel/stop', { method: 'POST' });
+      if (r.ok) {
+        setRemoteInfo((await r.json()) as RemoteTunnelInfo);
+      }
+    } finally {
+      setTunnelBusy(false);
+    }
+  };
+
+  const handleRotateAccessKey = async () => {
+    setTunnelBusy(true);
+    try {
+      const r = await fetch('/api/remote-tunnel/rotate-key', { method: 'POST' });
+      if (r.ok) {
+        setRemoteInfo((await r.json()) as RemoteTunnelInfo);
+      }
+    } finally {
+      setTunnelBusy(false);
+    }
+  };
 
   const copyText = (key: string, value: string) => {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
@@ -127,6 +202,16 @@ export function TermuxManagerView({
       cmd: 'bot logs',
       label: 'Pantau Chat Masuk',
       desc: 'Melihat aktivitas pesan dan pembuatan stiker secara real-time (tekan CTRL + C untuk menutup tampilan log).',
+    },
+    {
+      cmd: 'bot remote',
+      label: 'Link Panel Luar Rumah (4G/5G)',
+      desc: 'Mengaktifkan Cloudflare Tunnel di Redmi 9C agar Web Panel bisa dibuka dari HP kedua saat kamu pergi keluar rumah.',
+    },
+    {
+      cmd: `bot owner ${config.antiBan?.ownerNumber || '6289673533963'}`,
+      label: 'Daftarkan Nomor WA HP Kedua',
+      desc: 'Agar kamu cukup kirim chat pribadi .panel dari HP utamamu ke bot untuk menerima tautan login otomatis.',
     },
     {
       cmd: 'bot restart',
@@ -183,6 +268,181 @@ export function TermuxManagerView({
                   : 'Tautkan WA Sekarang'}
               </button>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* Section 1B: Dedicated Second-Phone Remote Access Control (Home Wi-Fi + Anywhere 4G/5G + .panel) */}
+      <div className="bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-6 space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+          <div className="space-y-1.5 max-w-3xl">
+            <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+              Akses Web Panel dari HP Kedua / HP Utama (Tanpa Bawa-Bawa Redmi 9C)
+            </h3>
+            <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">
+              Tinggalkan Redmi 9C tetap tercolok charger di rumah. Kamu tetap bisa membuka seluruh menu panel, mengubah template grup, mematikan fitur, hingga cek status WA langsung dari browser HP utamamu — baik saat satu Wi-Fi di rumah maupun saat sedang di luar rumah pakai kuota 4G/5G.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {remoteInfo?.status === 'online' ? (
+              <button
+                type="button"
+                disabled={tunnelBusy}
+                onClick={handleStopRemoteTunnel}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-[#FAF9F6] dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50"
+              >
+                <Power className="w-3.5 h-3.5 text-rose-500" />
+                {tunnelBusy ? 'Memproses...' : 'Matikan Link Luar Rumah'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={tunnelBusy}
+                onClick={handleStartRemoteTunnel}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-zinc-900 dark:bg-emerald-600 text-white text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                {tunnelBusy
+                  ? 'Membuka Jalur Tunnel...'
+                  : 'Aktifkan Link Luar Rumah (4G/5G)'}
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={tunnelBusy}
+              onClick={handleRotateAccessKey}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50"
+              title="Ganti kunci rahasia agar link lama hangus"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Reset Kunci
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-1">
+          {/* Mode 1: Outside the house (4G/5G Anywhere via Cloudflare + .panel WA command) */}
+          <div className="p-4 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900/70 border border-zinc-200/80 dark:border-zinc-800 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                <Lock className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                1. Saat di Luar Rumah (4G/5G Mana Saja)
+              </span>
+              {remoteInfo?.magicUrl && (
+                <button
+                  type="button"
+                  onClick={() => copyText('magicUrl', remoteInfo.magicUrl || '')}
+                  className="text-xs font-mono text-emerald-700 dark:text-emerald-400 hover:underline inline-flex items-center gap-1"
+                >
+                  {copiedKey === 'magicUrl' ? (
+                    <>
+                      <Check className="w-3 h-3" /> Tersalin
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" /> Salin Link
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+
+            {remoteInfo?.magicUrl ? (
+              <div className="px-3 py-2 rounded-lg bg-white dark:bg-zinc-950 border border-emerald-500/40 font-mono text-xs text-emerald-700 dark:text-emerald-300 break-all select-all">
+                {remoteInfo.magicUrl}
+              </div>
+            ) : (
+              <div className="px-3 py-2 rounded-lg bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 font-mono text-xs text-zinc-600 dark:text-zinc-400 break-words">
+                {remoteInfo?.lastError
+                  ? remoteInfo.lastError
+                  : 'Ketik "bot remote" di Termux Redmi 9C atau kirim ".panel" dari WA Owner ke bot'}
+              </div>
+            )}
+
+            <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+              Dilengkapi <strong>Kunci Rahasia Owner</strong> agar orang asing tidak bisa membuka panelmu. Kalau link berubah saat mati lampu, cukup <strong>chat pribadi <code className="font-mono">{config.prefix}panel</code> dari WA HP utamamu ke nomor bot</strong> — bot otomatis membalas link login terbaru!
+            </p>
+
+            {remoteInfo?.accessKey && (
+              <div className="flex items-center justify-between gap-2 pt-1 text-xs text-zinc-500 dark:text-zinc-400 border-t border-zinc-200/70 dark:border-zinc-800">
+                <span className="inline-flex items-center gap-1">
+                  <KeyRound className="w-3.5 h-3.5" />
+                  Kunci Owner: <code className="font-mono text-zinc-800 dark:text-zinc-200">{remoteInfo.accessKey}</code>
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    copyText(
+                      'cfInstall',
+                      'pkg install -y cloudflared && bot remote'
+                    )
+                  }
+                  className="font-mono text-emerald-700 dark:text-emerald-400 hover:underline"
+                >
+                  {copiedKey === 'cfInstall'
+                    ? 'Tersalin'
+                    : 'Salin cmd Termux'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Mode 2: Inside the house (Same Wi-Fi) */}
+          <div className="p-4 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900/70 border border-zinc-200/80 dark:border-zinc-800 space-y-3 flex flex-col justify-between">
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                  <Radio className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  2. Saat di Dalam Rumah (Satu Wi-Fi)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => copyText('lanCard', lanExampleUrl)}
+                  className="text-xs font-mono text-emerald-700 dark:text-emerald-400 hover:underline inline-flex items-center gap-1"
+                >
+                  {copiedKey === 'lanCard' ? (
+                    <>
+                      <Check className="w-3 h-3" /> Tersalin
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" /> Salin IP
+                    </>
+                  )}
+                </button>
+              </div>
+              <div className="px-3 py-2 rounded-lg bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 font-mono text-xs text-zinc-900 dark:text-emerald-300 select-all">
+                {lanExampleUrl}
+              </div>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                Selama HP keduamu dan Redmi 9C tersambung ke Wi-Fi rumah yang sama, langsung ketik alamat IP lokal di atas pada Chrome/Safari HP keduamu. Super cepat dan tanpa kuota internet sama sekali.
+              </p>
+            </div>
+            <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono pt-1 border-t border-zinc-200/70 dark:border-zinc-800">
+              Cek IP kapan saja via chat WA: {config.prefix}panel
+            </div>
+          </div>
+
+          {/* Mode 3: Optional Fixed Private IP via Tailscale */}
+          <div className="p-4 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900/70 border border-zinc-200/80 dark:border-zinc-800 space-y-3 flex flex-col justify-between">
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  3. Opsi IP Pribadi Permanen (Tailscale)
+                </span>
+              </div>
+              <div className="px-3 py-2 rounded-lg bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 font-mono text-xs text-zinc-900 dark:text-emerald-300">
+                http://100.x.x.x:3000
+              </div>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                Mau alamat IP yang tidak pernah berubah selamanya tanpa ketik <code className="font-mono">{config.prefix}panel</code>? Instal aplikasi gratis <strong>Tailscale</strong> dari Play Store di Redmi 9C &amp; HP utamamu dengan akun Google yang sama, lalu buka IP <code className="font-mono">100.x.x.x:3000</code> dari mana saja.
+              </p>
+            </div>
+            <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono pt-1 border-t border-zinc-200/70 dark:border-zinc-800">
+              100% gratis tanpa kartu kredit &amp; privat
+            </div>
           </div>
         </div>
       </div>

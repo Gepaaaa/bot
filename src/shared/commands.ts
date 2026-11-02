@@ -795,6 +795,15 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
       'Cek kecepatan respons bot, masa aktif sesi server, dan informasi owner.',
     example: 'ping',
   },
+  {
+    id: 'panel',
+    aliases: ['webpanel', 'remotepanel', 'linkpanel'],
+    category: 'utility',
+    usage: 'panel [on|off|resetkey]',
+    description:
+      'Khusus Owner (via Chat Pribadi): buka/ambil tautan Web Control Panel jarak jauh untuk diakses dari HP kedua di mana saja.',
+    example: 'panel',
+  },
 ];
 
 interface CompactCommandMeta {
@@ -872,6 +881,7 @@ const COMPACT_COMMAND_META: Record<string, CompactCommandMeta> = {
   menu: { shortUsage: 'menu [1-7]', shortDesc: 'Daftar fitur & panduan kategori' },
   owner: { shortUsage: 'owner', shortDesc: 'Kontak resmi Owner Bot' },
   ping: { shortUsage: 'ping', shortDesc: 'Cek kecepatan & status bot' },
+  panel: { shortUsage: 'panel', shortDesc: 'Link Web Panel jarak jauh (Owner)' },
 };
 
 interface CompactMenuRow {
@@ -1027,12 +1037,13 @@ export const MENU_SECTIONS: MenuSectionSpec[] = [
     key: 'info',
     code: '07',
     title: 'INFO & BANTUAN',
-    keywords: ['7', '07', 'info', 'utilitas', 'utility', 'bot', 'bantuan'],
-    ids: ['menu', 'owner', 'ping'],
+    keywords: ['7', '07', 'info', 'utilitas', 'utility', 'bot', 'bantuan', 'panel'],
+    ids: ['menu', 'owner', 'ping', 'panel'],
     compactRows: [
       { ids: ['menu'], argHint: '<1-7>', summary: 'Panduan detail per kategori' },
       { ids: ['allmenu'], summary: 'Daftar lengkap semua perintah' },
       { ids: ['owner', 'ping'], summary: 'Kontak owner & cek kecepatan' },
+      { ids: ['panel'], summary: 'Link Web Panel jarak jauh (Owner)' },
     ],
   },
 ];

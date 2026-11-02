@@ -20,10 +20,11 @@ echo ""
 echo "[1/6] Mengaktifkan Termux WakeLock (Anti-Sleep saat layar mati)..."
 termux-wake-lock 2>/dev/null || true
 
-# 2. Pasang paket sistem Termux (Node.js 22 LTS, FFmpeg + libwebp, Git, Curl, Tar)
-echo "[2/6] Memperbarui repositori & menginstal Node.js LTS, FFmpeg, libwebp..."
+# 2. Pasang paket sistem Termux (Node.js 22 LTS, FFmpeg + libwebp, Git, Curl, Tar, Cloudflared)
+echo "[2/6] Memperbarui repositori & menginstal Node.js LTS, FFmpeg, libwebp, cloudflared..."
 pkg update -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" || pkg update -y
 pkg install -y nodejs-lts ffmpeg libwebp git curl tar
+pkg install -y cloudflared 2>/dev/null || true
 
 # 3. Pasang PM2 Process Manager global jika belum tersedia
 echo "[3/6] Menyiapkan PM2 Process Manager (Auto-Restart 24/7)..."
@@ -66,12 +67,14 @@ print_status() {
   node -e '
     (async () => {
       try {
-        const [netRes, stRes] = await Promise.all([
+        const [netRes, stRes, rtRes] = await Promise.all([
           fetch("http://127.0.0.1:3000/api/network-info"),
-          fetch("http://127.0.0.1:3000/api/state")
+          fetch("http://127.0.0.1:3000/api/state"),
+          fetch("http://127.0.0.1:3000/api/remote-tunnel").catch(() => null)
         ]);
         const net = await netRes.json();
         const st = await stRes.json();
+        const rt = rtRes && rtRes.ok ? await rtRes.json() : null;
         const wa = st.waState || {};
         const cfg = st.config || {};
         console.log("============================================================");
@@ -80,15 +83,20 @@ print_status() {
         console.log("  Nama Bot      :", cfg.botName || "WABot");
         console.log("  Status WA     :", (wa.status || "disconnected").toUpperCase());
         console.log("  Nomor Tertaut :", wa.connectedUser?.phone ? ("+" + wa.connectedUser.phone) : "Belum tertaut");
+        console.log("  Nomor Owner   : +" + (cfg.antiBan?.ownerNumber || "6289673533963"));
         console.log("  Prefix Aktif  :", cfg.prefix || ".");
-        console.log("  Pengolah Media:", net.imageBackend || "resvg-wasm+ffmpeg");
         console.log("  Pemakaian RAM :", (net.memoryRssMb || "-") + " MB (" + (net.arch || "") + ")");
         console.log("------------------------------------------------------------");
-        console.log("  Kontrol di HP ini (Chrome) : " + (net.localhostUrl || "http://localhost:3000"));
+        console.log("  1) Di HP Redmi 9C ini     : " + (net.localhostUrl || "http://localhost:3000"));
         if (Array.isArray(net.lanUrls) && net.lanUrls.length > 0) {
-          console.log("  Kontrol dari HP Utama/PC   : " + net.lanUrls.join(" , "));
+          console.log("  2) HP ke-2 (Satu Wi-Fi)   : " + net.lanUrls.join(" , "));
         } else {
-          console.log("  Kontrol dari HP Utama/PC   : Hubungkan ke WiFi yang sama lalu cek IP HP");
+          console.log("  2) HP ke-2 (Satu Wi-Fi)   : Hubungkan ke Wi-Fi rumah lalu ketik bot status");
+        }
+        if (rt && rt.magicUrl) {
+          console.log("  3) HP ke-2 (Luar Rumah)   : " + rt.magicUrl);
+        } else {
+          console.log("  3) HP ke-2 (Luar Rumah)   : Ketik \"bot remote\" atau kirim \".panel\" dari WA Owner");
         }
         console.log("============================================================");
       } catch {
@@ -176,6 +184,88 @@ change_prefix() {
   ' "$NEW_PFX"
 }
 
+change_owner() {
+  NEW_OWNER="$1"
+  if [ -z "$NEW_OWNER" ]; then
+    printf "Masukkan nomor WA HP keduamu/Owner (contoh 6289673533963): "
+    read -r NEW_OWNER
+  fi
+  NEW_OWNER="$(echo "$NEW_OWNER" | tr -cd '0-9')"
+  case "$NEW_OWNER" in
+    08*) NEW_OWNER="62${NEW_OWNER#0}" ;;
+    8*)  NEW_OWNER="62${NEW_OWNER}" ;;
+  esac
+  if [ -z "$NEW_OWNER" ]; then
+    echo "[!] Nomor Owner tidak valid."
+    exit 1
+  fi
+  node -e '
+    const ownerNumber = process.argv[1];
+    (async () => {
+      const stRes = await fetch("http://127.0.0.1:3000/api/state");
+      const st = await stRes.json();
+      const prevAntiBan = st.config?.antiBan || {};
+      const res = await fetch("http://127.0.0.1:3000/api/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ antiBan: { ...prevAntiBan, ownerNumber } })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        console.log("[OK] Nomor WA Owner berhasil disetel ke: +" + ownerNumber);
+        console.log("     Sekarang kamu bisa chat pribadi \".panel\" dari nomor ini ke bot kapan saja!");
+      } else {
+        console.log("[!] Gagal mengubah Nomor Owner.");
+      }
+    })();
+  ' "$NEW_OWNER"
+}
+
+manage_remote() {
+  SUB="${1:-on}"
+  if [ "$SUB" = "off" ] || [ "$SUB" = "stop" ]; then
+    node -e '
+      (async () => {
+        await fetch("http://127.0.0.1:3000/api/remote-tunnel/stop", { method: "POST" });
+        console.log("[OK] Link akses luar rumah berhasil dimatikan.");
+      })();
+    '
+    return
+  fi
+
+  if ! command -v cloudflared >/dev/null 2>&1; then
+    echo "[+] Menginstal paket resmi cloudflared di Termux (sekali saja)..."
+    pkg install -y cloudflared || true
+  fi
+
+  echo "[+] Membuka jalur akses aman luar rumah (Cloudflare HTTP/2 Tunnel)..."
+  node -e '
+    (async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:3000/api/remote-tunnel/start", { method: "POST" });
+        const rt = await res.json();
+        console.log("");
+        console.log("============================================================");
+        if (rt.magicUrl) {
+          console.log("  LINK PANEL HP KE-2 (BISA DARI 4G/5G LUAR RUMAH):");
+          console.log("  " + rt.magicUrl);
+          console.log("");
+          console.log("  Tips Penting:");
+          console.log("  - Kalau di luar rumah link berubah karena mati lampu/Wi-Fi,");
+          console.log("    cukup kirim chat pribadi \".panel\" dari WA Owner ke bot!");
+          console.log("  - Untuk mematikan akses luar: bot remote off");
+        } else {
+          console.log("  [!] Tunnel belum mendapat URL publik:", rt.lastError || rt.status);
+        }
+        console.log("============================================================");
+        console.log("");
+      } catch {
+        console.log("[!] Server belum menyala. Jalankan: bot restart");
+      }
+    })();
+  '
+}
+
 case "${1:-menu}" in
   status|ip)
     print_status
@@ -185,6 +275,12 @@ case "${1:-menu}" in
     ;;
   prefix)
     change_prefix "$2"
+    ;;
+  owner)
+    change_owner "$2"
+    ;;
+  remote|panel|tunnel)
+    manage_remote "$2"
     ;;
   logs|log)
     pm2 logs wabot
@@ -198,13 +294,14 @@ case "${1:-menu}" in
     if [ -d "$HOME/wabot/.git" ]; then
       echo "[Update] Mengambil pembaruan terbaru dari Git..."
       (cd "$HOME/wabot" && git pull && rm -f server.bundle.mjs)
+      pkg install -y cloudflared 2>/dev/null || true
       pm2 restart wabot
       sleep 2
       print_status
     else
       echo "[i] Folder ~/wabot dipasang dari paket .tar.gz (bukan git clone)."
       echo "    Untuk update, unduh ulang wabot-redmi9c-ready.tar.gz ke folder Download lalu jalankan:"
-      echo "    tar -xzf ~/storage/downloads/wabot-redmi9c-ready.tar.gz -C ~/wabot && bot restart"
+      echo "    tar -xzf ~/storage/downloads/wabot-redmi9c-ready.tar.gz -C ~/wabot && bash ~/wabot/termux.sh"
     fi
     ;;
   stop)
@@ -218,21 +315,25 @@ case "${1:-menu}" in
     echo ""
     echo "Pilih aksi cepat:"
     echo "  1) Tautkan Nomor WA (Minta Kode Pairing 8 Digit)"
-    echo "  2) Ubah Prefix Perintah (. / ! / #)"
-    echo "  3) Lihat Log Aktivitas Realtime (CTRL+C untuk keluar)"
-    echo "  4) Restart Mesin Bot"
-    echo "  5) Matikan Bot Sementara"
-    echo "  6) Update Kode Bot Terbaru (git pull + restart)"
+    echo "  2) Buka Link Panel untuk HP Kedua / Luar Rumah (Cloudflare Tunnel)"
+    echo "  3) Setel Nomor WA HP Kedua sebagai Owner (Agar bisa chat .panel)"
+    echo "  4) Ubah Prefix Perintah (. / ! / #)"
+    echo "  5) Lihat Log Aktivitas Realtime (CTRL+C untuk keluar)"
+    echo "  6) Restart Mesin Bot"
+    echo "  7) Update Kode Bot Terbaru (git pull + restart)"
+    echo "  8) Matikan Bot Sementara"
     echo "  0) Keluar"
-    printf "\nPilihan [0-6]: "
+    printf "\nPilihan [0-8]: "
     read -r CHOICE
     case "$CHOICE" in
       1) request_pair "" ;;
-      2) change_prefix "" ;;
-      3) pm2 logs wabot ;;
-      4) pm2 restart wabot ;;
-      5) pm2 stop wabot ;;
-      6) "$0" update ;;
+      2) manage_remote "on" ;;
+      3) change_owner "" ;;
+      4) change_prefix "" ;;
+      5) pm2 logs wabot ;;
+      6) pm2 restart wabot ;;
+      7) "$0" update ;;
+      8) pm2 stop wabot ;;
       *) exit 0 ;;
     esac
     ;;
