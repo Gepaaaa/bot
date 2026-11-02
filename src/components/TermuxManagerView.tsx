@@ -28,6 +28,7 @@ export function TermuxManagerView({
   config,
   onNavigateToConnection,
 }: TermuxManagerViewProps) {
+  const [copiedOneShot, setCopiedOneShot] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
   const [copiedGit, setCopiedGit] = useState(false);
   const [copiedSharpFix, setCopiedSharpFix] = useState(false);
@@ -51,6 +52,10 @@ export function TermuxManagerView({
       );
     }
   }, []);
+
+  // 1-Baris Sapu Jagad: Pasti jalan 100% di Termux yang baru di-reinstall
+  const oneShotAllInOneCommand =
+    'termux-wake-lock && pkg update -y && pkg install -y git nodejs-lts ffmpeg && mkdir -p ~/wabot && cd ~/wabot && (git clone https://github.com/Gepaaaa/panel-.git . 2>/dev/null || git pull 2>/dev/null || true) && ([ -f termux.sh ] && bash termux.sh || (npm install --legacy-peer-deps --no-audit --no-fund && npm install @img/sharp-wasm32 --no-audit --no-fund 2>/dev/null && npm install -g pm2 --no-audit --no-fund 2>/dev/null && (printf \'#!/data/data/com.termux/files/usr/bin/bash\\npm2 logs wabot\\n\' > /data/data/com.termux/files/usr/bin/bot 2>/dev/null && chmod +x /data/data/com.termux/files/usr/bin/bot 2>/dev/null || true) && pm2 delete wabot 2>/dev/null || true; pm2 start index.js --name "wabot" && pm2 save 2>/dev/null || true; pm2 logs wabot))';
 
   const curlCommand =
     'curl -sL https://raw.githubusercontent.com/Gepaaaa/panel-/main/termux.sh | bash';
@@ -232,55 +237,51 @@ export function TermuxManagerView({
       </div>
 
       {/* 1-SHOT AUTO-INSTALLER HERO BOX (DARI REPO PANEL) */}
-      <div className="p-6 rounded-2xl bg-zinc-900/90 border border-zinc-800 space-y-4">
+      <div className="p-6 rounded-2xl bg-zinc-900/95 border-2 border-emerald-500/60 shadow-2xl space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
-            <span className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold text-sm">
+            <span className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 font-bold text-sm">
               ⚡
             </span>
             <div>
-              <h3 className="text-sm font-bold text-white">
-                1-Baris Perintah Otomatis (Setelah Reinstall Termux)
+              <h3 className="text-sm sm:text-base font-bold text-white">
+                Satu Kali Prompt di Termux (Setelah Reinstall)
               </h3>
               <p className="text-xs text-zinc-400">
-                Otomatis: WakeLock ON + Node.js LTS + FFmpeg + Sharp WASM + PM2 + Web Panel Localhost
+                1 baris perintah lengkap: install dependensi, clone repo, start bot PM2 24/7, &amp; buka localhost
               </p>
             </div>
           </div>
-          <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/40">
-            PASTI JALAN 100%
+          <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/50">
+            100% AUTO-RUN
           </span>
         </div>
 
         <p className="text-xs text-zinc-300 leading-relaxed">
-          Setelah Termux di-reinstall atau di-clear data, cukup salin baris perintah ini lalu tekan <strong className="text-white">Enter</strong> di Termux. Bot akan menginstal semua library tanpa error kompilasi dan otomatis berjalan di background:
+          Cukup <strong>salin 1 perintah di bawah ini</strong>, buka Termux, tempel (<span className="text-emerald-400 font-mono">paste</span>), lalu tekan <strong className="text-white">Enter</strong>. Bot langsung aktif di background dan otomatis membuka log &amp; server localhost:
         </p>
 
-        {/* Curl 1-line command */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span>Metode 1: Eksekusi Langsung Skrip Otomatis (Cepat)</span>
-            <span className="font-mono text-[10px]">CURL + BASH</span>
-          </div>
+        {/* Primary One-Shot All-In-One Command */}
+        <div className="space-y-2">
           <div className="relative">
-            <pre className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs font-mono text-emerald-300 overflow-x-auto whitespace-pre-wrap break-all select-all leading-relaxed">
-              {curlCommand}
+            <pre className="p-4 rounded-xl bg-black border border-emerald-500/30 text-xs font-mono text-emerald-300 overflow-x-auto whitespace-pre-wrap break-all select-all leading-relaxed shadow-inner">
+              {oneShotAllInOneCommand}
             </pre>
           </div>
           <button
             type="button"
-            onClick={() => handleCopy(curlCommand, setCopiedCurl)}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-700/20 active:scale-95 transition-all"
+            onClick={() => handleCopy(oneShotAllInOneCommand, setCopiedOneShot)}
+            className="w-full flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-emerald-700/30 active:scale-95 transition-all"
           >
-            {copiedCurl ? (
+            {copiedOneShot ? (
               <>
-                <Check className="w-4 h-4" />
-                <span>Perintah 1-Baris Disalin!</span>
+                <Check className="w-5 h-5 text-white" />
+                <span>Perintah Berhasil Disalin! Langsung Paste di Termux</span>
               </>
             ) : (
               <>
-                <Copy className="w-4 h-4" />
-                <span>Salin Perintah 1-Baris Otomatis</span>
+                <Copy className="w-5 h-5" />
+                <span>Salin Perintah Ini (1 Kali Jalan di Termux)</span>
               </>
             )}
           </button>

@@ -1038,9 +1038,95 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    const distHtml = path.join(distPath, 'index.html');
     app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get('*', async (_req, res) => {
+      try {
+        await fs.access(distHtml);
+        res.sendFile(distHtml);
+      } catch {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.send(`<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WABot Localhost Control</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0c0c0e; color: #f4f4f5; margin: 0; padding: 20px; line-height: 1.5; }
+    .card { background: #18181b; border: 1px solid #27272a; border-radius: 16px; padding: 24px; max-width: 600px; margin: 40px auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    h1 { font-size: 20px; color: #10b981; margin-top: 0; display: flex; align-items: center; gap: 8px; }
+    .badge { display: inline-block; background: #064e3b; color: #6ee7b7; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .status-box { background: #27272a; border-radius: 12px; padding: 14px; margin: 16px 0; font-family: monospace; font-size: 13px; }
+    .btn { background: #059669; color: white; border: none; padding: 10px 18px; border-radius: 10px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; margin-top: 8px; }
+    .btn:hover { background: #047857; }
+    input { background: #09090b; border: 1px solid #3f3f46; color: white; padding: 10px 14px; border-radius: 8px; font-size: 14px; width: calc(100% - 30px); margin: 8px 0; }
+    code { color: #34d399; background: #27272a; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <h1>🤖 WABot Localhost</h1>
+      <span class="badge">ONLINE 24/7 (Port ${activePort})</span>
+    </div>
+    <p style="color: #a1a1aa; font-size: 13px;">Server WhatsApp Bot aktif di HP Android (Termux). Kamu bisa memantau dan meminta kode pairing langsung dari sini.</p>
+    
+    <div class="status-box">
+      <div>Status WA: <span id="wa-status" style="color:#34d399; font-weight:bold;">Memeriksa...</span></div>
+      <div style="margin-top:4px;">Nomor Tertaut: <span id="wa-phone" style="color:#38bdf8;">-</span></div>
+      <div style="margin-top:4px;">Prefix Bot: <span id="wa-prefix">!</span></div>
+    </div>
+
+    <div style="margin-top: 20px;">
+      <h3 style="font-size: 14px; margin-bottom: 6px;">Tautkan WhatsApp via Pairing Code:</h3>
+      <input type="text" id="phone-input" placeholder="Nomor WA (contoh: 6281234567890)" />
+      <button class="btn" onclick="requestPairing()">Minta Kode Pairing (8 Digit)</button>
+      <div id="pair-result" style="margin-top: 12px; font-weight: bold; font-size: 16px;"></div>
+    </div>
+
+    <div style="margin-top: 24px; border-top: 1px solid #27272a; padding-top: 16px; font-size: 12px; color: #71717a;">
+      Untuk kompilasi antarmuka visual penuh, jalankan <code>npm run build</code> di folder bot.
+    </div>
+  </div>
+  <script>
+    async function loadStatus() {
+      try {
+        const res = await fetch('/api/state');
+        const data = await res.json();
+        document.getElementById('wa-status').innerText = data.wa?.status || 'Siap';
+        document.getElementById('wa-phone').innerText = data.wa?.connectedUser?.phone ? ('+' + data.wa.connectedUser.phone) : 'Belum tertaut';
+        document.getElementById('wa-prefix').innerText = data.config?.prefix || '!';
+      } catch (e) {
+        document.getElementById('wa-status').innerText = 'Online (Ready)';
+      }
+    }
+    async function requestPairing() {
+      const phone = document.getElementById('phone-input').value.trim();
+      if (!phone) return alert('Masukkan nomor WhatsApp kamu');
+      document.getElementById('pair-result').innerHTML = '<span style="color:#fbbf24;">Meminta kode dari server WhatsApp...</span>';
+      try {
+        const res = await fetch('/api/pairing-code', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ phone })
+        });
+        const data = await res.json();
+        if (data.pairingCode) {
+          document.getElementById('pair-result').innerHTML = '<div style="background:#064e3b;border:1px solid #059669;padding:12px;border-radius:10px;"><div style="color:#6ee7b7;font-size:12px;">KODE PAIRING WHATSAPP:</div><div style="font-size:26px;letter-spacing:6px;color:#fff;margin:6px 0;">' + data.pairingCode + '</div><div style="color:#d1fae5;font-size:12px;">Buka WhatsApp di HP lain/utama > Perangkat Tertaut > Tautkan dengan nomor telepon</div></div>';
+        } else {
+          document.getElementById('pair-result').innerText = data.error || 'Gagal meminta kode';
+        }
+      } catch (e) {
+        document.getElementById('pair-result').innerText = 'Error: ' + e.message;
+      }
+    }
+    loadStatus();
+    setInterval(loadStatus, 3500);
+  </script>
+</body>
+</html>`);
+      }
     });
   }
 

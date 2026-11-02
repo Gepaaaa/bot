@@ -48,6 +48,7 @@ cd "$BOT_DIR"
 # 5. Instal dependensi Node.js & Sharp WebAssembly untuk kompatibilitas Android 32/64-bit
 echo "📥 [5/6] Menginstal dependensi & engine stiker (@img/sharp-wasm32)..."
 npm install --legacy-peer-deps --no-audit --no-fund
+npm install @img/sharp-wasm32 --no-audit --no-fund 2>/dev/null || true
 
 # Build tampilan Web Panel agar siap diakses di http://localhost:3000
 if [ ! -f "dist/index.html" ]; then
