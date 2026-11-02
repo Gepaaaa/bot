@@ -261,10 +261,10 @@ export function SettingsView({
             <div className="py-3.5 flex items-start justify-between gap-4 bg-emerald-500/5 -mx-2 px-3 rounded-xl border border-emerald-500/20 my-1">
               <div>
                 <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-                  Kunci Pengaturan: Hanya Manual via Web Panel
+                  Kunci Pengaturan Grup &amp; Akun: Hanya Manual
                 </div>
                 <div className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5 leading-relaxed">
-                  Mencegah bot mengubah setelan grup (buka/tutup chat grup, ganti nama/deskripsi, ubah link, antilink, welcome) via chat WhatsApp. Semua setelan dikontrol manual dari panel ini.
+                  Bot dikunci agar tidak bisa mengubah setelan grup (buka/tutup grup, ganti nama/deskripsi, reset link, antilink, welcome, template) via chat WA, serta tidak pernah mengubah profil, bio, foto profil, maupun privasi nomor bot sendiri.
                 </div>
               </div>
               <button

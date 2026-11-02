@@ -135,8 +135,8 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     category: 'downloader',
     usage: 'ttslide <link slide tiktok>',
     description:
-      'Download rangkaian album foto slide TikTok resolusi jernih beserta audio latarnya secara berjeda aman.',
-    example: 'ttslide https://www.tiktok.com/@tiktok/video/7106594312292453675',
+      'Download seluruh foto dari postingan Slide TikTok tanpa watermark dan kirim satu per satu sekaligus sesuai urutan aslinya (Foto 1/N s.d. N/N).',
+    example: 'ttslide https://www.tiktok.com/@user5449227735440/photo/7703619176962870558',
   },
   {
     id: 'ig',
@@ -623,10 +623,9 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     category: 'group',
     usage: 'hidetag <pesan>',
     description:
-      'Dinonaktifkan otomatis karena mention massal tersembunyi ke seluruh member memicu deteksi spam & penangguhan grup WhatsApp.',
+      'Kirim pengumuman penting dengan mention tersembunyi ke seluruh anggota grup (Khusus Admin/Owner).',
     example: 'hidetag Jangan lupa kumpul komunitas malam ini jam 20.00 WIB!',
     groupOnly: true,
-    suspensionRisk: true,
   },
   {
     id: 'tagall',
@@ -634,10 +633,9 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     category: 'group',
     usage: 'tagall <pesan>',
     description:
-      'Dinonaktifkan otomatis karena mention massal seluruh anggota berisiko tinggi menyebabkan grup ditangguhkan WhatsApp.',
+      'Sebutkan dan tag seluruh daftar anggota grup beserta pesan pengumuman (Khusus Admin/Owner).',
     example: 'tagall Absen hadir anggota komunitas',
     groupOnly: true,
-    suspensionRisk: true,
   },
   {
     id: 'antilink',
@@ -860,8 +858,8 @@ const COMPACT_COMMAND_META: Record<string, CompactCommandMeta> = {
   promote: { shortUsage: 'promote <@tag/reply>', shortDesc: 'Angkat jadi Admin Grup' },
   demote: { shortUsage: 'demote <@tag/reply>', shortDesc: 'Cabut jabatan Admin Grup' },
   group: { shortUsage: 'group <open|close>', shortDesc: 'Buka / kunci chat grup' },
-  hidetag: { shortUsage: 'hidetag <pesan>', shortDesc: 'Dikunci cegah suspend grup' },
-  tagall: { shortUsage: 'tagall <pesan>', shortDesc: 'Dikunci cegah suspend grup' },
+  hidetag: { shortUsage: 'hidetag <pesan>', shortDesc: 'Pengumuman mention tersembunyi' },
+  tagall: { shortUsage: 'tagall <pesan>', shortDesc: 'Tag daftar semua anggota grup' },
   setname: { shortUsage: 'setname <nama>', shortDesc: 'Ganti nama grup WA' },
   setdesc: { shortUsage: 'setdesc <teks>', shortDesc: 'Ganti deskripsi grup WA' },
   linkgc: { shortUsage: 'linkgc', shortDesc: 'Ambil link undangan grup' },
@@ -1002,6 +1000,7 @@ export const MENU_SECTIONS: MenuSectionSpec[] = [
     ],
     compactRows: [
       { ids: ['kick', 'promote', 'demote'], summary: 'Kelola anggota & admin' },
+      { ids: ['hidetag', 'tagall'], summary: 'Pengumuman & mention semua member' },
       { ids: ['group'], argHint: 'open|close', summary: 'Buka / kunci chat grup' },
       { ids: ['setname', 'setdesc'], summary: 'Ubah nama & deskripsi grup' },
       { ids: ['linkgc', 'revoke'], summary: 'Ambil / reset tautan grup' },

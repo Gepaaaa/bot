@@ -806,7 +806,15 @@ async function startServer() {
 
           const mType = targetMsg.media?.type;
           const mUrl = targetMsg.media?.url;
-          const resolvedBuf = await resolveCachedBufferFromUrl(mUrl);
+          let resolvedBuf = await resolveCachedBufferFromUrl(mUrl);
+          if (targetMsg.media?.isViewOnce && !resolvedBuf) {
+            resolvedBuf =
+              mType === 'video'
+                ? await getOrCreateSampleVideoBuffer()
+                : mType === 'audio' || mType === 'vn'
+                ? await getOrCreateSampleAudioBuffer()
+                : await loadSampleCatBuffer();
+          }
 
           if (targetMsg.media?.isViewOnce && resolvedBuf) {
             viewOnceMedia = {
@@ -989,6 +997,48 @@ async function startServer() {
             },
           };
           botStore.addSimulatorMessage(hdReplyMsg);
+        } else if (botResult.slideProxyUrls?.length) {
+          const slides = botResult.slideProxyUrls.slice(0, 35);
+          const total = slides.length;
+          const baseTs = Date.now();
+          for (let i = 0; i < total; i += 1) {
+            const stepLabel = `📸 *Foto ${i + 1}/${total}*`;
+            const captionText =
+              i === 0
+                ? botResult.replyText
+                  ? `${botResult.replyText}\n${stepLabel}`
+                  : stepLabel
+                : stepLabel;
+            const slideMsg: SimulatorMessage = {
+              id: `sim-slide-${baseTs}-${i}-${Math.random().toString(36).slice(2, 6)}`,
+              chatMode,
+              sender: 'bot',
+              senderName: botStore.config.botName,
+              senderPhone: 'Bot Engine',
+              text: captionText,
+              timestamp: baseTs + i,
+              replyTo:
+                i === 0
+                  ? {
+                      id: userMsg.id,
+                      senderName: userMsg.senderName,
+                      senderPhone: userMsg.senderPhone,
+                      text: userMsg.text || '[Tautan Slide TikTok]',
+                    }
+                  : undefined,
+              media: {
+                type: 'image',
+                url: slides[i],
+                mimeType: 'image/jpeg',
+                fileName: `tiktok-slide-${i + 1}.jpg`,
+                title: botResult.mediaTitle
+                  ? `${botResult.mediaTitle} (${i + 1}/${total})`
+                  : `Foto ${i + 1}/${total}`,
+                author: botResult.mediaAuthor,
+              },
+            };
+            botStore.addSimulatorMessage(slideMsg);
+          }
         } else {
           let resolvedMedia: SimulatorMessage['media'] | undefined;
 
@@ -1002,15 +1052,6 @@ async function startServer() {
                 pack: botStore.config.stickerPackName,
                 author: botStore.config.stickerAuthor,
               },
-            };
-          } else if (botResult.slideProxyUrls?.length) {
-            resolvedMedia = {
-              type: 'gallery',
-              url: botResult.slideProxyUrls[0],
-              galleryUrls: botResult.slideProxyUrls,
-              mimeType: 'image/jpeg',
-              title: botResult.mediaTitle,
-              author: botResult.mediaAuthor,
             };
           } else if (botResult.imageWebUrl) {
             resolvedMedia = {

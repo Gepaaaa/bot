@@ -74,6 +74,7 @@ export interface IncomingViewOncePayload {
   buffer: Buffer;
   mimeType: string;
   caption?: string;
+  isVoiceNote?: boolean;
 }
 
 export interface HdSwPreparedMedia {
@@ -105,6 +106,7 @@ export interface IncomingBotContext {
   audioBuffer?: Buffer | null;
   stickerBuffer?: Buffer | null;
   viewOnceMedia?: IncomingViewOncePayload | null;
+  viewOnceError?: string | null;
   quotedText?: string;
   quotedSenderName?: string;
   documentMedia?: IncomingDocumentPayload | null;
@@ -140,6 +142,7 @@ export interface BotCommandResult {
   documentFileName?: string;
   documentWebUrl?: string;
   slideImageUrls?: string[];
+  slideFallbackImageUrls?: string[][];
   slideProxyUrls?: string[];
   videoRemoteUrl?: string;
   videoProxyUrl?: string;
@@ -582,7 +585,7 @@ export async function processBotMessage(
         handled: true,
         reactionStatus: 'error',
         replyText:
-          '🔒 *Perubahan Pengaturan Dinonaktifkan via Chat*\n\nBot ini telah dikonfigurasi agar *tidak dapat* mengubah setelan grup maupun preferensi bot melalui perintah chat WhatsApp.\n\nSemua perubahan setelan (buka/tutup chat grup, nama grup, deskripsi, tautan undangan, antilink, welcome, dan template) hanya dapat diubah secara *MANUAL* melalui Dashboard Web Panel oleh pemilik bot.',
+          '🔒 *Perubahan Pengaturan Dikunci Manual*\n\nBot ini dikunci agar *tidak dapat* mengubah setelan grup maupun setelan nomor/akun bot melalui perintah chat WhatsApp.\n\nSeluruh pengaturan (buka/tutup grup, nama & deskripsi grup, reset link grup, antilink, welcome/out, template, dan preferensi bot) hanya bisa diubah secara *MANUAL* oleh Owner lewat aplikasi WhatsApp atau Web Control Panel.',
       };
     }
     return null;
@@ -687,12 +690,22 @@ export async function processBotMessage(
 
   const buildSocialDownloadResponse = async (
     targetUrl: string,
-    platformHint: SupportedPlatform | 'auto'
+    platformHint: SupportedPlatform | 'auto',
+    options?: { requireSlides?: boolean }
   ): Promise<BotCommandResult> => {
     const media =
       platformHint === 'tiktok'
         ? await downloadTikTokMedia(targetUrl)
         : await resolveSocialMedia(targetUrl, platformHint);
+
+    if (
+      options?.requireSlides &&
+      (!media.slideImages || media.slideImages.length === 0)
+    ) {
+      return failReply(
+        `Tautan TikTok tersebut berupa *Video*, bukan postingan *Slide Foto*.\nGunakan perintah *${config.prefix}tt <link>* untuk mengunduh videonya.`
+      );
+    }
 
     // 1. Multi-photo slide / carousel (TikTok Slide / IG Carousel / X Gallery)
     if (media.slideImages && media.slideImages.length > 0) {
@@ -712,6 +725,7 @@ export async function processBotMessage(
         handled: true,
         reactionStatus: 'success',
         slideImageUrls: media.slideImages,
+        slideFallbackImageUrls: media.slideFallbackImageUrls,
         slideProxyUrls: proxySlides,
         audioRemoteUrl: media.audioUrl,
         audioProxyUrl: media.audioUrl
@@ -721,7 +735,7 @@ export async function processBotMessage(
           : undefined,
         mediaTitle: media.title,
         mediaAuthor: media.author,
-        replyText: `${caption}\nJumlah Slide: *${media.slideImages.length} Foto*`,
+        replyText: `${caption}\nTotal Urutan: *${media.slideImages.length} Foto*`,
       };
     }
 
@@ -1174,8 +1188,11 @@ export async function processBotMessage(
 
       case 'rvo': {
         if (!ctx.viewOnceMedia) {
+          if (ctx.viewOnceError) {
+            return failReply(ctx.viewOnceError);
+          }
           return failReply(
-            `Balas (reply) pada pesan *View Once* (foto, video, atau suara sekali lihat) dengan *${config.prefix}rvo* untuk membukanya kembali.`
+            `Balas (reply) pada pesan *View Once* (foto, video, atau pesan suara sekali lihat) dengan *${config.prefix}rvo* untuk membukanya kembali.`
           );
         }
         const vo = ctx.viewOnceMedia;
@@ -1214,8 +1231,8 @@ export async function processBotMessage(
         } else {
           const webUrl = botStore.storeHdMedia(
             vo.buffer,
-            vo.mimeType || 'audio/mpeg',
-            'viewonce.mp3'
+            vo.mimeType || 'audio/ogg; codecs=opus',
+            'viewonce-audio.ogg'
           );
           result = {
             handled: true,
@@ -1223,6 +1240,7 @@ export async function processBotMessage(
             audioBuffer: vo.buffer,
             audioMimeType: vo.mimeType || 'audio/mpeg',
             audioWebUrl: webUrl,
+            asVoiceNote: Boolean(vo.isVoiceNote),
             replyText: caption,
           };
         }
@@ -1357,7 +1375,8 @@ export async function processBotMessage(
 
         result = await buildSocialDownloadResponse(
           targetUrl,
-          hintMap[matchedCmd.id] || 'auto'
+          hintMap[matchedCmd.id] || 'auto',
+          { requireSlides: matchedCmd.id === 'ttslide' }
         );
         break;
       }
@@ -2218,9 +2237,93 @@ export async function processBotMessage(
         break;
       }
 
-      case 'hidetag':
+      case 'hidetag': {
+        if (config.antiBan?.hidetagAdminOnly ?? true) {
+          const guard = ensureSenderGroupAdmin();
+          if (guard) return guard;
+        }
+
+        if (!isSenderBotOwner(ctx) && config.antiBan?.enabled) {
+          const cooldownSec = Math.max(
+            10,
+            config.antiBan.hidetagCooldownSeconds || 30
+          );
+          const htCooldown = checkGroupActionCooldown(
+            ctx,
+            'hidetag',
+            cooldownSec * 1000
+          );
+          if (htCooldown) {
+            botStore.incrementAntiBanStat('hidetagProtected');
+            return failReply(htCooldown);
+          }
+        }
+
+        const members = ctx.groupMembers || botStore.groupMembers;
+        const allJids = Array.from(
+          new Set(members.map((m) => m.jid).filter(Boolean))
+        );
+        const announceText =
+          argsText ||
+          ctx.quotedText ||
+          `📢 *Pengumuman Grup (${
+            ctx.groupName || botStore.groupState.subject
+          })*`;
+
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          replyText: announceText,
+          hiddenMentions: allJids,
+        };
+        break;
+      }
+
       case 'tagall': {
-        return failReply(SUSPENSION_RISK_DISABLED_REPLY);
+        if (config.antiBan?.hidetagAdminOnly ?? true) {
+          const guard = ensureSenderGroupAdmin();
+          if (guard) return guard;
+        }
+
+        if (!isSenderBotOwner(ctx) && config.antiBan?.enabled) {
+          const cooldownSec = Math.max(
+            10,
+            config.antiBan.hidetagCooldownSeconds || 30
+          );
+          const tagCooldown = checkGroupActionCooldown(
+            ctx,
+            'hidetag',
+            cooldownSec * 1000
+          );
+          if (tagCooldown) {
+            botStore.incrementAntiBanStat('hidetagProtected');
+            return failReply(tagCooldown);
+          }
+        }
+
+        const members = ctx.groupMembers || botStore.groupMembers;
+        const allJids = Array.from(
+          new Set(members.map((m) => m.jid).filter(Boolean))
+        );
+        const headerMsg = argsText || ctx.quotedText || 'Panggilan seluruh anggota grup';
+        const gTitle = ctx.groupName || botStore.groupState.subject;
+        const mentionLines = members.map((m, idx) => {
+          const tagId = m.jid.split(':')[0]?.split('@')[0] || m.phone;
+          return `${idx + 1}. @${tagId}`;
+        });
+
+        result = {
+          handled: true,
+          reactionStatus: 'success',
+          replyText: [
+            `*TAG ALL · ${gTitle}*`,
+            `Pesan: *${headerMsg}*`,
+            '────────────────────',
+            ...mentionLines,
+          ].join('\n'),
+          mentions: allJids,
+        };
+        break;
       }
 
       case 'antilink': {
@@ -2456,6 +2559,9 @@ export async function processBotMessage(
       }
 
       case 'resetset': {
+        const manualGuard = checkManualOnlySettingsGuard();
+        if (manualGuard) return manualGuard;
+
         const guard = ensureSenderGroupAdmin();
         if (guard) return guard;
 

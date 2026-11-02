@@ -1009,3 +1009,50 @@ export async function prepareHdStatusImage(
     };
   }
 }
+
+export async function ensureWhatsappImageBuffer(
+  buffer: Buffer,
+  mimeType = 'image/jpeg'
+): Promise<{ buffer: Buffer; mimeType: string }> {
+  const sniffed = sniffImageMetadata(buffer);
+  if (sniffed.format === 'jpeg') {
+    return { buffer, mimeType: 'image/jpeg' };
+  }
+  if (sniffed.format === 'png') {
+    return { buffer, mimeType: 'image/png' };
+  }
+
+  const sharp = getOptionalSharp();
+  if (sharp) {
+    try {
+      const jpg = await sharp(buffer, { animated: false })
+        .flatten({ background: '#000000' })
+        .jpeg({ quality: 92 })
+        .toBuffer();
+      return { buffer: jpg, mimeType: 'image/jpeg' };
+    } catch {
+      // Fall back to FFmpeg conversion below
+    }
+  }
+
+  try {
+    const jpgBuf = await withTempDir(async (dir) => {
+      const inPath = path.join(dir, 'slide.img');
+      const outPath = path.join(dir, 'slide.jpg');
+      await fs.writeFile(inPath, buffer);
+      await execFileAsync(
+        getFfmpegBin(),
+        ['-y', '-i', inPath, '-frames:v', '1', '-q:v', '2', outPath],
+        { timeout: 18000 }
+      );
+      return fs.readFile(outPath);
+    });
+    return { buffer: jpgBuf, mimeType: 'image/jpeg' };
+  } catch {
+    return {
+      buffer,
+      mimeType: mimeType.startsWith('image/') ? mimeType : 'image/jpeg',
+    };
+  }
+}
+

@@ -3,11 +3,13 @@ import path from 'node:path';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  downloadContentFromMessage,
   downloadMediaMessage,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
   type AuthenticationState,
   type GroupMetadata,
+  type MediaType,
   type WASocket,
   type WAMessage,
 } from '@whiskeysockets/baileys';
@@ -23,6 +25,7 @@ import {
   shouldSendPendingReaction,
   type WAGroupOperations,
 } from './commandEngine.ts';
+import { ensureWhatsappImageBuffer } from './imageAdapter.ts';
 import { fetchRemoteBuffer } from './mediaDownloader.ts';
 import { botStore } from './stateStore.ts';
 import { cloudSync } from './cloudSync.ts';
@@ -62,6 +65,23 @@ class WhatsAppSessionManager {
   private groupGreetingLastSent = new Map<string, number>();
   private userCommandTimestamps = new Map<string, number[]>();
   private lastHidetagPerGroup = new Map<string, number>();
+  private recentViewOnceCache = new Map<
+    string,
+    {
+      kind: 'image' | 'video' | 'audio';
+      hkdfType: MediaType;
+      mediaObj: {
+        mediaKey?: Uint8Array | null;
+        directPath?: string | null;
+        url?: string | null;
+      };
+      mimeType: string;
+      caption?: string;
+      isVoiceNote?: boolean;
+      fullMsg: WAMessage;
+      savedAt: number;
+    }
+  >();
   private outboundQueue: Promise<void> = Promise.resolve();
   private lastOutboundSentAt = 0;
 
@@ -419,7 +439,15 @@ class WhatsAppSessionManager {
           if (cached) return cached;
           return this.getCachedGroupMetadata(jid);
         },
-        getMessage: async () => undefined,
+        getMessage: async (key) => {
+          if (key?.id) {
+            const cachedVo = this.recentViewOnceCache.get(key.id);
+            if (cachedVo?.fullMsg?.message) {
+              return cachedVo.fullMsg.message;
+            }
+          }
+          return undefined;
+        },
       });
 
       if (currentGen !== this.sessionGeneration || this.manualDisconnect) {
@@ -871,7 +899,11 @@ class WhatsAppSessionManager {
     raw: WAMessage['message'] | null | undefined
   ): WAMessage['message'] | null {
     let current = raw;
-    for (let depth = 0; depth < 4 && current; depth += 1) {
+    for (let depth = 0; depth < 8 && current; depth += 1) {
+      if (current.deviceSentMessage?.message) {
+        current = current.deviceSentMessage.message;
+        continue;
+      }
       if (current.ephemeralMessage?.message) {
         current = current.ephemeralMessage.message;
         continue;
@@ -892,9 +924,163 @@ class WhatsAppSessionManager {
         current = current.documentWithCaptionMessage.message;
         continue;
       }
+      if (current.editedMessage?.message?.protocolMessage?.editedMessage) {
+        current = current.editedMessage.message.protocolMessage.editedMessage;
+        continue;
+      }
       break;
     }
     return current || null;
+  }
+
+  private inspectViewOnceCandidate(
+    raw: WAMessage['message'] | null | undefined
+  ): {
+    isViewOnce: boolean;
+    kind: 'image' | 'video' | 'audio';
+    hkdfType: MediaType;
+    mediaObj: {
+      mediaKey?: Uint8Array | null;
+      directPath?: string | null;
+      url?: string | null;
+    };
+    hasDownloadKeys: boolean;
+    mimeType: string;
+    caption?: string;
+    isVoiceNote?: boolean;
+  } | null {
+    let current = raw;
+    let sawVoWrapper = false;
+    for (let depth = 0; depth < 8 && current; depth += 1) {
+      if (current.deviceSentMessage?.message) {
+        current = current.deviceSentMessage.message;
+        continue;
+      }
+      if (current.ephemeralMessage?.message) {
+        current = current.ephemeralMessage.message;
+        continue;
+      }
+      if (current.viewOnceMessage?.message) {
+        sawVoWrapper = true;
+        current = current.viewOnceMessage.message;
+        continue;
+      }
+      if (current.viewOnceMessageV2?.message) {
+        sawVoWrapper = true;
+        current = current.viewOnceMessageV2.message;
+        continue;
+      }
+      if (current.viewOnceMessageV2Extension?.message) {
+        sawVoWrapper = true;
+        current = current.viewOnceMessageV2Extension.message;
+        continue;
+      }
+      if (current.documentWithCaptionMessage?.message) {
+        current = current.documentWithCaptionMessage.message;
+        continue;
+      }
+      break;
+    }
+    if (!current) return null;
+
+    const checkHasKeys = (m: {
+      mediaKey?: Uint8Array | null;
+      directPath?: string | null;
+      url?: string | null;
+    }) =>
+      Boolean(
+        m?.mediaKey &&
+          m.mediaKey.length > 0 &&
+          (Boolean(m.directPath) || Boolean(m.url))
+      );
+
+    if (current.imageMessage) {
+      const m = current.imageMessage;
+      return {
+        isViewOnce: sawVoWrapper || Boolean(m.viewOnce),
+        kind: 'image',
+        hkdfType: 'image',
+        mediaObj: m,
+        hasDownloadKeys: checkHasKeys(m),
+        mimeType: m.mimetype || 'image/jpeg',
+        caption: m.caption || undefined,
+      };
+    }
+
+    if (current.videoMessage) {
+      const m = current.videoMessage;
+      return {
+        isViewOnce: sawVoWrapper || Boolean(m.viewOnce),
+        kind: 'video',
+        hkdfType: 'video',
+        mediaObj: m,
+        hasDownloadKeys: checkHasKeys(m),
+        mimeType: m.mimetype || 'video/mp4',
+        caption: m.caption || undefined,
+      };
+    }
+
+    if (current.ptvMessage) {
+      const m = current.ptvMessage;
+      return {
+        isViewOnce: sawVoWrapper || Boolean(m.viewOnce),
+        kind: 'video',
+        hkdfType: 'ptv',
+        mediaObj: m,
+        hasDownloadKeys: checkHasKeys(m),
+        mimeType: m.mimetype || 'video/mp4',
+        caption: m.caption || undefined,
+      };
+    }
+
+    if (current.audioMessage) {
+      const m = current.audioMessage;
+      return {
+        isViewOnce: sawVoWrapper || Boolean(m.viewOnce),
+        kind: 'audio',
+        hkdfType: 'audio',
+        mediaObj: m,
+        hasDownloadKeys: checkHasKeys(m),
+        mimeType: m.mimetype || 'audio/ogg; codecs=opus',
+        isVoiceNote: Boolean(m.ptt),
+      };
+    }
+
+    return null;
+  }
+
+  private cacheIncomingViewOnceIfAny(msg: WAMessage): void {
+    const id = msg.key?.id;
+    if (!id || !msg.message) return;
+
+    const inspected = this.inspectViewOnceCandidate(msg.message);
+    if (!inspected || !inspected.isViewOnce || !inspected.hasDownloadKeys) {
+      return;
+    }
+
+    const now = Date.now();
+    // Prune expired (> 60 mins) or overflow (> 50 entries) to keep RAM < 25 KB on Redmi 9C
+    for (const [k, v] of this.recentViewOnceCache.entries()) {
+      if (now - v.savedAt > 60 * 60 * 1000) {
+        this.recentViewOnceCache.delete(k);
+      }
+    }
+    while (this.recentViewOnceCache.size >= 50) {
+      const oldestKey = this.recentViewOnceCache.keys().next().value;
+      if (!oldestKey) break;
+      this.recentViewOnceCache.delete(oldestKey);
+    }
+
+    this.recentViewOnceCache.set(id, {
+      kind: inspected.kind,
+      hkdfType: inspected.hkdfType,
+      mediaObj: inspected.mediaObj,
+      mimeType: inspected.mimeType,
+      caption: inspected.caption,
+      isVoiceNote: inspected.isVoiceNote,
+      fullMsg: msg,
+      savedAt: now,
+    });
   }
 
   private extractMessageText(msg: WAMessage): string {
@@ -917,6 +1103,8 @@ class WhatsAppSessionManager {
       m?.imageMessage?.contextInfo ||
       m?.videoMessage?.contextInfo ||
       m?.documentMessage?.contextInfo ||
+      m?.audioMessage?.contextInfo ||
+      m?.stickerMessage?.contextInfo ||
       undefined
     );
   }
@@ -995,105 +1183,152 @@ class WhatsAppSessionManager {
     return null;
   }
 
+  private async downloadStreamToBuffer(
+    mediaObj: {
+      mediaKey?: Uint8Array | null;
+      directPath?: string | null;
+      url?: string | null;
+    },
+    hkdfType: MediaType
+  ): Promise<Buffer> {
+    const stream = await downloadContentFromMessage(mediaObj, hkdfType);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const buf = Buffer.concat(chunks);
+    if (buf.length === 0) {
+      throw new Error('Hasil dekripsi media View Once kosong.');
+    }
+    return buf;
+  }
+
   private async extractQuotedViewOnceMedia(
     sock: WASocket,
     msg: WAMessage
   ): Promise<{
-    kind: 'image' | 'video' | 'audio';
-    buffer: Buffer;
-    mimeType: string;
-    caption?: string;
-  } | null> {
+    payload: {
+      kind: 'image' | 'video' | 'audio';
+      buffer: Buffer;
+      mimeType: string;
+      caption?: string;
+      isVoiceNote?: boolean;
+    } | null;
+    errorHint?: string;
+  }> {
     try {
       const contextInfo = this.extractContextInfo(msg);
+      const stanzaId = contextInfo?.stanzaId || '';
       const rawQuoted = contextInfo?.quotedMessage;
-      if (!rawQuoted || !contextInfo?.stanzaId) return null;
 
-      const voInner =
-        rawQuoted.viewOnceMessage?.message ||
-        rawQuoted.viewOnceMessageV2?.message ||
-        rawQuoted.viewOnceMessageV2Extension?.message ||
-        (rawQuoted.imageMessage?.viewOnce ||
-        rawQuoted.videoMessage?.viewOnce ||
-        rawQuoted.audioMessage?.viewOnce
-          ? rawQuoted
-          : null);
-
-      const unwrapped = voInner || this.unwrapWaMessage(rawQuoted);
-      if (!unwrapped) return null;
-
-      const isVoFlagged = Boolean(
-        voInner ||
-          unwrapped.imageMessage?.viewOnce ||
-          unwrapped.videoMessage?.viewOnce ||
-          unwrapped.audioMessage?.viewOnce
-      );
-      if (!isVoFlagged) return null;
-
-      let kind: 'image' | 'video' | 'audio' | null = null;
-      let mimeType = 'application/octet-stream';
-      let caption: string | undefined;
-
-      if (unwrapped.imageMessage) {
-        kind = 'image';
-        mimeType = unwrapped.imageMessage.mimetype || 'image/jpeg';
-        caption = unwrapped.imageMessage.caption || undefined;
-      } else if (unwrapped.videoMessage) {
-        kind = 'video';
-        mimeType = unwrapped.videoMessage.mimetype || 'video/mp4';
-        caption = unwrapped.videoMessage.caption || undefined;
-      } else if (unwrapped.audioMessage) {
-        kind = 'audio';
-        mimeType = unwrapped.audioMessage.mimetype || 'audio/mpeg';
+      if (!stanzaId && !rawQuoted) {
+        return { payload: null };
       }
 
-      if (!kind) return null;
+      const cached = stanzaId ? this.recentViewOnceCache.get(stanzaId) : undefined;
+      const quotedInspected = rawQuoted
+        ? this.inspectViewOnceCandidate(rawQuoted)
+        : null;
 
-      const cleanInner = { ...unwrapped };
-      if (cleanInner.imageMessage) {
-        cleanInner.imageMessage = {
-          ...cleanInner.imageMessage,
-          viewOnce: false,
-        };
+      // Choose unstripped cached ViewOnce metadata first if WhatsApp stripped mediaKey/directPath in quote
+      const chosen =
+        cached
+          ? {
+              kind: cached.kind,
+              hkdfType: cached.hkdfType,
+              mediaObj: cached.mediaObj,
+              hasDownloadKeys: true,
+              mimeType: cached.mimeType,
+              caption: cached.caption ?? quotedInspected?.caption,
+              isVoiceNote: cached.isVoiceNote,
+              reuploadTarget: cached.fullMsg,
+            }
+          : quotedInspected
+          ? {
+              kind: quotedInspected.kind,
+              hkdfType: quotedInspected.hkdfType,
+              mediaObj: quotedInspected.mediaObj,
+              hasDownloadKeys: quotedInspected.hasDownloadKeys,
+              mimeType: quotedInspected.mimeType,
+              caption: quotedInspected.caption,
+              isVoiceNote: quotedInspected.isVoiceNote,
+              reuploadTarget: stanzaId
+                ? ({
+                    key: {
+                      remoteJid: msg.key.remoteJid,
+                      id: stanzaId,
+                      participant: contextInfo?.participant,
+                    },
+                    message: rawQuoted!,
+                  } as WAMessage)
+                : undefined,
+            }
+          : null;
+
+      if (!chosen) {
+        return { payload: null };
       }
-      if (cleanInner.videoMessage) {
-        cleanInner.videoMessage = {
-          ...cleanInner.videoMessage,
-          viewOnce: false,
-        };
-      }
-      if (cleanInner.audioMessage) {
-        cleanInner.audioMessage = {
-          ...cleanInner.audioMessage,
-          viewOnce: false,
+
+      if (!chosen.hasDownloadKeys) {
+        return {
+          payload: null,
+          errorHint:
+            'Kunci enkripsi pada pesan *View Once* ini sudah dihapus oleh WhatsApp (biasanya karena pesan dikirim sebelum bot menyala atau sudah dibuka terlebih dahulu). Untuk pesan View Once baru yang masuk saat bot aktif, *.rvo* otomatis menyimpannya sehingga bisa dibuka kapan saja.',
         };
       }
 
-      const dlBuf = await downloadMediaMessage(
-        {
-          key: {
-            remoteJid: msg.key.remoteJid,
-            id: contextInfo.stanzaId,
-            participant: contextInfo.participant,
+      try {
+        const buffer = await this.downloadStreamToBuffer(
+          chosen.mediaObj,
+          chosen.hkdfType
+        );
+        return {
+          payload: {
+            kind: chosen.kind,
+            buffer,
+            mimeType: chosen.mimeType,
+            caption: chosen.caption,
+            isVoiceNote: chosen.isVoiceNote,
           },
-          message: cleanInner,
-        },
-        'buffer',
-        {},
-        {
-          logger: silentLogger as never,
-          reuploadRequest: sock.updateMediaMessage,
+        };
+      } catch (firstErr) {
+        // Attempt WhatsApp media reupload request if CDN path expired (404/410)
+        if (chosen.reuploadTarget) {
+          try {
+            const refreshed = await sock.updateMediaMessage(
+              chosen.reuploadTarget
+            );
+            const refreshedInspected = this.inspectViewOnceCandidate(
+              refreshed.message
+            );
+            if (refreshedInspected?.hasDownloadKeys) {
+              const retryBuf = await this.downloadStreamToBuffer(
+                refreshedInspected.mediaObj,
+                refreshedInspected.hkdfType
+              );
+              return {
+                payload: {
+                  kind: refreshedInspected.kind,
+                  buffer: retryBuf,
+                  mimeType: refreshedInspected.mimeType,
+                  caption: refreshedInspected.caption ?? chosen.caption,
+                  isVoiceNote: refreshedInspected.isVoiceNote,
+                },
+              };
+            }
+          } catch {
+            // Fall through to descriptive error
+          }
         }
-      );
-
-      return {
-        kind,
-        buffer: Buffer.from(dlBuf),
-        mimeType,
-        caption,
-      };
+        const reason =
+          firstErr instanceof Error ? firstErr.message : 'Gagal mendekripsi media';
+        return {
+          payload: null,
+          errorHint: `Gagal mengunduh media View Once dari server WhatsApp (${reason}). Pastikan pesan View Once belum kedaluwarsa di server WA.`,
+        };
+      }
     } catch {
-      return null;
+      return { payload: null };
     }
   }
 
@@ -1224,6 +1459,9 @@ class WhatsAppSessionManager {
   ): Promise<void> {
     if (!msg.message || !msg.key.remoteJid) return;
     if (msg.key.remoteJid === 'status@broadcast') return;
+
+    // Cache incoming ViewOnce metadata BEFORE checking text so captionless ViewOnce media can always be opened via .rvo
+    this.cacheIncomingViewOnceIfAny(msg);
 
     const text = this.extractMessageText(msg).trim();
     if (!text) return;
@@ -1376,6 +1614,11 @@ class WhatsAppSessionManager {
           this.groupMetaCache.delete(remoteJid);
         },
         setGroupAnnouncement: async (announcementOnly: boolean) => {
+          if (botStore.config.lockSettingsManualOnly ?? true) {
+            throw new Error(
+              'Pengubahan setelan grup dikunci manual oleh Owner.'
+            );
+          }
           await this.sleepRandom(1000, 1900);
           await sock.groupSettingUpdate(
             remoteJid,
@@ -1384,11 +1627,19 @@ class WhatsAppSessionManager {
           this.groupMetaCache.delete(remoteJid);
         },
         setGroupSubject: async (subject: string) => {
+          if (botStore.config.lockSettingsManualOnly ?? true) {
+            throw new Error('Pengubahan nama grup dikunci manual oleh Owner.');
+          }
           await this.sleepRandom(1100, 2000);
           await sock.groupUpdateSubject(remoteJid, subject);
           this.groupMetaCache.delete(remoteJid);
         },
         setGroupDescription: async (description: string) => {
+          if (botStore.config.lockSettingsManualOnly ?? true) {
+            throw new Error(
+              'Pengubahan deskripsi grup dikunci manual oleh Owner.'
+            );
+          }
           await this.sleepRandom(1100, 2000);
           await sock.groupUpdateDescription(remoteJid, description);
           this.groupMetaCache.delete(remoteJid);
@@ -1398,6 +1649,11 @@ class WhatsAppSessionManager {
           return await sock.groupInviteCode(remoteJid);
         },
         revokeGroupInviteCode: async () => {
+          if (botStore.config.lockSettingsManualOnly ?? true) {
+            throw new Error(
+              'Reset tautan undangan grup dikunci manual oleh Owner.'
+            );
+          }
           await this.sleepRandom(1300, 2400);
           return await sock.groupRevokeInvite(remoteJid);
         },
@@ -1639,7 +1895,7 @@ class WhatsAppSessionManager {
       'tourl',
     ].includes(firstToken);
 
-    const [imageBuffer, videoBuffer, audioBuffer, stickerBuffer, viewOnceMedia] =
+    const [imageBuffer, videoBuffer, audioBuffer, stickerBuffer, voResult] =
       await Promise.all([
         needsImage
           ? this.extractAttachedOrQuotedMediaByKind(sock, msg, 'image')
@@ -1657,6 +1913,8 @@ class WhatsAppSessionManager {
           ? this.extractQuotedViewOnceMedia(sock, msg)
           : Promise.resolve(null),
       ]);
+    const viewOnceMedia = voResult?.payload ?? null;
+    const viewOnceError = voResult?.errorHint ?? null;
 
     let documentMedia: {
       kind: 'image' | 'video' | 'unsupported';
@@ -1707,6 +1965,7 @@ class WhatsAppSessionManager {
       audioBuffer,
       stickerBuffer,
       viewOnceMedia,
+      viewOnceError,
       quotedText,
       quotedSenderName,
       documentMedia,
@@ -1843,44 +2102,64 @@ class WhatsAppSessionManager {
           result.slideImageUrls &&
           result.slideImageUrls.length > 0
         ) {
-          const slides = result.slideImageUrls.slice(0, 8);
-          for (let i = 0; i < slides.length; i += 1) {
-            const { buffer, contentType } = await fetchRemoteBuffer(slides[i]);
-            await this.simulateHumanTyping(sock, remoteJid, isGroup);
-            await sock.sendMessage(
-              remoteJid,
-              {
-                image: buffer,
-                mimetype: contentType.startsWith('image/')
-                  ? contentType
-                  : 'image/jpeg',
-                caption:
-                  i === 0
-                    ? result.replyText || `Slide 1/${slides.length}`
-                    : `Slide ${i + 1}/${slides.length}`,
-              },
-              i === 0 ? { quoted: msg } : undefined
+          const slides = result.slideImageUrls.slice(0, 35);
+          const slideFallbacks = result.slideFallbackImageUrls || [];
+          const total = slides.length;
+          const CHUNK_SIZE = 4;
+
+          await this.simulateHumanTyping(sock, remoteJid, isGroup);
+
+          for (
+            let chunkStart = 0;
+            chunkStart < total;
+            chunkStart += CHUNK_SIZE
+          ) {
+            const chunkUrls = slides.slice(chunkStart, chunkStart + CHUNK_SIZE);
+            // Pre-download up to 4 slides concurrently while strictly keeping array order [0, 1, 2, 3]
+            const preparedChunk = await Promise.all(
+              chunkUrls.map(async (slideUrl, offset) => {
+                const absoluteIdx = chunkStart + offset;
+                const fallbacks = slideFallbacks[absoluteIdx] || [];
+                const { buffer: rawBuf, contentType } = await fetchRemoteBuffer(
+                  slideUrl,
+                  25 * 1024 * 1024,
+                  fallbacks
+                );
+                const normalized = await ensureWhatsappImageBuffer(
+                  rawBuf,
+                  contentType
+                );
+                return {
+                  index: absoluteIdx,
+                  buffer: normalized.buffer,
+                  mimeType: normalized.mimeType,
+                };
+              })
             );
-            if (i < slides.length - 1) {
-              await this.sleepRandom(1100, 1900);
-            }
-          }
-          if (result.audioRemoteUrl) {
-            try {
-              const { buffer } = await fetchRemoteBuffer(result.audioRemoteUrl);
-              await this.sleepRandom(900, 1500);
-              await this.simulateHumanTyping(sock, remoteJid, isGroup, 'audio');
+
+            // Dispatch each photo sequentially in exact TikTok order (1/N, 2/N, ..., N/N) back-to-back
+            for (const item of preparedChunk) {
+              const stepLabel = `📸 *Foto ${item.index + 1}/${total}*`;
+              const photoCaption =
+                item.index === 0
+                  ? result.replyText
+                    ? `${result.replyText}\n${stepLabel}`
+                    : stepLabel
+                  : stepLabel;
+
               await sock.sendMessage(
                 remoteJid,
                 {
-                  audio: buffer,
-                  mimetype: 'audio/mpeg',
-                  ptt: false,
+                  image: item.buffer,
+                  mimetype: item.mimeType,
+                  caption: photoCaption,
                 },
-                { quoted: msg }
+                item.index === 0 ? { quoted: msg } : undefined
               );
-            } catch {
-              // Optional slide background audio non-fatal
+
+              if (item.index < total - 1) {
+                await new Promise((r) => setTimeout(r, 260));
+              }
             }
           }
         } else if (result.videoRemoteUrl) {

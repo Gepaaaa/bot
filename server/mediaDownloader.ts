@@ -25,6 +25,7 @@ export interface DownloadedSocialMedia {
   fallbackAudioUrls?: string[];
   imageUrl?: string;
   slideImages?: string[];
+  slideFallbackImageUrls?: string[][];
   fileUrl?: string;
   fileName?: string;
   fileMimeType?: string;
@@ -38,6 +39,8 @@ export interface ResolveSocialOptions {
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const BOT_UA = 'TelegramBot (like TwitterBot)';
+const TIKTOK_APP_UA =
+  'com.zhiliaoapp.musically/300904 (2018111632; U; Android 10; en_US; Pixel 4; Build/QQ3A.200805.001; Cronet/58.0.2991.0)';
 const TIOO_BASE = 'https://backend1.tioo.eu.org';
 const TIOO_VERSION = '6.4.0';
 
@@ -229,15 +232,304 @@ async function fetchOembedMetadata(
 }
 
 // ============================================================================
-// 1. TIKTOK (.tt, .ttslide, .mp3) — 3 Independent Live Providers
+// 1. TIKTOK (.tt, .ttslide, .mp3) — 4 Independent Live Providers (Up to 35 Ordered Slides)
 // ============================================================================
+function randomNumericDigits(len: number): string {
+  let out = '';
+  for (let i = 0; i < len; i += 1) {
+    out += Math.floor(Math.random() * 10).toString();
+  }
+  return out;
+}
+
+function randomHexChars(len: number): string {
+  const hex = '0123456789abcdef';
+  let out = '';
+  for (let i = 0; i < len; i += 1) {
+    out += hex[Math.floor(Math.random() * hex.length)];
+  }
+  return out;
+}
+
+function extractAwemeIdFromTikTokUrl(rawUrl: string): string | null {
+  const pathIdMatch = rawUrl.match(
+    /(?:\/(?:video|photo|v|embed)\/|[?&](?:item_id|share_item_id)=)(\d{17,21})/i
+  );
+  if (pathIdMatch?.[1]) return pathIdMatch[1];
+  const fallbackDigits = rawUrl.match(/\b(\d{18,21})\b/);
+  return fallbackDigits?.[1] || null;
+}
+
+function decodeTikTokIoTokenTarget(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    const token = parsed.searchParams.get('token');
+    if (!token || token.length < 16) return '';
+    // tiktokio wraps base64("https://...") by replacing leading "aHR0" with an 8-char prefix and appending "O0O0O"
+    const cleanedB64 = ('aHR0' + token.slice(8)).replace(/(?:O0O0O)+$/g, '');
+    return Buffer.from(cleanedB64, 'base64').toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+function isLikelyTikTokSlideAsset(rawUrl: string): boolean {
+  if (/\.(jpe?g|png|webp)(\?|$)/i.test(rawUrl)) return true;
+  if (/photomode/i.test(rawUrl)) return true;
+  const decoded = decodeTikTokIoTokenTarget(rawUrl);
+  if (decoded) {
+    if (/photomode/i.test(decoded)) return true;
+    if (/\.(jpe?g|png|webp)(\?|$)/i.test(decoded)) return true;
+  }
+  return false;
+}
+
 export async function downloadTikTokMedia(
   url: string
 ): Promise<DownloadedSocialMedia> {
-  // Provider 1: TikWM API (supports HD MP4, Photo Slides, and MP3; retries once on 1req/sec rate limit)
+  let resolvedUrl = url;
+  let awemeId = extractAwemeIdFromTikTokUrl(url);
+  if (!awemeId || /\/\/(?:vt|vm|t)\.tiktok\.com\//i.test(url) || /tiktok\.com\/t\//i.test(url)) {
+    resolvedUrl = await resolveFinalUrl(url, 8500);
+    awemeId = extractAwemeIdFromTikTokUrl(resolvedUrl) || awemeId;
+  }
+  const urlIndicatesPhotoSlide = /\/photo\/\d+/i.test(resolvedUrl) || /\/photo\/\d+/i.test(url);
+
+  // Provider 1: Official TikTok Android Feed API (tiktokv) — Zero Cloudflare 403, Native Ordered Slides (1..35) & 2K JPEG
+  if (awemeId) {
+    const feedHosts = [
+      'https://api16-normal-useast5.tiktokv.us',
+      'https://api16-normal-c-useast1a.tiktokv.com',
+    ];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const host = feedHosts[attempt % feedHosts.length];
+      try {
+        const params = new URLSearchParams({
+          aweme_id: awemeId,
+          version_name: '1.1.9',
+          version_code: '2018111632',
+          build_number: '1.1.9',
+          device_id: `73${randomNumericDigits(17)}`,
+          iid: `73${randomNumericDigits(17)}`,
+          manifest_version_code: '2018111632',
+          update_version_code: '2018111632',
+          openudid: randomHexChars(16),
+          uuid: randomNumericDigits(16),
+          _rticket: String(Date.now() * 1000),
+          ts: String(Math.floor(Date.now() / 1000)),
+          device_brand: 'Google',
+          device_type: 'Pixel 4',
+          device_platform: 'android',
+          resolution: '1080*1920',
+          dpi: '420',
+          os_version: '10',
+          os_api: '29',
+          carrier_region: 'ID',
+          sys_region: 'ID',
+          region: 'ID',
+          timezone_name: 'Asia/Jakarta',
+          timezone_offset: '25200',
+          channel: 'googleplay',
+          ac: 'wifi',
+          mcc_mnc: '51010',
+          is_my_cn: '0',
+          ssmix: 'a',
+          as: 'a1qwert123',
+          cp: 'cbfhckdckkde1',
+        });
+
+        const feedRes = await fetch(`${host}/aweme/v1/feed/?${params.toString()}`, {
+          method: 'OPTIONS',
+          headers: { 'User-Agent': TIKTOK_APP_UA },
+          signal: AbortSignal.timeout(9000),
+        });
+
+        if (feedRes.ok) {
+          const feedJson = (await feedRes.json()) as {
+            status_code?: number;
+            aweme_list?: Array<Record<string, any>>;
+          };
+          const content = feedJson?.aweme_list?.find(
+            (item) => String(item?.aweme_id) === awemeId
+          );
+
+          if (content) {
+            const authorHandle = content.author?.unique_id
+              ? `@${content.author.unique_id}`
+              : content.author?.nickname || 'Kreator TikTok';
+            const musicUrls: string[] = Array.isArray(content.music?.play_url?.url_list)
+              ? content.music.play_url.url_list.filter(
+                  (u: unknown): u is string => typeof u === 'string' && u.startsWith('http')
+                )
+              : [];
+            const descText =
+              typeof content.desc === 'string' ? content.desc.trim() : '';
+
+            // Exact TikTok Photo Slideshow array: content.image_post_info.images[0..N-1]
+            const rawSlideItems: Array<Record<string, any>> | undefined =
+              content.image_post_info?.images;
+            if (Array.isArray(rawSlideItems) && rawSlideItems.length > 0) {
+              const primarySlides: string[] = [];
+              const fallbackSlides: string[][] = [];
+
+              for (const slideObj of rawSlideItems.slice(0, 35)) {
+                const cleanUrls: string[] = Array.isArray(
+                  slideObj?.display_image?.url_list
+                )
+                  ? slideObj.display_image.url_list.filter(
+                      (u: unknown): u is string =>
+                        typeof u === 'string' && u.startsWith('http')
+                    )
+                  : [];
+                const wmUrls: string[] = Array.isArray(
+                  slideObj?.owner_watermark_image?.url_list
+                )
+                  ? slideObj.owner_watermark_image.url_list.filter(
+                      (u: unknown): u is string =>
+                        typeof u === 'string' && u.startsWith('http')
+                    )
+                  : [];
+                const allForSlide = [...cleanUrls, ...wmUrls];
+                if (allForSlide.length === 0) continue;
+
+                // Prefer native JPEG/PNG URL directly from TikTok CDN before WebP so WhatsApp sends instantly without transcoding
+                const preferredJpeg =
+                  cleanUrls.find((u) => /\.jpe?g(\?|$)/i.test(u)) ||
+                  cleanUrls.find((u) => /\.png(\?|$)/i.test(u)) ||
+                  allForSlide[0];
+                const backups = allForSlide.filter((u) => u !== preferredJpeg);
+                primarySlides.push(preferredJpeg);
+                fallbackSlides.push(backups);
+              }
+
+              if (primarySlides.length > 0) {
+                return {
+                  platform: 'tiktok',
+                  title:
+                    descText ||
+                    `Album Slide Foto TikTok (${primarySlides.length} Foto)`,
+                  author: authorHandle,
+                  slideImages: primarySlides,
+                  slideFallbackImageUrls: fallbackSlides,
+                  audioUrl: musicUrls[0],
+                  fallbackAudioUrls: musicUrls.slice(1),
+                  coverUrl: primarySlides[0],
+                };
+              }
+            }
+
+            // Regular TikTok Video post
+            const playUrls: string[] = Array.isArray(content.video?.play_addr?.url_list)
+              ? content.video.play_addr.url_list.filter(
+                  (u: unknown): u is string => typeof u === 'string' && u.startsWith('http')
+                )
+              : [];
+            const dlUrls: string[] = Array.isArray(content.video?.download_addr?.url_list)
+              ? content.video.download_addr.url_list.filter(
+                  (u: unknown): u is string => typeof u === 'string' && u.startsWith('http')
+                )
+              : [];
+            const allVideoCandidates = [...playUrls, ...dlUrls];
+            if (allVideoCandidates.length > 0 && !urlIndicatesPhotoSlide) {
+              return {
+                platform: 'tiktok',
+                title: descText || 'Video TikTok Tanpa Watermark',
+                author: authorHandle,
+                duration: content.video?.duration
+                  ? Math.round(Number(content.video.duration) / 1000) ||
+                    Number(content.video.duration)
+                  : undefined,
+                videoUrl: allVideoCandidates[0],
+                fallbackVideoUrls: allVideoCandidates.slice(1),
+                audioUrl: musicUrls[0],
+                fallbackAudioUrls: musicUrls.slice(1),
+                coverUrl: content.video?.cover?.url_list?.[0],
+              };
+            }
+          }
+        }
+      } catch {
+        // Proceed to next attempt / provider
+      }
+    }
+  }
+
+  // Provider 2: Tioo / TikTokIO Mirror (supports token-wrapped photo slides 1..35 + ISP block bypass)
+  const tioo = await fetchTiooEndpoint('ttdl', resolvedUrl || url);
+  if (tioo && tioo.status !== false) {
+    const rawMediaEntries = Array.isArray(tioo.images) && tioo.images.length > 0
+      ? tioo.images
+      : Array.isArray(tioo.video)
+      ? tioo.video
+      : [tioo.video];
+
+    const mediaUrls = rawMediaEntries
+      .map((v: unknown) =>
+        typeof v === 'string'
+          ? v
+          : typeof (v as { url?: string })?.url === 'string'
+          ? (v as { url: string }).url
+          : ''
+      )
+      .filter((v: string) => v.startsWith('http'));
+
+    const audios = (Array.isArray(tioo.audio) ? tioo.audio : [tioo.audio])
+      .map((a: unknown) =>
+        typeof a === 'string'
+          ? a
+          : typeof (a as { url?: string })?.url === 'string'
+          ? (a as { url: string }).url
+          : ''
+      )
+      .filter((a: string) => a.startsWith('http'));
+
+    const thumbIsPhotomode =
+      typeof tioo.thumbnail === 'string' && /photomode/i.test(tioo.thumbnail);
+    const slideDetected =
+      Array.isArray(tioo.images) && tioo.images.length > 0
+        ? true
+        : urlIndicatesPhotoSlide ||
+          thumbIsPhotomode ||
+          (mediaUrls.length > 0 &&
+            mediaUrls.every((u: string) => isLikelyTikTokSlideAsset(u))) ||
+          (mediaUrls.length > 1 &&
+            mediaUrls.some((u: string) => isLikelyTikTokSlideAsset(u)));
+
+    if (slideDetected && mediaUrls.length > 0) {
+      const orderedSlides = mediaUrls.slice(0, 35);
+      return {
+        platform: 'tiktok',
+        title:
+          (typeof tioo.title === 'string' && tioo.title.trim()) ||
+          `Album Slide Foto TikTok (${orderedSlides.length} Foto)`,
+        author: tioo.author || 'Kreator TikTok',
+        slideImages: orderedSlides,
+        audioUrl: audios[0],
+        fallbackAudioUrls: audios.slice(1),
+        coverUrl: tioo.thumbnail || orderedSlides[0],
+      };
+    }
+
+    if (mediaUrls[0]) {
+      return {
+        platform: 'tiktok',
+        title:
+          (typeof tioo.title === 'string' && tioo.title.trim()) ||
+          'Video TikTok Tanpa Watermark',
+        author: tioo.author || 'Kreator TikTok',
+        videoUrl: mediaUrls[0],
+        fallbackVideoUrls: mediaUrls.slice(1),
+        audioUrl: audios[0],
+        fallbackAudioUrls: audios.slice(1),
+        coverUrl: tioo.thumbnail,
+      };
+    }
+  }
+
+  // Provider 3: TikWM API (supports HD MP4, Ordered Photo Slides 1..35, and MP3)
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const form = new URLSearchParams({ url, hd: '1' });
+      const form = new URLSearchParams({ url: resolvedUrl || url, hd: '1' });
       const res = await fetch('https://www.tikwm.com/api/', {
         method: 'POST',
         headers: {
@@ -248,7 +540,7 @@ export async function downloadTikTokMedia(
           Referer: 'https://www.tikwm.com/',
         },
         body: form,
-        signal: AbortSignal.timeout(12000),
+        signal: AbortSignal.timeout(10000),
       });
 
       if (res.ok) {
@@ -281,7 +573,7 @@ export async function downloadTikTokMedia(
             ? d.images
                 .map((img) => resolveTikwmUrl(img))
                 .filter((u): u is string => Boolean(u))
-                .slice(0, 8)
+                .slice(0, 35)
             : undefined;
 
           const playUrl = resolveTikwmUrl(d.play);
@@ -301,7 +593,7 @@ export async function downloadTikTokMedia(
               title:
                 d.title?.trim() ||
                 (slideImages?.length
-                  ? `Album Slide Foto TikTok (${slideImages.length} Slide)`
+                  ? `Album Slide Foto TikTok (${slideImages.length} Foto)`
                   : 'Video TikTok Tanpa Watermark'),
               author: d.author?.unique_id
                 ? `@${d.author.unique_id}`
@@ -318,68 +610,15 @@ export async function downloadTikTokMedia(
       }
       break;
     } catch {
-      // Provider 1 unreachable (e.g., ISP DNS block on tikwm.com) -> proceed to Provider 2
       break;
     }
   }
 
-  // Provider 2: Tioo / TikTokIO Mirror (bypasses Indonesian ISP blocks on tikwm.com)
-  const tioo = await fetchTiooEndpoint('ttdl', url);
-  if (tioo && tioo.status !== false) {
-    const videos = (Array.isArray(tioo.video) ? tioo.video : [tioo.video])
-      .map((v: unknown) =>
-        typeof v === 'string'
-          ? v
-          : typeof (v as { url?: string })?.url === 'string'
-          ? (v as { url: string }).url
-          : ''
-      )
-      .filter((v: string) => v.startsWith('http'));
-
-    const audios = (Array.isArray(tioo.audio) ? tioo.audio : [tioo.audio])
-      .map((a: unknown) =>
-        typeof a === 'string'
-          ? a
-          : typeof (a as { url?: string })?.url === 'string'
-          ? (a as { url: string }).url
-          : ''
-      )
-      .filter((a: string) => a.startsWith('http'));
-
-    const allPhotos = videos.filter((v: string) =>
-      /\.(jpe?g|png|webp)(\?|$)/i.test(v)
-    );
-    if (allPhotos.length > 1) {
-      return {
-        platform: 'tiktok',
-        title: tioo.title?.trim() || `Album Slide Foto TikTok (${allPhotos.length} Slide)`,
-        author: tioo.author || 'Kreator TikTok',
-        slideImages: allPhotos.slice(0, 8),
-        audioUrl: audios[0],
-        coverUrl: tioo.thumbnail,
-      };
-    }
-
-    if (videos[0]) {
-      return {
-        platform: 'tiktok',
-        title: tioo.title?.trim() || 'Video TikTok Tanpa Watermark',
-        author: tioo.author || 'Kreator TikTok',
-        videoUrl: videos[0],
-        fallbackVideoUrls: videos.slice(1),
-        audioUrl: audios[0],
-        coverUrl: tioo.thumbnail,
-      };
-    }
-  }
-
-  // Provider 3: vxTikTok / tnkTok Bot Meta Extractor
+  // Provider 4: vxTikTok / tnkTok Bot Meta Extractor (/video/ & /photo/)
   try {
-    const resolved =
-      url.includes('vt.tiktok') || url.includes('vm.tiktok')
-        ? await resolveFinalUrl(url)
-        : url;
-    const pathMatch = resolved.match(/tiktok\.com\/(@[^/?#]+\/video\/[0-9]+)/i);
+    const pathMatch = resolvedUrl.match(
+      /tiktok\.com\/(@[^/?#]+\/(?:video|photo)\/[0-9]+)/i
+    );
     if (pathMatch?.[1]) {
       const vxRes = await fetch(`https://tnktok.com/${pathMatch[1]}`, {
         headers: { 'User-Agent': BOT_UA },
@@ -388,27 +627,57 @@ export async function downloadTikTokMedia(
       });
       if (vxRes.ok) {
         const html = await vxRes.text();
-        const vidMatch =
-          html.match(/property=["']og:video(?::secure_url)?["']\s+content=["']([^"']+)["']/i) ||
-          html.match(/content=["']([^"']+)["']\s+property=["']og:video/i);
         const descMatch =
-          html.match(/property=["']og:description["']\s+content=["']([^"']+)["']/i) ||
-          html.match(/content=["']([^"']+)["']\s+property=["']og:description/i);
-        const rawVid = vidMatch?.[1] ? decodeHtmlEntities(vidMatch[1]) : undefined;
+          html.match(
+            /property=["']og:description["']\s+content=["']([^"']+)["']/i
+          ) ||
+          html.match(
+            /content=["']([^"']+)["']\s+property=["']og:description/i
+          );
+        const authorTag = `@${pathMatch[1].split('/')[0].replace(/^@/, '')}`;
+
+        if (urlIndicatesPhotoSlide) {
+          const ogImgs = [
+            ...html.matchAll(
+              /property=["']og:image["']\s+content=["']([^"']+)["']|content=["']([^"']+)["']\s+property=["']og:image["']/gi
+            ),
+          ]
+            .map((m) => decodeHtmlEntities(m[1] || m[2] || ''))
+            .filter((u) => u.startsWith('http'));
+          if (ogImgs.length > 0) {
+            return {
+              platform: 'tiktok',
+              title: descMatch?.[1]
+                ? decodeHtmlEntities(descMatch[1]).slice(0, 100)
+                : `Album Slide Foto TikTok (${ogImgs.length} Foto)`,
+              author: authorTag,
+              slideImages: ogImgs.slice(0, 35),
+            };
+          }
+        }
+
+        const vidMatch =
+          html.match(
+            /property=["']og:video(?::secure_url)?["']\s+content=["']([^"']+)["']/i
+          ) ||
+          html.match(/content=["']([^"']+)["']\s+property=["']og:video/i);
+        const rawVid = vidMatch?.[1]
+          ? decodeHtmlEntities(vidMatch[1])
+          : undefined;
         if (rawVid && rawVid.startsWith('http')) {
           return {
             platform: 'tiktok',
             title: descMatch?.[1]
               ? decodeHtmlEntities(descMatch[1]).slice(0, 100)
               : 'Video TikTok Tanpa Watermark',
-            author: `@${pathMatch[1].split('/')[0].replace(/^@/, '')}`,
+            author: authorTag,
             videoUrl: rawVid,
           };
         }
       }
     }
   } catch {
-    // Exhausted all 3 providers
+    // Exhausted all 4 providers
   }
 
   throw new Error(
