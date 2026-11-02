@@ -630,30 +630,57 @@ export async function createMemeSticker(
 ): Promise<Buffer> {
   const sourceBuffer = baseImageBuffer ?? (await getFallbackMemeBackground());
 
-  const topLines = topText.trim()
-    ? wrapTextLines(topText.trim().toUpperCase(), 18, 2)
-    : [];
-  const bottomLines = bottomText.trim()
-    ? wrapTextLines(bottomText.trim().toUpperCase(), 18, 2)
-    : [];
+  const cleanTop = topText.trim().toUpperCase();
+  const cleanBottom = bottomText.trim().toUpperCase();
 
-  const fontSize = 44;
-  const lineHeight = 48;
+  // Bungkus teks ke maksimal 2 baris atas & 2 baris bawah
+  const topLines = cleanTop ? wrapTextLines(cleanTop, 15, 2) : [];
+  const bottomLines = cleanBottom ? wrapTextLines(cleanBottom, 15, 2) : [];
+
+  const maxLen = Math.max(
+    ...topLines.map((l) => l.length),
+    ...bottomLines.map((l) => l.length),
+    1
+  );
+
+  // Ukuran font dibuat dinamis jauh lebih besar & jelas di layar HP
+  let fontSize = 58;
+  let lineHeight = 64;
+  let strokeWidth = 11;
+
+  if (maxLen <= 8) {
+    fontSize = 70;
+    lineHeight = 76;
+    strokeWidth = 12;
+  } else if (maxLen <= 12) {
+    fontSize = 62;
+    lineHeight = 68;
+    strokeWidth = 11;
+  } else if (maxLen <= 16) {
+    fontSize = 54;
+    lineHeight = 60;
+    strokeWidth = 10;
+  } else {
+    fontSize = 46;
+    lineHeight = 52;
+    strokeWidth = 9;
+  }
 
   const topSvg = topLines
     .map((line, idx) => {
-      const y = 54 + idx * lineHeight;
-      return `<text x="256" y="${y}" text-anchor="middle" font-family="Impact, Arial Black, DejaVu Sans, sans-serif" font-size="${fontSize}" font-weight="900" fill="#FFFFFF" stroke="#000000" stroke-width="8" stroke-linejoin="round" paint-order="stroke fill">${escapeXml(
+      const y = 32 + fontSize + idx * lineHeight;
+      return `<text x="256" y="${y}" text-anchor="middle" font-family="Impact, Arial Black, Montserrat, DejaVu Sans, sans-serif" font-size="${fontSize}" font-weight="900" letter-spacing="1px" fill="#FFFFFF" stroke="#000000" stroke-width="${strokeWidth}" stroke-linejoin="round" paint-order="stroke fill">${escapeXml(
         line
       )}</text>`;
     })
     .join('\n');
 
-  const bottomStartY = 512 - 24 - (bottomLines.length - 1) * lineHeight;
+  const totalBottomHeight = (bottomLines.length - 1) * lineHeight;
+  const bottomStartY = 512 - 24 - totalBottomHeight;
   const bottomSvg = bottomLines
     .map((line, idx) => {
       const y = bottomStartY + idx * lineHeight;
-      return `<text x="256" y="${y}" text-anchor="middle" font-family="Impact, Arial Black, DejaVu Sans, sans-serif" font-size="${fontSize}" font-weight="900" fill="#FFFFFF" stroke="#000000" stroke-width="8" stroke-linejoin="round" paint-order="stroke fill">${escapeXml(
+      return `<text x="256" y="${y}" text-anchor="middle" font-family="Impact, Arial Black, Montserrat, DejaVu Sans, sans-serif" font-size="${fontSize}" font-weight="900" letter-spacing="1px" fill="#FFFFFF" stroke="#000000" stroke-width="${strokeWidth}" stroke-linejoin="round" paint-order="stroke fill">${escapeXml(
         line
       )}</text>`;
     })
@@ -667,3 +694,4 @@ export async function createMemeSticker(
   const webpBuffer = await compositeMemeToWebp(sourceBuffer, overlaySvg);
   return injectWhatsAppExif(webpBuffer, packName, author);
 }
+

@@ -234,14 +234,22 @@ var COMMAND_CATALOG = [
     example: "attp MANTAP JIWA"
   },
   {
-    id: "meme",
-    aliases: ["smeme", "memesticker"],
+    id: "smeme",
+    aliases: ["memesticker", "stikermeme", "smemer"],
     category: "sticker",
-    usage: "meme <teks atas> | <teks bawah>",
-    description: "Tambahkan teks meme tebal atas & bawah pada foto lalu jadikan stiker WebP.",
-    example: "meme niatnya tidur cepat | malah scroll tiktok jam 3 pagi",
+    usage: "smeme <teks atas> | <teks bawah>",
+    description: "Tambahkan teks meme tebal besar atas & bawah pada foto lalu jadikan stiker WebP (bisa reply foto).",
+    example: "smeme niatnya tidur cepat | malah scroll tiktok jam 3 pagi",
     requiresMedia: true,
     mediaKindHint: "image"
+  },
+  {
+    id: "meme",
+    aliases: ["memeindo", "memereceh", "candaan", "jokes"],
+    category: "media",
+    usage: "meme [kategori/topik opsional]",
+    description: "Ambil dan kirim gambar meme lucu acak dari berbagai referensi web & komunitas humor (cak.one/candaan/meme-api).",
+    example: "meme"
   },
   {
     id: "emojimix",
@@ -720,7 +728,8 @@ var COMPACT_COMMAND_META = {
   bratvid: { shortUsage: "bratvid <teks>", shortDesc: "Stiker Brat animasi bergerak" },
   ttp: { shortUsage: "ttp <teks>", shortDesc: "Stiker teks tebal transparan" },
   attp: { shortUsage: "attp <teks>", shortDesc: "Stiker animasi teks pelangi RGB" },
-  meme: { shortUsage: "meme <atas|bawah>", shortDesc: "Stiker foto teks meme tebal" },
+  smeme: { shortUsage: "smeme <atas|bawah>", shortDesc: "Stiker foto teks meme tebal besar" },
+  meme: { shortUsage: "meme [topik]", shortDesc: "Ambil foto meme lucu dari referensi web" },
   emojimix: { shortUsage: "emojimix \u{1F600}+\u{1F60E}", shortDesc: "Gabung 2 emoji jadi stiker" },
   wm: { shortUsage: "wm <pack|author>", shortDesc: "Ganti nama pack/author stiker" },
   toimg: { shortUsage: "toimg", shortDesc: "Ubah stiker kembali jadi foto" },
@@ -801,7 +810,7 @@ var MENU_SECTIONS = [
       "bratvid",
       "ttp",
       "attp",
-      "meme",
+      "smeme",
       "emojimix",
       "wm",
       "toimg",
@@ -812,7 +821,7 @@ var MENU_SECTIONS = [
       { ids: ["qc", "iqc"], summary: "Stiker bubble chat WA & iPhone" },
       { ids: ["brat", "bratwhite", "bratcolor"], summary: "Stiker teks gaya Brat" },
       { ids: ["bratvid", "ttp", "attp"], summary: "Stiker teks & animasi RGB" },
-      { ids: ["meme", "emojimix"], summary: "Stiker meme & mix 2 emoji" },
+      { ids: ["smeme", "emojimix"], summary: "Stiker meme teks besar & mix emoji" },
       { ids: ["wm", "toimg", "tovid"], summary: "Ubah EXIF & konversi stiker" }
     ]
   },
@@ -820,13 +829,13 @@ var MENU_SECTIONS = [
     key: "media",
     code: "03",
     title: "PERKAKAS MEDIA",
-    keywords: ["3", "03", "media", "tools", "hd", "sw", "hdsw", "foto"],
-    ids: ["hdsw", "hd", "rvo", "toptv", "hitamkan", "imgedit", "tourl", "qrcode"],
+    keywords: ["3", "03", "media", "tools", "hd", "sw", "hdsw", "foto", "meme"],
+    ids: ["hdsw", "hd", "meme", "rvo", "toptv", "hitamkan", "imgedit", "tourl", "qrcode"],
     compactRows: [
       { ids: ["hdsw"], summary: "Dokumen ke Status HD (Grup & PC)" },
       { ids: ["hd", "hitamkan"], summary: "Upscale foto 2\xD7 & hitam-putih" },
       { ids: ["imgedit"], summary: "Filter blur, invert, mirror, sepia" },
-      { ids: ["rvo", "toptv"], summary: "Buka ViewOnce & video bulat PTV" },
+      { ids: ["meme", "rvo", "toptv"], summary: "Meme web lucu, ViewOnce & video PTV" },
       { ids: ["tourl", "qrcode"], summary: "Link media publik & kode QR" }
     ]
   },
@@ -5700,20 +5709,46 @@ async function getFallbackMemeBackground() {
 }
 async function createMemeSticker(topText, bottomText, baseImageBuffer, packName, author) {
   const sourceBuffer = baseImageBuffer ?? await getFallbackMemeBackground();
-  const topLines = topText.trim() ? wrapTextLines(topText.trim().toUpperCase(), 18, 2) : [];
-  const bottomLines = bottomText.trim() ? wrapTextLines(bottomText.trim().toUpperCase(), 18, 2) : [];
-  const fontSize = 44;
-  const lineHeight = 48;
+  const cleanTop = topText.trim().toUpperCase();
+  const cleanBottom = bottomText.trim().toUpperCase();
+  const topLines = cleanTop ? wrapTextLines(cleanTop, 15, 2) : [];
+  const bottomLines = cleanBottom ? wrapTextLines(cleanBottom, 15, 2) : [];
+  const maxLen = Math.max(
+    ...topLines.map((l) => l.length),
+    ...bottomLines.map((l) => l.length),
+    1
+  );
+  let fontSize = 58;
+  let lineHeight = 64;
+  let strokeWidth = 11;
+  if (maxLen <= 8) {
+    fontSize = 70;
+    lineHeight = 76;
+    strokeWidth = 12;
+  } else if (maxLen <= 12) {
+    fontSize = 62;
+    lineHeight = 68;
+    strokeWidth = 11;
+  } else if (maxLen <= 16) {
+    fontSize = 54;
+    lineHeight = 60;
+    strokeWidth = 10;
+  } else {
+    fontSize = 46;
+    lineHeight = 52;
+    strokeWidth = 9;
+  }
   const topSvg = topLines.map((line, idx) => {
-    const y = 54 + idx * lineHeight;
-    return `<text x="256" y="${y}" text-anchor="middle" font-family="Impact, Arial Black, DejaVu Sans, sans-serif" font-size="${fontSize}" font-weight="900" fill="#FFFFFF" stroke="#000000" stroke-width="8" stroke-linejoin="round" paint-order="stroke fill">${escapeXml(
+    const y = 32 + fontSize + idx * lineHeight;
+    return `<text x="256" y="${y}" text-anchor="middle" font-family="Impact, Arial Black, Montserrat, DejaVu Sans, sans-serif" font-size="${fontSize}" font-weight="900" letter-spacing="1px" fill="#FFFFFF" stroke="#000000" stroke-width="${strokeWidth}" stroke-linejoin="round" paint-order="stroke fill">${escapeXml(
       line
     )}</text>`;
   }).join("\n");
-  const bottomStartY = 512 - 24 - (bottomLines.length - 1) * lineHeight;
+  const totalBottomHeight = (bottomLines.length - 1) * lineHeight;
+  const bottomStartY = 512 - 24 - totalBottomHeight;
   const bottomSvg = bottomLines.map((line, idx) => {
     const y = bottomStartY + idx * lineHeight;
-    return `<text x="256" y="${y}" text-anchor="middle" font-family="Impact, Arial Black, DejaVu Sans, sans-serif" font-size="${fontSize}" font-weight="900" fill="#FFFFFF" stroke="#000000" stroke-width="8" stroke-linejoin="round" paint-order="stroke fill">${escapeXml(
+    return `<text x="256" y="${y}" text-anchor="middle" font-family="Impact, Arial Black, Montserrat, DejaVu Sans, sans-serif" font-size="${fontSize}" font-weight="900" letter-spacing="1px" fill="#FFFFFF" stroke="#000000" stroke-width="${strokeWidth}" stroke-linejoin="round" paint-order="stroke fill">${escapeXml(
       line
     )}</text>`;
   }).join("\n");
@@ -5723,6 +5758,141 @@ async function createMemeSticker(topText, bottomText, baseImageBuffer, packName,
     </svg>`;
   const webpBuffer = await compositeMemeToWebp(sourceBuffer, overlaySvg);
   return injectWhatsAppExif(webpBuffer, packName, author);
+}
+
+// server/memeFetcher.ts
+var FALLBACK_MEMES = [
+  {
+    title: "Ketika Niat Belajar Coding Tapi Malah Buka Sosmed",
+    url: "https://images.unsplash.com/photo-1534972195531-a756b1126f24?auto=format&fit=crop&w=720&q=80",
+    source: "Koleksi Humor Santai"
+  },
+  {
+    title: "Ekspektasi vs Realita Begadang",
+    url: "https://images.unsplash.com/photo-1543852786-1cf6624b9987?auto=format&fit=crop&w=720&q=80",
+    source: "Koleksi Humor Santai"
+  }
+];
+async function fetchMemeFromWeb(query) {
+  const cleanQ = (query || "").trim().toLowerCase();
+  const fetchers = [];
+  if (cleanQ) {
+    let sub = cleanQ;
+    if (sub.includes("indo")) sub = "indonesia";
+    else if (sub.includes("program") || sub.includes("koding") || sub.includes("it")) sub = "programmerhumor";
+    else if (sub.includes("kucing") || sub.includes("cat")) sub = "catmemes";
+    else if (sub.includes("lucu") || sub.includes("funny")) sub = "wholesomememes";
+    fetchers.push(async () => {
+      const res = await fetch(`https://meme-api.com/gimme/${encodeURIComponent(sub)}`, {
+        signal: AbortSignal.timeout(6e3)
+      });
+      const data = await res.json();
+      if (data?.url && typeof data.url === "string") {
+        return {
+          url: data.url,
+          title: data.title || `Meme r/${sub}`,
+          source: `Reddit r/${data.subreddit || sub}`
+        };
+      }
+      throw new Error("Meme API empty");
+    });
+  }
+  fetchers.push(async () => {
+    const res = await fetch("https://candaan-api.vercel.app/api/image/random", {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      signal: AbortSignal.timeout(5e3)
+    });
+    const data = await res.json();
+    if (data?.data?.url && typeof data.data.url === "string") {
+      return {
+        url: data.data.url,
+        title: "Meme Candaan & Jokes Lucu",
+        source: "Candaan Web API"
+      };
+    }
+    throw new Error("Candaan API empty");
+  });
+  fetchers.push(async () => {
+    const res = await fetch("https://meme-api.com/gimme/indonesia", {
+      signal: AbortSignal.timeout(5e3)
+    });
+    const data = await res.json();
+    if (data?.url && typeof data.url === "string") {
+      return {
+        url: data.url,
+        title: data.title || "Meme Komunitas Indonesia",
+        source: "r/indonesia Humor"
+      };
+    }
+    throw new Error("Meme-API Indonesia empty");
+  });
+  fetchers.push(async () => {
+    const res = await fetch("https://rest.cak.one/api/random/meme", {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      signal: AbortSignal.timeout(4e3)
+    });
+    const data = await res.json();
+    const targetUrl = data?.url || data?.result?.url || data?.image;
+    if (targetUrl && typeof targetUrl === "string") {
+      return {
+        url: targetUrl,
+        title: data?.title || data?.caption || "Meme Referensi Cak.one",
+        source: "Cak.one API"
+      };
+    }
+    throw new Error("Cak.one empty");
+  });
+  fetchers.push(async () => {
+    const res = await fetch("https://meme-api.com/gimme", {
+      signal: AbortSignal.timeout(5e3)
+    });
+    const data = await res.json();
+    if (data?.url && typeof data.url === "string") {
+      return {
+        url: data.url,
+        title: data.title || "Trending Meme",
+        source: `Reddit r/${data.subreddit || "dankmemes"}`
+      };
+    }
+    throw new Error("Meme-API Trending empty");
+  });
+  if (!cleanQ) {
+    fetchers.sort(() => Math.random() - 0.5);
+  }
+  for (const fn of fetchers) {
+    try {
+      const candidate = await fn();
+      if (!candidate?.url) continue;
+      const { buffer: rawBuf2, contentType: contentType2 } = await fetchRemoteBuffer(
+        candidate.url,
+        15 * 1024 * 1024
+      );
+      const { buffer: buffer2, mimeType: mimeType2 } = await ensureWhatsappImageBuffer(rawBuf2, contentType2);
+      if (buffer2 && buffer2.length > 256) {
+        return {
+          title: candidate.title,
+          source: candidate.source,
+          url: candidate.url,
+          buffer: buffer2,
+          mimeType: mimeType2
+        };
+      }
+    } catch {
+    }
+  }
+  const fallback = FALLBACK_MEMES[Math.floor(Math.random() * FALLBACK_MEMES.length)];
+  const { buffer: rawBuf, contentType } = await fetchRemoteBuffer(
+    fallback.url,
+    15 * 1024 * 1024
+  );
+  const { buffer, mimeType } = await ensureWhatsappImageBuffer(rawBuf, contentType);
+  return {
+    title: fallback.title,
+    source: fallback.source,
+    url: fallback.url,
+    buffer,
+    mimeType
+  };
 }
 
 // server/commandEngine.ts
@@ -7057,9 +7227,34 @@ Contoh: *${config.prefix}${matchedCmd.example}*`
         break;
       }
       case "meme": {
+        try {
+          const meme = await fetchMemeFromWeb(argsText);
+          const webUrl = botStore.storeHdMedia(
+            meme.buffer,
+            meme.mimeType,
+            "meme.jpg"
+          );
+          result = {
+            handled: true,
+            reactionStatus: "success",
+            imageBuffer: meme.buffer,
+            imageMimeType: meme.mimeType,
+            imageWebUrl: webUrl,
+            replyText: `\u{1F602} *${meme.title}*
+\u{1F310} _Sumber: ${meme.source}_`
+          };
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : "Gagal mengambil meme";
+          return failReply(
+            `Gagal mengambil gambar meme dari referensi web (${errMsg}). Coba ketik *${config.prefix}meme* kembali.`
+          );
+        }
+        break;
+      }
+      case "smeme": {
         if (!argsText && !ctx.imageBuffer) {
           return failReply(
-            `Gunakan format *${config.prefix}meme teks atas | teks bawah* (bisa sambil melampirkan atau me-reply foto).`
+            `Gunakan format *${config.prefix}smeme teks atas | teks bawah* (bisa sambil melampirkan atau me-reply foto untuk dijadikan stiker meme).`
           );
         }
         const parts = argsText.split("|");
@@ -9728,9 +9923,9 @@ Batas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam Whats
       "stiker",
       "sticker",
       "sgif",
-      "meme",
       "smeme",
       "memesticker",
+      "stikermeme",
       "hd",
       "remini",
       "upscale",

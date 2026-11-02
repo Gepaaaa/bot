@@ -1263,7 +1263,7 @@ export function ChatSimulatorView({
                         : 'Foto contoh studio siap diproses'}
                     </div>
                     <div className="text-zinc-500 dark:text-zinc-400 truncate">
-                      Gunakan {p}s, {p}hd, {p}hitamkan, {p}meme atas|bawah, atau {p}tourl
+                      Gunakan {p}s, {p}hd, {p}smeme atas|bawah, {p}meme, atau {p}tourl
                     </div>
                   </div>
                 </div>

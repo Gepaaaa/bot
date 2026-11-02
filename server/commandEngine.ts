@@ -47,6 +47,7 @@ import {
   stickerWebpToPng,
   videoToAnimatedStickerWebp,
 } from './stickerStudio.ts';
+import { fetchMemeFromWeb } from './memeFetcher.ts';
 
 export interface WAGroupOperations {
   removeParticipant: (targetJid: string) => Promise<void>;
@@ -1751,9 +1752,35 @@ export async function processBotMessage(
       }
 
       case 'meme': {
+        try {
+          const meme = await fetchMemeFromWeb(argsText);
+          const webUrl = botStore.storeHdMedia(
+            meme.buffer,
+            meme.mimeType,
+            'meme.jpg'
+          );
+          result = {
+            handled: true,
+            reactionStatus: 'success',
+            imageBuffer: meme.buffer,
+            imageMimeType: meme.mimeType,
+            imageWebUrl: webUrl,
+            replyText: `😂 *${meme.title}*\n🌐 _Sumber: ${meme.source}_`,
+          };
+        } catch (err) {
+          const errMsg =
+            err instanceof Error ? err.message : 'Gagal mengambil meme';
+          return failReply(
+            `Gagal mengambil gambar meme dari referensi web (${errMsg}). Coba ketik *${config.prefix}meme* kembali.`
+          );
+        }
+        break;
+      }
+
+      case 'smeme': {
         if (!argsText && !ctx.imageBuffer) {
           return failReply(
-            `Gunakan format *${config.prefix}meme teks atas | teks bawah* (bisa sambil melampirkan atau me-reply foto).`
+            `Gunakan format *${config.prefix}smeme teks atas | teks bawah* (bisa sambil melampirkan atau me-reply foto untuk dijadikan stiker meme).`
           );
         }
         const parts = argsText.split('|');
