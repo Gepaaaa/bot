@@ -31,6 +31,7 @@ export function TermuxManagerView({
   const [copiedCurl, setCopiedCurl] = useState(false);
   const [copiedGit, setCopiedGit] = useState(false);
   const [copiedSharpFix, setCopiedSharpFix] = useState(false);
+  const [copiedNoSuchFile, setCopiedNoSuchFile] = useState(false);
   const [copiedLocalhost, setCopiedLocalhost] = useState(false);
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
 
@@ -54,7 +55,9 @@ export function TermuxManagerView({
   const curlCommand =
     'curl -sL https://raw.githubusercontent.com/Gepaaaa/panel-/main/termux.sh | bash';
   const gitCommand =
-    'pkg update -y && pkg install -y git nodejs-lts && git clone https://github.com/Gepaaaa/panel-.git wabot && cd wabot && bash termux.sh';
+    'pkg update -y && pkg install -y git nodejs-lts && git clone https://github.com/Gepaaaa/panel-.git ~/wabot && cd ~/wabot && bash termux.sh';
+  const noSuchFileFixCommand =
+    'cd ~/wabot 2>/dev/null || cd ~/panel- 2>/dev/null || (git clone https://github.com/Gepaaaa/panel-.git ~/wabot && cd ~/wabot); [ -f termux.sh ] && bash termux.sh || (npm install --legacy-peer-deps && node index.js)';
   const sharpFixCommand =
     "mkdir -p dist && echo '<html><body>WABot</body></html>' > dist/index.html && npm install @img/sharp-wasm32 && node index.js";
 
@@ -311,6 +314,44 @@ export function TermuxManagerView({
               </>
             )}
           </button>
+        </div>
+      </div>
+
+      {/* Troubleshooting: No such file or directory */}
+      <div className="p-5 rounded-2xl bg-amber-950/40 border border-amber-600/40 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+            <h4 className="text-xs sm:text-sm font-bold text-amber-300">
+              Solusi Error:{' '}
+              <code className="font-mono text-zinc-200 bg-zinc-950 px-1.5 py-0.5 rounded text-[11px]">
+                bash : termux.sh : No such file or directory
+              </code>
+            </h4>
+          </div>
+          <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-900/60 text-amber-200 border border-amber-700/60 font-mono">
+            Solusi Folder &amp; Unduhan
+          </span>
+        </div>
+
+        <p className="text-xs text-zinc-300 leading-relaxed">
+          <strong>Penyebab:</strong> Terminal Termux saat ini berada di folder awal (<code className="text-amber-300 font-mono">~</code>) dan belum masuk ke folder bot tempat <code className="text-amber-300 font-mono">termux.sh</code> berada, atau repository belum ter-clone.
+        </p>
+
+        <div className="bg-zinc-950/80 p-3 rounded-xl border border-zinc-800 space-y-2 text-xs">
+          <p className="text-zinc-300 font-semibold">Gunakan perintah sapu-jagad ini (otomatis deteksi folder, clone jika belum ada, &amp; langsung jalankan):</p>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <code className="flex-1 p-2.5 rounded-lg bg-zinc-900 text-xs font-mono text-amber-300 border border-zinc-800 select-all overflow-x-auto whitespace-pre-wrap">
+              {noSuchFileFixCommand}
+            </code>
+            <button
+              type="button"
+              onClick={() => handleCopy(noSuchFileFixCommand, setCopiedNoSuchFile)}
+              className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold whitespace-nowrap active:scale-95 transition-all shadow-md shadow-amber-800/20 shrink-0"
+            >
+              {copiedNoSuchFile ? 'Perintah Perbaikan Tersalin!' : 'Salin Perintah Solusi'}
+            </button>
+          </div>
         </div>
       </div>
 
