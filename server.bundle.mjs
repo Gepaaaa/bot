@@ -6555,7 +6555,7 @@ Contoh: *${config.prefix}hitamkan*, *${config.prefix}blur*, *${config.prefix}inv
             return failReply(ctx.viewOnceError);
           }
           return failReply(
-            `Balas (reply) pada pesan *View Once* (foto, video, atau pesan suara sekali lihat) dengan *${config.prefix}rvo* untuk membukanya kembali.`
+            `Ketik *${config.prefix}rvo* (atau balas pesan View Once) untuk membuka foto/video sekali lihat terakhir di chat ini.`
           );
         }
         const vo = ctx.viewOnceMedia;
@@ -8176,6 +8176,7 @@ import makeWASocket, {
 import pino from "pino";
 import QRCode2 from "qrcode";
 var AUTH_DIR = path7.join(resolveDataDir(), ".baileys_auth");
+var VIEWONCE_DIR = path7.join(resolveDataDir(), "viewonce_cache");
 var silentLogger = pino({ level: "silent" });
 var WhatsAppSessionManager = class {
   constructor() {
@@ -8195,8 +8196,10 @@ var WhatsAppSessionManager = class {
     this.userCommandTimestamps = /* @__PURE__ */ new Map();
     this.lastHidetagPerGroup = /* @__PURE__ */ new Map();
     this.recentViewOnceCache = /* @__PURE__ */ new Map();
+    this.lastViewOnceByChat = /* @__PURE__ */ new Map();
     this.outboundQueue = Promise.resolve();
     this.lastOutboundSentAt = 0;
+    void this.loadRecentViewOnceFromDisk();
   }
   sleepRandom(minMs, maxMs) {
     const duration = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
@@ -8805,6 +8808,9 @@ ${noticeText}`
         }
       });
       sock.ev.on("messages.upsert", async ({ messages, type }) => {
+        for (const msg of messages) {
+          void this.cacheIncomingViewOnceIfAny(sock, msg);
+        }
         if (type !== "notify") return;
         for (const msg of messages) {
           void this.handleIncomingMessage(sock, msg);
@@ -8867,7 +8873,7 @@ ${noticeText}`
   inspectViewOnceCandidate(raw) {
     let current = raw;
     let sawVoWrapper = false;
-    for (let depth = 0; depth < 8 && current; depth += 1) {
+    for (let depth = 0; depth < 10 && current; depth += 1) {
       if (current.deviceSentMessage?.message) {
         current = current.deviceSentMessage.message;
         continue;
@@ -8894,6 +8900,51 @@ ${noticeText}`
       if (current.documentWithCaptionMessage?.message) {
         current = current.documentWithCaptionMessage.message;
         continue;
+      }
+      if (current.templateMessage?.hydratedTemplate) {
+        const ht = current.templateMessage.hydratedTemplate;
+        if (ht.imageMessage) {
+          current = { imageMessage: ht.imageMessage };
+          continue;
+        }
+        if (ht.videoMessage) {
+          current = { videoMessage: ht.videoMessage };
+          continue;
+        }
+        if (ht.documentMessage) {
+          current = { documentMessage: ht.documentMessage };
+          continue;
+        }
+      }
+      if (current.templateMessage?.hydratedFourRowTemplate) {
+        const ht = current.templateMessage.hydratedFourRowTemplate;
+        if (ht.imageMessage) {
+          current = { imageMessage: ht.imageMessage };
+          continue;
+        }
+        if (ht.videoMessage) {
+          current = { videoMessage: ht.videoMessage };
+          continue;
+        }
+        if (ht.documentMessage) {
+          current = { documentMessage: ht.documentMessage };
+          continue;
+        }
+      }
+      if (current.interactiveMessage?.header) {
+        const hdr = current.interactiveMessage.header;
+        if (hdr.imageMessage) {
+          current = { imageMessage: hdr.imageMessage };
+          continue;
+        }
+        if (hdr.videoMessage) {
+          current = { videoMessage: hdr.videoMessage };
+          continue;
+        }
+        if (hdr.documentMessage) {
+          current = { documentMessage: hdr.documentMessage };
+          continue;
+        }
       }
       break;
     }
@@ -8949,15 +9000,123 @@ ${noticeText}`
         isVoiceNote: Boolean(m.ptt)
       };
     }
+    if (current.documentMessage && (sawVoWrapper || current.documentMessage.viewOnce)) {
+      const m = current.documentMessage;
+      const mime = (m.mimetype || "").toLowerCase();
+      const isVid = mime.startsWith("video/");
+      const isAud = mime.startsWith("audio/");
+      return {
+        isViewOnce: true,
+        kind: isVid ? "video" : isAud ? "audio" : "image",
+        hkdfType: isVid ? "video" : isAud ? "audio" : "image",
+        mediaObj: m,
+        hasDownloadKeys: checkHasKeys(m),
+        mimeType: m.mimetype || (isVid ? "video/mp4" : "image/jpeg"),
+        caption: m.caption || void 0
+      };
+    }
     return null;
   }
-  cacheIncomingViewOnceIfAny(msg) {
+  async ensureViewOnceDir() {
+    try {
+      await fs9.mkdir(VIEWONCE_DIR, { recursive: true });
+    } catch {
+    }
+  }
+  async persistViewOnceToDisk(item) {
+    if (!item.buffer || item.buffer.length === 0) return;
+    try {
+      await this.ensureViewOnceDir();
+      const metaPath = path7.join(VIEWONCE_DIR, `${item.id}.json`);
+      const binPath = path7.join(VIEWONCE_DIR, `${item.id}.bin`);
+      const meta = {
+        id: item.id,
+        remoteJid: item.remoteJid,
+        kind: item.kind,
+        mimeType: item.mimeType,
+        caption: item.caption,
+        isVoiceNote: item.isVoiceNote,
+        savedAt: item.savedAt
+      };
+      await fs9.writeFile(metaPath, JSON.stringify(meta), "utf-8");
+      await fs9.writeFile(binPath, item.buffer);
+      const files = await fs9.readdir(VIEWONCE_DIR);
+      const jsonFiles = files.filter((f) => f.endsWith(".json"));
+      if (jsonFiles.length > 25) {
+        const parsed = await Promise.all(
+          jsonFiles.map(async (jf) => {
+            try {
+              const raw = await fs9.readFile(path7.join(VIEWONCE_DIR, jf), "utf-8");
+              const data = JSON.parse(raw);
+              return { file: jf, id: data.id || jf.replace(".json", ""), savedAt: data.savedAt || 0 };
+            } catch {
+              return { file: jf, id: jf.replace(".json", ""), savedAt: 0 };
+            }
+          })
+        );
+        parsed.sort((a, b) => a.savedAt - b.savedAt);
+        const toDelete = parsed.slice(0, parsed.length - 20);
+        for (const d of toDelete) {
+          await fs9.unlink(path7.join(VIEWONCE_DIR, `${d.id}.json`)).catch(() => {
+          });
+          await fs9.unlink(path7.join(VIEWONCE_DIR, `${d.id}.bin`)).catch(() => {
+          });
+        }
+      }
+    } catch {
+    }
+  }
+  async loadRecentViewOnceFromDisk() {
+    try {
+      await this.ensureViewOnceDir();
+      const files = await fs9.readdir(VIEWONCE_DIR);
+      const jsonFiles = files.filter((f) => f.endsWith(".json"));
+      const now = Date.now();
+      for (const jf of jsonFiles) {
+        try {
+          const metaPath = path7.join(VIEWONCE_DIR, jf);
+          const raw = await fs9.readFile(metaPath, "utf-8");
+          const data = JSON.parse(raw);
+          if (now - data.savedAt > 24 * 60 * 60 * 1e3) {
+            await fs9.unlink(metaPath).catch(() => {
+            });
+            await fs9.unlink(path7.join(VIEWONCE_DIR, `${data.id}.bin`)).catch(() => {
+            });
+            continue;
+          }
+          const binPath = path7.join(VIEWONCE_DIR, `${data.id}.bin`);
+          const buf = await fs9.readFile(binPath).catch(() => null);
+          if (buf && buf.length > 0) {
+            const item = {
+              id: data.id,
+              remoteJid: data.remoteJid,
+              kind: data.kind,
+              buffer: buf,
+              mimeType: data.mimeType,
+              caption: data.caption,
+              isVoiceNote: data.isVoiceNote,
+              savedAt: data.savedAt
+            };
+            this.recentViewOnceCache.set(data.id, item);
+            if (data.remoteJid) {
+              this.lastViewOnceByChat.set(data.remoteJid, data.id);
+            }
+          }
+        } catch {
+        }
+      }
+    } catch {
+    }
+  }
+  async cacheIncomingViewOnceIfAny(sock, msg) {
     const id = msg.key?.id;
-    if (!id || !msg.message) return;
+    const remoteJid = msg.key?.remoteJid;
+    if (!id || !remoteJid || !msg.message) return;
     const inspected = this.inspectViewOnceCandidate(msg.message);
-    if (!inspected || !inspected.isViewOnce || !inspected.hasDownloadKeys) {
+    if (!inspected || !inspected.isViewOnce) {
       return;
     }
+    this.lastViewOnceByChat.set(remoteJid, id);
     const now = Date.now();
     for (const [k, v] of this.recentViewOnceCache.entries()) {
       if (now - v.savedAt > 60 * 60 * 1e3) {
@@ -8969,7 +9128,9 @@ ${noticeText}`
       if (!oldestKey) break;
       this.recentViewOnceCache.delete(oldestKey);
     }
-    this.recentViewOnceCache.set(id, {
+    const cachedItem = {
+      id,
+      remoteJid,
       kind: inspected.kind,
       hkdfType: inspected.hkdfType,
       mediaObj: inspected.mediaObj,
@@ -8978,7 +9139,52 @@ ${noticeText}`
       isVoiceNote: inspected.isVoiceNote,
       fullMsg: msg,
       savedAt: now
-    });
+    };
+    this.recentViewOnceCache.set(id, cachedItem);
+    try {
+      let buffer = null;
+      try {
+        const direct = await downloadMediaMessage(
+          msg,
+          "buffer",
+          {},
+          {
+            logger: silentLogger,
+            reuploadRequest: sock.updateMediaMessage
+          }
+        );
+        if (direct && direct.length > 0) {
+          buffer = Buffer.from(direct);
+        }
+      } catch {
+      }
+      if (!buffer && inspected.hasDownloadKeys) {
+        try {
+          buffer = await this.downloadStreamToBuffer(
+            inspected.mediaObj,
+            inspected.hkdfType
+          );
+        } catch {
+          try {
+            const refreshed = await sock.updateMediaMessage(msg);
+            const refInspected = this.inspectViewOnceCandidate(refreshed.message);
+            if (refInspected?.hasDownloadKeys) {
+              buffer = await this.downloadStreamToBuffer(
+                refInspected.mediaObj,
+                refInspected.hkdfType
+              );
+            }
+          } catch {
+          }
+        }
+      }
+      if (buffer && buffer.length > 0) {
+        cachedItem.buffer = buffer;
+        this.recentViewOnceCache.set(id, cachedItem);
+        void this.persistViewOnceToDisk(cachedItem);
+      }
+    } catch {
+    }
   }
   extractMessageText(msg) {
     const m = this.unwrapWaMessage(msg.message);
@@ -9051,112 +9257,189 @@ ${noticeText}`
     return null;
   }
   async downloadStreamToBuffer(mediaObj, hkdfType) {
-    const stream = await downloadContentFromMessage(mediaObj, hkdfType);
-    const chunks = [];
-    for await (const chunk of stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const candidateHosts = [
+      "mmg.whatsapp.net",
+      "media-sin1-1.cdn.whatsapp.net",
+      "media-cgk1-1.cdn.whatsapp.net",
+      "media-cgk1-2.cdn.whatsapp.net",
+      "media.fsub3-2.fna.whatsapp.net"
+    ];
+    let lastErr;
+    for (const host of candidateHosts) {
+      try {
+        const stream = await downloadContentFromMessage(mediaObj, hkdfType, {
+          host
+        });
+        const chunks = [];
+        for await (const chunk of stream) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        const buf = Buffer.concat(chunks);
+        if (buf.length > 0) {
+          return buf;
+        }
+      } catch (err) {
+        lastErr = err;
+      }
     }
-    const buf = Buffer.concat(chunks);
-    if (buf.length === 0) {
-      throw new Error("Hasil dekripsi media View Once kosong.");
-    }
-    return buf;
+    throw lastErr || new Error("Hasil dekripsi media View Once kosong.");
   }
-  async extractQuotedViewOnceMedia(sock, msg) {
-    try {
-      const contextInfo = this.extractContextInfo(msg);
-      const stanzaId = contextInfo?.stanzaId || "";
-      const rawQuoted = contextInfo?.quotedMessage;
-      if (!stanzaId && !rawQuoted) {
-        return { payload: null };
-      }
-      const cached = stanzaId ? this.recentViewOnceCache.get(stanzaId) : void 0;
-      const quotedInspected = rawQuoted ? this.inspectViewOnceCandidate(rawQuoted) : null;
-      const chosen = cached ? {
-        kind: cached.kind,
-        hkdfType: cached.hkdfType,
-        mediaObj: cached.mediaObj,
-        hasDownloadKeys: true,
-        mimeType: cached.mimeType,
-        caption: cached.caption ?? quotedInspected?.caption,
-        isVoiceNote: cached.isVoiceNote,
-        reuploadTarget: cached.fullMsg
-      } : quotedInspected ? {
-        kind: quotedInspected.kind,
-        hkdfType: quotedInspected.hkdfType,
-        mediaObj: quotedInspected.mediaObj,
-        hasDownloadKeys: quotedInspected.hasDownloadKeys,
-        mimeType: quotedInspected.mimeType,
-        caption: quotedInspected.caption,
-        isVoiceNote: quotedInspected.isVoiceNote,
-        reuploadTarget: stanzaId ? {
-          key: {
-            remoteJid: msg.key.remoteJid,
-            id: stanzaId,
-            participant: contextInfo?.participant
-          },
-          message: rawQuoted
-        } : void 0
-      } : null;
-      if (!chosen) {
-        return { payload: null };
-      }
-      if (!chosen.hasDownloadKeys) {
-        return {
-          payload: null,
-          errorHint: "Kunci enkripsi pada pesan *View Once* ini sudah dihapus oleh WhatsApp (biasanya karena pesan dikirim sebelum bot menyala atau sudah dibuka terlebih dahulu). Untuk pesan View Once baru yang masuk saat bot aktif, *.rvo* otomatis menyimpannya sehingga bisa dibuka kapan saja."
-        };
+  async extractViewOnceForRvo(sock, msg) {
+    const remoteJid = msg.key.remoteJid || "";
+    const contextInfo = this.extractContextInfo(msg);
+    const stanzaId = contextInfo?.stanzaId || "";
+    const rawQuoted = contextInfo?.quotedMessage;
+    const selfInspected = this.inspectViewOnceCandidate(msg.message);
+    if (selfInspected && selfInspected.isViewOnce) {
+      if (msg.key.id && this.recentViewOnceCache.has(msg.key.id)) {
+        const c = this.recentViewOnceCache.get(msg.key.id);
+        if (c.buffer) {
+          return {
+            payload: {
+              kind: c.kind,
+              buffer: c.buffer,
+              mimeType: c.mimeType,
+              caption: c.caption,
+              isVoiceNote: c.isVoiceNote
+            }
+          };
+        }
       }
       try {
-        const buffer = await this.downloadStreamToBuffer(
-          chosen.mediaObj,
-          chosen.hkdfType
+        const direct = await downloadMediaMessage(
+          msg,
+          "buffer",
+          {},
+          {
+            logger: silentLogger,
+            reuploadRequest: sock.updateMediaMessage
+          }
         );
+        if (direct && direct.length > 0) {
+          return {
+            payload: {
+              kind: selfInspected.kind,
+              buffer: Buffer.from(direct),
+              mimeType: selfInspected.mimeType,
+              caption: selfInspected.caption,
+              isVoiceNote: selfInspected.isVoiceNote
+            }
+          };
+        }
+      } catch {
+      }
+    }
+    if (stanzaId) {
+      const cached = this.recentViewOnceCache.get(stanzaId);
+      if (cached && cached.buffer) {
         return {
           payload: {
-            kind: chosen.kind,
-            buffer,
-            mimeType: chosen.mimeType,
-            caption: chosen.caption,
-            isVoiceNote: chosen.isVoiceNote
+            kind: cached.kind,
+            buffer: cached.buffer,
+            mimeType: cached.mimeType,
+            caption: cached.caption,
+            isVoiceNote: cached.isVoiceNote
           }
         };
-      } catch (firstErr) {
-        if (chosen.reuploadTarget) {
-          try {
-            const refreshed = await sock.updateMediaMessage(
-              chosen.reuploadTarget
-            );
-            const refreshedInspected = this.inspectViewOnceCandidate(
-              refreshed.message
-            );
-            if (refreshedInspected?.hasDownloadKeys) {
-              const retryBuf = await this.downloadStreamToBuffer(
-                refreshedInspected.mediaObj,
-                refreshedInspected.hkdfType
-              );
-              return {
-                payload: {
-                  kind: refreshedInspected.kind,
-                  buffer: retryBuf,
-                  mimeType: refreshedInspected.mimeType,
-                  caption: refreshedInspected.caption ?? chosen.caption,
-                  isVoiceNote: refreshedInspected.isVoiceNote
-                }
-              };
+      }
+      if (cached && cached.mediaObj && cached.hkdfType) {
+        try {
+          const buf = await this.downloadStreamToBuffer(
+            cached.mediaObj,
+            cached.hkdfType
+          );
+          cached.buffer = buf;
+          void this.persistViewOnceToDisk(cached);
+          return {
+            payload: {
+              kind: cached.kind,
+              buffer: buf,
+              mimeType: cached.mimeType,
+              caption: cached.caption,
+              isVoiceNote: cached.isVoiceNote
             }
+          };
+        } catch {
+        }
+      }
+      if (rawQuoted) {
+        const quotedInspected = this.inspectViewOnceCandidate(rawQuoted);
+        if (quotedInspected && quotedInspected.hasDownloadKeys) {
+          try {
+            const buf = await this.downloadStreamToBuffer(
+              quotedInspected.mediaObj,
+              quotedInspected.hkdfType
+            );
+            return {
+              payload: {
+                kind: quotedInspected.kind,
+                buffer: buf,
+                mimeType: quotedInspected.mimeType,
+                caption: quotedInspected.caption,
+                isVoiceNote: quotedInspected.isVoiceNote
+              }
+            };
           } catch {
           }
         }
-        const reason = firstErr instanceof Error ? firstErr.message : "Gagal mendekripsi media";
+      }
+    }
+    const lastChatId = this.lastViewOnceByChat.get(remoteJid);
+    if (lastChatId) {
+      const lastVo = this.recentViewOnceCache.get(lastChatId);
+      if (lastVo && lastVo.buffer) {
         return {
-          payload: null,
-          errorHint: `Gagal mengunduh media View Once dari server WhatsApp (${reason}). Pastikan pesan View Once belum kedaluwarsa di server WA.`
+          payload: {
+            kind: lastVo.kind,
+            buffer: lastVo.buffer,
+            mimeType: lastVo.mimeType,
+            caption: lastVo.caption,
+            isVoiceNote: lastVo.isVoiceNote
+          }
         };
       }
-    } catch {
-      return { payload: null };
+      if (lastVo && lastVo.mediaObj && lastVo.hkdfType) {
+        try {
+          const buf = await this.downloadStreamToBuffer(
+            lastVo.mediaObj,
+            lastVo.hkdfType
+          );
+          lastVo.buffer = buf;
+          void this.persistViewOnceToDisk(lastVo);
+          return {
+            payload: {
+              kind: lastVo.kind,
+              buffer: buf,
+              mimeType: lastVo.mimeType,
+              caption: lastVo.caption,
+              isVoiceNote: lastVo.isVoiceNote
+            }
+          };
+        } catch {
+        }
+      }
     }
+    let newestItem = null;
+    for (const item of this.recentViewOnceCache.values()) {
+      if (item.buffer && (!newestItem || item.savedAt > newestItem.savedAt)) {
+        newestItem = item;
+      }
+    }
+    if (newestItem && Date.now() - newestItem.savedAt < 60 * 60 * 1e3) {
+      return {
+        payload: {
+          kind: newestItem.kind,
+          buffer: newestItem.buffer,
+          mimeType: newestItem.mimeType,
+          caption: newestItem.caption,
+          isVoiceNote: newestItem.isVoiceNote
+        }
+      };
+    }
+    return {
+      payload: null,
+      errorHint: "Belum ada pesan *View Once* (sekali lihat) yang tersimpan di chat ini. Kirim foto/video sekali lihat baru, lalu ketik *.rvo* (bisa tanpa reply) untuk membukanya kembali."
+    };
   }
   classifyDocKind(mimeType, fileName) {
     const lowerMime = mimeType.toLowerCase();
@@ -9242,7 +9525,7 @@ ${noticeText}`
   async handleIncomingMessage(sock, msg) {
     if (!msg.message || !msg.key.remoteJid) return;
     if (msg.key.remoteJid === "status@broadcast") return;
-    this.cacheIncomingViewOnceIfAny(msg);
+    void this.cacheIncomingViewOnceIfAny(sock, msg);
     const text = this.extractMessageText(msg).trim();
     if (!text) return;
     if (msg.key.fromMe && !botStore.config.selfMode) {
@@ -9579,7 +9862,7 @@ Batas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam Whats
       needsVideo ? this.extractAttachedOrQuotedMediaByKind(sock, msg, "video") : Promise.resolve(null),
       needsAudio ? this.extractAttachedOrQuotedMediaByKind(sock, msg, "audio") : Promise.resolve(null),
       needsSticker ? this.extractAttachedOrQuotedMediaByKind(sock, msg, "sticker") : Promise.resolve(null),
-      needsViewOnce ? this.extractQuotedViewOnceMedia(sock, msg) : Promise.resolve(null)
+      needsViewOnce ? this.extractViewOnceForRvo(sock, msg) : Promise.resolve(null)
     ]);
     const viewOnceMedia = voResult?.payload ?? null;
     const viewOnceError = voResult?.errorHint ?? null;
@@ -9889,15 +10172,8 @@ function resolveListenConfig() {
       explicitCliPort: false
     };
   }
-  if (process.env.NODE_ENV !== "production") {
-    return {
-      port: Number(process.env.APP_PORT || 3e3),
-      host,
-      explicitCliPort: false
-    };
-  }
   return {
-    port: Number(process.env.PORT || 3e3),
+    port: Number(process.env.APP_PORT || 3e3),
     host,
     explicitCliPort: false
   };
@@ -10499,6 +10775,27 @@ async function startServer() {
                 fileSize: cached.buffer.length
               };
             }
+          }
+        }
+      }
+      if (!viewOnceMedia && (text.toLowerCase().trim().startsWith(`${botStore.config.prefix}rvo`) || ["rvo", "readviewonce", "bukavo", "lihatsekali"].includes(
+        text.toLowerCase().replace(/^[^\w\s]+/, "").trim()
+      ))) {
+        const lastVo = [...botStore.simulatorMessages].reverse().find((m) => m.media?.isViewOnce);
+        if (lastVo) {
+          const mType = lastVo.media?.type || "image";
+          const mUrl = lastVo.media?.url;
+          let resolvedBuf = await resolveCachedBufferFromUrl(mUrl);
+          if (!resolvedBuf) {
+            resolvedBuf = mType === "video" ? await getOrCreateSampleVideoBuffer() : mType === "audio" || mType === "vn" ? await getOrCreateSampleAudioBuffer() : await loadSampleCatBuffer();
+          }
+          if (resolvedBuf) {
+            viewOnceMedia = {
+              kind: mType === "video" ? "video" : mType === "audio" || mType === "vn" ? "audio" : "image",
+              buffer: resolvedBuf,
+              mimeType: lastVo.media?.mimeType || (mType === "video" ? "video/mp4" : "image/jpeg"),
+              caption: lastVo.text || void 0
+            };
           }
         }
       }

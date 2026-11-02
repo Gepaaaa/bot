@@ -862,6 +862,46 @@ async function startServer() {
         }
       }
 
+      if (
+        !viewOnceMedia &&
+        (text.toLowerCase().trim().startsWith(`${botStore.config.prefix}rvo`) ||
+          ['rvo', 'readviewonce', 'bukavo', 'lihatsekali'].includes(
+            text.toLowerCase().replace(/^[^\w\s]+/, '').trim()
+          ))
+      ) {
+        const lastVo = [...botStore.simulatorMessages]
+          .reverse()
+          .find((m) => m.media?.isViewOnce);
+        if (lastVo) {
+          const mType = lastVo.media?.type || 'image';
+          const mUrl = lastVo.media?.url;
+          let resolvedBuf = await resolveCachedBufferFromUrl(mUrl);
+          if (!resolvedBuf) {
+            resolvedBuf =
+              mType === 'video'
+                ? await getOrCreateSampleVideoBuffer()
+                : mType === 'audio' || mType === 'vn'
+                ? await getOrCreateSampleAudioBuffer()
+                : await loadSampleCatBuffer();
+          }
+          if (resolvedBuf) {
+            viewOnceMedia = {
+              kind:
+                mType === 'video'
+                  ? 'video'
+                  : mType === 'audio' || mType === 'vn'
+                  ? 'audio'
+                  : 'image',
+              buffer: resolvedBuf,
+              mimeType:
+                lastVo.media?.mimeType ||
+                (mType === 'video' ? 'video/mp4' : 'image/jpeg'),
+              caption: lastVo.text || undefined,
+            };
+          }
+        }
+      }
+
       const isMemberSimulation = chatMode === 'group' && senderRole === 'member';
       if (isMemberSimulation && botStore.groupState.isAnnouncementOnly) {
         res.status(403).json({

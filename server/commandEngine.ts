@@ -1192,7 +1192,7 @@ export async function processBotMessage(
             return failReply(ctx.viewOnceError);
           }
           return failReply(
-            `Balas (reply) pada pesan *View Once* (foto, video, atau pesan suara sekali lihat) dengan *${config.prefix}rvo* untuk membukanya kembali.`
+            `Ketik *${config.prefix}rvo* (atau balas pesan View Once) untuk membuka foto/video sekali lihat terakhir di chat ini.`
           );
         }
         const vo = ctx.viewOnceMedia;
