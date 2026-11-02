@@ -1,4 +1,3 @@
-import sharp from 'sharp';
 import {
   buildBotMenuText,
   COMMAND_CATALOG,
@@ -12,6 +11,7 @@ import type {
   SimulatorMember,
 } from '../src/shared/types.ts';
 import { evaluateAutoResponder } from './autoResponder.ts';
+import { prepareHdStatusImage } from './imageAdapter.ts';
 import {
   downloadTikTokMedia,
   extractFirstUrl,
@@ -851,35 +851,16 @@ export async function processBotMessage(
           : undefined;
 
         if (validKind === 'image') {
-          try {
-            const meta = await sharp(finalBuffer).metadata();
-            width = meta.width;
-            height = meta.height;
-
-            if (
-              meta.format === 'webp' ||
-              finalMime.toLowerCase().includes('webp')
-            ) {
-              finalBuffer = await sharp(finalBuffer)
-                .png({ compressionLevel: 0 })
-                .toBuffer();
-              finalMime = 'image/png';
-            } else if (meta.format === 'png') {
-              finalMime = 'image/png';
-            } else {
-              finalMime = 'image/jpeg';
-            }
-
-            const thumbBuf = await sharp(finalBuffer)
-              .resize(72, 72, { fit: 'inside' })
-              .jpeg({ quality: 65 })
-              .toBuffer();
-            jpegThumbnail = thumbBuf.toString('base64');
-          } catch {
-            finalMime = finalMime.startsWith('image/')
-              ? finalMime
-              : 'image/jpeg';
-          }
+          const prepared = await prepareHdStatusImage(
+            finalBuffer,
+            finalMime,
+            jpegThumbnail
+          );
+          finalBuffer = prepared.buffer;
+          finalMime = prepared.mimeType;
+          width = prepared.width;
+          height = prepared.height;
+          jpegThumbnail = prepared.jpegThumbnail;
         } else {
           finalMime = 'video/mp4';
         }

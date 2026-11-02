@@ -25,6 +25,7 @@ interface ConnectionViewProps {
   onConnectPairing: (phone: string) => Promise<void>;
   onDisconnect: () => Promise<void>;
   onUpdateConfig: (patch: Partial<BotConfig>) => Promise<void>;
+  onOpenTermuxGuide?: () => void;
 }
 
 export function ConnectionView({
@@ -39,6 +40,7 @@ export function ConnectionView({
   onConnectPairing,
   onDisconnect,
   onUpdateConfig,
+  onOpenTermuxGuide,
 }: ConnectionViewProps) {
   const [method, setMethod] = useState<'qr' | 'pairing'>('pairing');
   const [phoneInput, setPhoneInput] = useState('628');
@@ -46,7 +48,6 @@ export function ConnectionView({
   const [localError, setLocalError] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedPing, setCopiedPing] = useState(false);
-  const [copiedTermux, setCopiedTermux] = useState(false);
   const [hostGuideMode, setHostGuideMode] = useState<
     'termux' | 'koyeb_render' | 'huggingface' | 'oracle'
   >('termux');
@@ -567,53 +568,36 @@ export function ConnectionView({
           <div className="pt-4 border-t border-zinc-200/80 dark:border-zinc-800 grid grid-cols-1 md:grid-cols-3 gap-6 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
             <div className="space-y-1.5">
               <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                01. Install Termux Resmi (F-Droid)
+                01. Instal Termux Resmi (F-Droid)
               </div>
               <p>
-                Di HP Android nganggur, unduh APK <strong>Termux</strong> dari <strong className="text-zinc-800 dark:text-zinc-200">f-droid.org</strong> (jangan versi Play Store lama). Di Pengaturan HP &rarr; Aplikasi &rarr; Termux &rarr; Baterai, pilih <strong>Tidak Dibatasi</strong>.
+                Di HP cadangan (seperti <strong>Xiaomi Redmi 9C 3/32</strong>), unduh APK <strong>Termux</strong> dari <strong className="text-zinc-800 dark:text-zinc-200">f-droid.org</strong> (jangan versi Play Store). Aktifkan <strong>Autostart</strong> &amp; baterai <strong>Tidak ada pembatasan</strong>.
               </p>
             </div>
             <div className="space-y-1.5">
               <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                02. Tempel 1 Perintah Otomatis (1-Kali Jalan)
+                02. Pasang Paket Siap Pakai (.tar.gz) atau Git Clone
               </div>
               <p>
-                Buka Termux, cukup salin dan jalankan perintah 1-baris ini. Skrip <code className="font-mono">termux.sh</code> otomatis mengaktifkan <em>WakeLock</em>, memasang Node LTS, FFmpeg, PM2, dan menyalakan Web Panel di <code className="font-mono">http://localhost:3000</code>.
+                Paket <code className="font-mono">.tar.gz</code> sudah menyertakan Web Panel terkompilasi + engine stiker WebAssembly sehingga langsung jalan mulus di Android 32-bit (<code className="font-mono">armv7l</code>) maupun 64-bit tanpa error <code className="font-mono">sharp</code> / <code className="font-mono">esbuild</code>.
               </p>
-              <button
-                type="button"
-                onClick={async () => {
-                  const cmd =
-                    'curl -sL https://raw.githubusercontent.com/Gepaaaa/panel-/main/termux.sh | bash';
-                  try {
-                    await navigator.clipboard.writeText(cmd);
-                    setCopiedTermux(true);
-                    setTimeout(() => setCopiedTermux(false), 2000);
-                  } catch {
-                    // Ignore clipboard restrictions
-                  }
-                }}
-                className="mt-1 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-[#FAF9F6] dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 font-medium inline-flex items-center gap-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-              >
-                {copiedTermux ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                    Perintah 1-Baris Tersalin
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    Salin Perintah 1-Baris Termux
-                  </>
-                )}
-              </button>
+              {onOpenTermuxGuide && (
+                <button
+                  type="button"
+                  onClick={onOpenTermuxGuide}
+                  className="mt-1 px-3.5 py-2 rounded-xl bg-zinc-900 dark:bg-emerald-600 text-white font-medium inline-flex items-center gap-1.5 hover:opacity-90 transition-opacity"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  Buka Installer &amp; Paket Redmi 9C
+                </button>
+              )}
             </div>
             <div className="space-y-1.5">
               <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                03. Kelola via Localhost (Browser HP)
+                03. Kontrol Menu, Template &amp; Pairing
               </div>
               <p>
-                Setelah bot aktif di Termux, buka Chrome di HP dan ketik <strong className="text-emerald-600 dark:text-emerald-400 font-mono">http://localhost:3000</strong> untuk mengatur bot, scan QR / pairing, atau ketik <code className="font-mono">bot</code> di Termux untuk cek log 24/7.
+                Setelah menyala, buka <strong className="text-emerald-700 dark:text-emerald-400 font-mono">http://localhost:3000</strong> di Chrome HP tersebut, buka <code className="font-mono">http://IP-WIFI-HP:3000</code> dari HP utamamu, atau ketik <code className="font-mono">bot</code> langsung di Termux.
               </p>
             </div>
           </div>

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import express from 'express';
@@ -14,6 +15,7 @@ import {
 } from './server/commandEngine.ts';
 import { cloudSync } from './server/cloudSync.ts';
 import { gatewayRouter } from './server/gatewayRouter.ts';
+import { getActiveImageBackend } from './server/imageAdapter.ts';
 import {
   getOrCreateSampleAudioBuffer,
   getOrCreateSampleVideoBuffer,
@@ -21,7 +23,11 @@ import {
 import { botStore } from './server/stateStore.ts';
 import { resolveDataDir } from './server/storagePath.ts';
 import { waManager } from './server/waManager.ts';
-import { renderBotTemplate } from './src/shared/commands.ts';
+import {
+  COMMAND_CATALOG,
+  OFFICIAL_OWNER_NUMBER,
+  renderBotTemplate,
+} from './src/shared/commands.ts';
 import type { BotConfig, SimulatorMessage } from './src/shared/types.ts';
 
 function resolveListenConfig(): { port: number; host: string; explicitCliPort: boolean } {
@@ -83,6 +89,28 @@ function resolveListenConfig(): { port: number; host: string; explicitCliPort: b
 }
 
 const LISTEN_CONFIG = resolveListenConfig();
+
+function getLocalLanUrls(port: number): string[] {
+  const urls: string[] = [];
+  try {
+    const nets = os.networkInterfaces();
+    for (const entries of Object.values(nets)) {
+      if (!entries) continue;
+      for (const net of entries) {
+        const fam = String(net.family);
+        if ((fam === 'IPv4' || fam === '4') && !net.internal && net.address) {
+          const url = `http://${net.address}:${port}`;
+          if (!urls.includes(url)) {
+            urls.push(url);
+          }
+        }
+      }
+    }
+  } catch {
+    // Android 11+ SELinux may restrict os.networkInterfaces() on some ROMs; ignore safely
+  }
+  return urls;
+}
 
 function classifySimulatorDocKind(
   mimeType: string,
@@ -223,6 +251,22 @@ async function startServer() {
         Boolean(process.env.DATA_DIR) ||
         cloudDbSync,
       timestamp: Date.now(),
+    });
+  });
+
+  app.get('/api/network-info', (_req, res) => {
+    const port = activePort || LISTEN_CONFIG.port;
+    res.json({
+      ok: true,
+      port,
+      localhostUrl: `http://localhost:${port}`,
+      loopbackUrl: `http://127.0.0.1:${port}`,
+      lanUrls: getLocalLanUrls(port),
+      arch: process.arch,
+      platform: process.platform,
+      nodeVersion: process.version,
+      imageBackend: getActiveImageBackend(),
+      memoryRssMb: Math.round(process.memoryUsage().rss / (1024 * 1024)),
     });
   });
 
@@ -1025,126 +1069,105 @@ async function startServer() {
     }
   });
 
-  // 1. Download Project Source Bundle (tar.gz) directly from this running applet
-  app.get('/api/project-bundle.tar.gz', (_req, res) => {
-    res.setHeader('Content-Type', 'application/gzip');
-    res.setHeader(
-      'Content-Disposition',
-      'attachment; filename="wabot-project.tar.gz"'
-    );
-    const tar = spawn('tar', [
-      '--exclude=node_modules',
-      '--exclude=.git',
-      '--exclude=.aistudio',
-      '--exclude=data',
-      '--exclude=dist',
-      '--exclude=.env',
-      '-czf',
-      '-',
-      '.',
-    ]);
-    tar.stdout.pipe(res);
-    tar.stderr.on('data', (d) => console.error('[TAR]', d.toString()));
-  });
+  // 1. Pre-built Ready-to-Run Termux Bundle (.tar.gz) including compiled dist/ Web Panel + server.bundle.mjs
+  //    Specifically engineered so 32-bit ARMv7 phones (Xiaomi Redmi 9C 3/32) never need vite or esbuild!
+  let prepareBundlePromise: Promise<void> | null = null;
+  async function ensureTermuxArtifactsBuilt(): Promise<void> {
+    if (!prepareBundlePromise) {
+      prepareBundlePromise = (async () => {
+        const root = process.cwd();
+        const distHtmlPath = path.join(root, 'dist', 'index.html');
+        try {
+          await fs.access(distHtmlPath);
+        } catch {
+          try {
+            const { build: viteBuild } = await import('vite');
+            await viteBuild({ logLevel: 'warn' });
+          } catch (err) {
+            console.warn(
+              '[Bundle Builder] Vite build skipped:',
+              err instanceof Error ? err.message : err
+            );
+          }
+        }
 
-  // 2. Direct 1-liner Termux installer that downloads THIS project directly
-  app.get(['/api/termux-install', '/termux-install'], (req, res) => {
-    const host = req.get('host') || 'localhost:3000';
-    const proto =
-      req.headers['x-forwarded-proto'] ||
-      (req.secure ? 'https' : 'http');
-    const origin = `${proto}://${host}`;
-
-    const script = `#!/data/data/com.termux/files/usr/bin/bash
-# ==============================================================================
-#  WABot 24/7 & Web Panel — Termux Auto-Installer (Dari Project Ini Langsung)
-#  Host: ${origin}
-# ==============================================================================
-set -e
-
-echo ""
-echo "============================================================"
-echo "  🚀 MEMASANG PROJECT WABOT KE TERMUX ANDROID"
-echo "  Sumber: ${origin}"
-echo "============================================================"
-echo ""
-
-# 1. WakeLock
-echo "⚡ [1/5] Mengaktifkan Termux WakeLock..."
-termux-wake-lock 2>/dev/null || true
-
-# 2. Package updates & core tools
-echo "📦 [2/5] Memperbarui paket Termux & menginstal Node.js LTS, FFmpeg, Curl, Tar..."
-pkg update -y
-pkg install -y nodejs-lts ffmpeg curl tar ncurses-utils
-
-# 3. PM2 Process Manager
-echo "⚙️ [3/5] Menyiapkan PM2 Process Manager..."
-if ! command -v pm2 >/dev/null 2>&1; then
-  npm install -g pm2 --no-audit --no-fund || true
-fi
-
-# 4. Download source code project ini langsung ke ~/wabot
-echo "📥 [4/5] Mengunduh seluruh berkas project bot ke ~/wabot..."
-mkdir -p "$HOME/wabot"
-cd "$HOME/wabot"
-curl -sSL "${origin}/api/project-bundle.tar.gz" | tar -xz
-
-# 5. Pasang dependensi & engine stiker WASM
-echo "📥 [5/5] Memasang library Node.js & Sharp WASM..."
-npm install --legacy-peer-deps --no-audit --no-fund
-npm install @img/sharp-wasm32 --no-audit --no-fund 2>/dev/null || true
-
-# Buat shortcut 'bot'
-cat > /data/data/com.termux/files/usr/bin/bot << 'EOF'
-#!/data/data/com.termux/files/usr/bin/bash
-termux-wake-lock 2>/dev/null || true
-echo "============================================================"
-echo "  WABot 24/7 Console Monitor"
-echo "  🌐 Kelola di Browser HP: http://localhost:3000"
-echo "  Tekan CTRL + C untuk menutup log (bot tetap ON)"
-echo "============================================================"
-pm2 logs wabot
-EOF
-chmod +x /data/data/com.termux/files/usr/bin/bot 2>/dev/null || true
-
-# Jalankan bot dengan PM2
-pm2 delete wabot 2>/dev/null || true
-pm2 start index.js --name "wabot"
-pm2 save 2>/dev/null || true
-
-WIFI_IP=$(ip -4 addr show wlan0 2>/dev/null | grep -oP '(?<=inet\\s)\\d+(\\.\\d+){3}' | head -n1 || echo "")
-
-echo ""
-echo "============================================================"
-echo "  🎉 BERHASIL! PROJECT INI SUDAH AKTIF 24/7 DI HP KAMU!"
-echo "============================================================"
-echo "  🌐 Buka Google Chrome di HP:  http://localhost:3000"
-if [ -n "$WIFI_IP" ]; then
-echo "  💻 Buka dari Laptop/PC:       http://$WIFI_IP:3000"
-fi
-echo "  📱 Buka log kapan saja:       ketik 'bot'"
-echo "============================================================"
-echo ""
-sleep 1
-pm2 logs wabot
-`;
-
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.send(script);
-  });
-
-  // 3. Serve termux.sh statically
-  app.get('/termux.sh', async (_req, res) => {
-    try {
-      const termuxShPath = path.join(process.cwd(), 'termux.sh');
-      const content = await fs.readFile(termuxShPath, 'utf-8');
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      res.send(content);
-    } catch {
-      res.status(404).send('# termux.sh not found');
+        try {
+          const { build: esbuildBundle } = await import('esbuild');
+          await esbuildBundle({
+            entryPoints: [path.join(root, 'server.ts')],
+            bundle: true,
+            platform: 'node',
+            format: 'esm',
+            packages: 'external',
+            outfile: path.join(root, 'server.bundle.mjs'),
+            logLevel: 'warning',
+          });
+        } catch (err) {
+          console.warn(
+            '[Bundle Builder] esbuild bundle skipped:',
+            err instanceof Error ? err.message : err
+          );
+        }
+      })().finally(() => {
+        prepareBundlePromise = null;
+      });
     }
-  });
+    return prepareBundlePromise;
+  }
+
+  app.get(
+    ['/api/termux-bundle.tar.gz', '/api/project-bundle.tar.gz'],
+    async (req, res) => {
+      try {
+        await ensureTermuxArtifactsBuilt();
+      } catch {
+        // Stream available files even if optional build step warned
+      }
+
+      const fileName = req.path.includes('termux-bundle')
+        ? 'wabot-redmi9c-ready.tar.gz'
+        : 'wabot-project.tar.gz';
+
+      res.setHeader('Content-Type', 'application/gzip');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${fileName}"`
+      );
+
+      const tar = spawn('tar', [
+        '--exclude=node_modules',
+        '--exclude=.git',
+        '--exclude=.aistudio',
+        '--exclude=.baileys_auth',
+        '--exclude=.bot-state.json',
+        '--exclude=.wabot-state.json',
+        '--exclude=data',
+        '--exclude=.env',
+        '--exclude=server.mjs',
+        '--exclude=public/assets/aistudio',
+        '-czf',
+        '-',
+        '.',
+      ]);
+      tar.stdout.pipe(res);
+      tar.stderr.on('data', (d) => console.error('[TAR]', d.toString()));
+    }
+  );
+
+  // 2. Serve termux.sh installer script directly
+  app.get(
+    ['/termux.sh', '/api/termux-install', '/termux-install'],
+    async (_req, res) => {
+      try {
+        const termuxShPath = path.join(process.cwd(), 'termux.sh');
+        const content = await fs.readFile(termuxShPath, 'utf-8');
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.send(content);
+      } catch {
+        res.status(404).send('# termux.sh not found');
+      }
+    }
+  );
 
   // --- VITE MIDDLEWARE (DEV) OR STATIC ASSETS (PROD) ---
   if (process.env.NODE_ENV !== 'production') {
@@ -1167,84 +1190,271 @@ pm2 logs wabot
         await fs.access(distHtml);
         res.sendFile(distHtml);
       } catch {
+        const catalogJson = JSON.stringify(
+          COMMAND_CATALOG.filter((c) => !c.suspensionRisk).map((c) => ({
+            id: c.id,
+            category: c.category,
+            desc: c.description,
+          }))
+        );
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.send(`<!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WABot Localhost Control</title>
+  <title>WABot Localhost Panel (Termux Lite)</title>
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; background: #0c0c0e; color: #f4f4f5; margin: 0; padding: 20px; line-height: 1.5; }
-    .card { background: #18181b; border: 1px solid #27272a; border-radius: 16px; padding: 24px; max-width: 600px; margin: 40px auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-    h1 { font-size: 20px; color: #10b981; margin-top: 0; display: flex; align-items: center; gap: 8px; }
-    .badge { display: inline-block; background: #064e3b; color: #6ee7b7; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-    .status-box { background: #27272a; border-radius: 12px; padding: 14px; margin: 16px 0; font-family: monospace; font-size: 13px; }
-    .btn { background: #059669; color: white; border: none; padding: 10px 18px; border-radius: 10px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; margin-top: 8px; }
-    .btn:hover { background: #047857; }
-    input { background: #09090b; border: 1px solid #3f3f46; color: white; padding: 10px 14px; border-radius: 8px; font-size: 14px; width: calc(100% - 30px); margin: 8px 0; }
-    code { color: #34d399; background: #27272a; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0c0c0e; color: #f4f4f5; margin: 0; padding: 16px; line-height: 1.5; }
+    .wrap { max-width: 760px; margin: 16px auto 48px; display: flex; flex-direction: column; gap: 16px; }
+    .card { background: #141417; border: 1px solid #27272a; border-radius: 16px; padding: 20px; }
+    h1 { font-size: 19px; color: #f4f4f5; margin: 0; }
+    h2 { font-size: 15px; color: #e4e4e7; margin: 0 0 12px; }
+    .meta { color: #a1a1aa; font-size: 12px; margin-top: 4px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+    label { display: block; font-size: 12px; color: #a1a1aa; margin-bottom: 4px; font-weight: 500; }
+    input, textarea { width: 100%; background: #09090b; border: 1px solid #27272a; color: #f4f4f5; padding: 9px 12px; border-radius: 10px; font-size: 13px; font-family: inherit; }
+    textarea { min-height: 70px; resize: vertical; }
+    .btn { background: #059669; color: #fff; border: none; padding: 9px 16px; border-radius: 10px; font-weight: 600; font-size: 13px; cursor: pointer; }
+    .btn-sec { background: #27272a; color: #e4e4e7; }
+    .btn-danger { background: #9f1239; color: #fff; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+    .codebox { background: #064e3b; border: 1px solid #059669; padding: 14px; border-radius: 12px; margin-top: 12px; text-align: center; }
+    .pair-digits { font-family: monospace; font-size: 28px; letter-spacing: 5px; font-weight: 700; color: #fff; margin: 6px 0; }
+    .cmd-list { max-height: 260px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 8px; margin-top: 8px; }
+    .cmd-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: #09090b; border: 1px solid #27272a; border-radius: 9px; font-size: 12px; font-family: monospace; }
+    .toast { font-size: 12px; color: #34d399; margin-top: 8px; min-height: 18px; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-      <h1>🤖 WABot Localhost</h1>
-      <span class="badge">ONLINE 24/7 (Port ${activePort})</span>
-    </div>
-    <p style="color: #a1a1aa; font-size: 13px;">Server WhatsApp Bot aktif di HP Android (Termux). Kamu bisa memantau dan meminta kode pairing langsung dari sini.</p>
-    
-    <div class="status-box">
-      <div>Status WA: <span id="wa-status" style="color:#34d399; font-weight:bold;">Memeriksa...</span></div>
-      <div style="margin-top:4px;">Nomor Tertaut: <span id="wa-phone" style="color:#38bdf8;">-</span></div>
-      <div style="margin-top:4px;">Prefix Bot: <span id="wa-prefix">!</span></div>
+  <div class="wrap">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+        <div>
+          <h1 id="hdr-name">WABot — Panel Kontrol Termux 24/7</h1>
+          <div class="meta">Port ${activePort} · Owner Default: +${OFFICIAL_OWNER_NUMBER} · Kontrol Penuh Menu, Template & Pairing</div>
+        </div>
+        <div id="wa-pill" style="font-size:12px;font-family:monospace;color:#34d399;">Memuat status...</div>
+      </div>
     </div>
 
-    <div style="margin-top: 20px;">
-      <h3 style="font-size: 14px; margin-bottom: 6px;">Tautkan WhatsApp via Pairing Code:</h3>
-      <input type="text" id="phone-input" placeholder="Nomor WA (contoh: 6281234567890)" />
-      <button class="btn" onclick="requestPairing()">Minta Kode Pairing (8 Digit)</button>
-      <div id="pair-result" style="margin-top: 12px; font-weight: bold; font-size: 16px;"></div>
+    <div class="card">
+      <h2>1. Tautkan Nomor WhatsApp (Pairing Code 8 Digit)</h2>
+      <div class="grid">
+        <div>
+          <label>Nomor WhatsApp Bot (awalan 628...)</label>
+          <input type="tel" id="phone-input" placeholder="6281234567890" />
+        </div>
+      </div>
+      <div class="row">
+        <button class="btn" onclick="requestPairing()">Dapatkan Pairing Code</button>
+        <button class="btn btn-danger" onclick="disconnectWa()">Putuskan / Ganti Nomor</button>
+      </div>
+      <div id="pair-box"></div>
     </div>
 
-    <div style="margin-top: 24px; border-top: 1px solid #27272a; padding-top: 16px; font-size: 12px; color: #71717a;">
-      Untuk kompilasi antarmuka visual penuh, jalankan <code>npm run build</code> di folder bot.
+    <div class="card">
+      <h2>2. Identitas Bot, Prefix, Owner & Self-Mode</h2>
+      <div class="grid">
+        <div>
+          <label>Nama Bot</label>
+          <input type="text" id="cfg-botname" />
+        </div>
+        <div>
+          <label>Prefix Perintah (. / ! / #)</label>
+          <input type="text" id="cfg-prefix" maxlength="3" />
+        </div>
+        <div>
+          <label>Nomor Owner (Tanpa +)</label>
+          <input type="text" id="cfg-owner" placeholder="${OFFICIAL_OWNER_NUMBER}" />
+        </div>
+        <div>
+          <label>Nama Pack Stiker</label>
+          <input type="text" id="cfg-pack" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <label style="display:flex;align-items:center;gap:8px;margin:0;color:#e4e4e7;cursor:pointer;">
+          <input type="checkbox" id="cfg-selfmode" style="width:auto;" />
+          Aktifkan Self-Mode (Bisa tes perintah dari nomor bot sendiri)
+        </label>
+      </div>
+      <div class="row">
+        <button class="btn" onclick="saveIdentity()">Simpan Pengaturan Utama</button>
+      </div>
+      <div class="toast" id="toast-identity"></div>
+    </div>
+
+    <div class="card">
+      <h2>3. Template Balasan Chat & Sambutan Grup</h2>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div>
+          <label>Header Menu ({botName}, {senderName}, {prefix})</label>
+          <textarea id="tpl-menuheader"></textarea>
+        </div>
+        <div>
+          <label>Pesan Sambutan Member Masuk (Welcome — @user, @group)</label>
+          <textarea id="tpl-welcome"></textarea>
+        </div>
+        <div>
+          <label>Pesan Member Keluar (Out/Goodbye — @user, @group)</label>
+          <textarea id="tpl-goodbye"></textarea>
+        </div>
+      </div>
+      <div class="row">
+        <button class="btn" onclick="saveTemplates()">Simpan Template Balasan</button>
+      </div>
+      <div class="toast" id="toast-tpl"></div>
+    </div>
+
+    <div class="card">
+      <h2>4. Aktif / Nonaktifkan Fitur Menu Bot</h2>
+      <div class="meta">Centang fitur yang ingin diaktifkan di WhatsApp:</div>
+      <div class="cmd-list" id="cmd-grid"></div>
     </div>
   </div>
+
   <script>
-    async function loadStatus() {
+    const CATALOG = ${catalogJson};
+    let currentCfg = null;
+    let initializedForm = false;
+
+    async function loadState() {
       try {
         const res = await fetch('/api/state');
-        const data = await res.json();
-        document.getElementById('wa-status').innerText = data.wa?.status || 'Siap';
-        document.getElementById('wa-phone').innerText = data.wa?.connectedUser?.phone ? ('+' + data.wa.connectedUser.phone) : 'Belum tertaut';
-        document.getElementById('wa-prefix').innerText = data.config?.prefix || '!';
-      } catch (e) {
-        document.getElementById('wa-status').innerText = 'Online (Ready)';
+        const snap = await res.json();
+        const wa = snap.waState || {};
+        const cfg = snap.config || {};
+        currentCfg = cfg;
+
+        document.getElementById('hdr-name').innerText = (cfg.botName || 'WABot') + ' — Panel Kontrol Termux 24/7';
+        const userPhone = wa.connectedUser?.phone ? ('+' + wa.connectedUser.phone) : 'Belum tertaut';
+        document.getElementById('wa-pill').innerText = 'WA: ' + (wa.status || 'disconnected').toUpperCase() + ' · ' + userPhone;
+
+        if (wa.pairingCode) {
+          document.getElementById('pair-box').innerHTML =
+            '<div class="codebox"><div style="font-size:12px;color:#a7f3d0;">KODE PAIRING WHATSAPP (+' + (wa.pairingPhone || '') + '):</div>' +
+            '<div class="pair-digits">' + wa.pairingCode + '</div>' +
+            '<div style="font-size:12px;color:#d1fae5;">Buka WhatsApp > Perangkat Tertaut > Tautkan dengan nomor telepon saja</div></div>';
+        } else if (wa.status === 'connected') {
+          document.getElementById('pair-box').innerHTML = '';
+        }
+
+        if (!initializedForm && cfg.prefix) {
+          initializedForm = true;
+          document.getElementById('cfg-botname').value = cfg.botName || 'WABot';
+          document.getElementById('cfg-prefix').value = cfg.prefix || '.';
+          document.getElementById('cfg-owner').value = cfg.antiBan?.ownerNumber || '${OFFICIAL_OWNER_NUMBER}';
+          document.getElementById('cfg-pack').value = cfg.stickerPackName || 'WABot Sticker';
+          document.getElementById('cfg-selfmode').checked = Boolean(cfg.selfMode);
+          document.getElementById('tpl-menuheader').value = cfg.templates?.menuHeader || '';
+          document.getElementById('tpl-welcome').value = cfg.templates?.welcomeMsg || '';
+          document.getElementById('tpl-goodbye').value = cfg.templates?.goodbyeMsg || '';
+        }
+        renderCommands(cfg.disabledCommands || [], cfg.prefix || '.');
+      } catch (err) {
+        document.getElementById('wa-pill').innerText = 'Menyambungkan ulang...';
       }
     }
+
+    function renderCommands(disabledList, prefix) {
+      const grid = document.getElementById('cmd-grid');
+      grid.innerHTML = CATALOG.map((c) => {
+        const enabled = !disabledList.includes(c.id);
+        return '<label class="cmd-item" style="margin:0;cursor:pointer;color:#e4e4e7;">' +
+          '<span>' + prefix + c.id + '</span>' +
+          '<input type="checkbox" style="width:auto;" ' + (enabled ? 'checked' : '') +
+          ' onchange="toggleCmd(\\'' + c.id + '\\', this.checked)" />' +
+          '</label>';
+      }).join('');
+    }
+
+    async function toggleCmd(cmdId, enabled) {
+      if (!currentCfg) return;
+      const prev = currentCfg.disabledCommands || [];
+      const next = enabled ? prev.filter((x) => x !== cmdId) : Array.from(new Set([...prev, cmdId]));
+      await fetch('/api/config', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ disabledCommands: next })
+      });
+      await loadState();
+    }
+
     async function requestPairing() {
-      const phone = document.getElementById('phone-input').value.trim();
-      if (!phone) return alert('Masukkan nomor WhatsApp kamu');
-      document.getElementById('pair-result').innerHTML = '<span style="color:#fbbf24;">Meminta kode dari server WhatsApp...</span>';
+      const phoneNumber = document.getElementById('phone-input').value.trim();
+      if (!phoneNumber) return;
+      document.getElementById('pair-box').innerHTML = '<div class="toast" style="color:#fbbf24;">Meminta 8-digit Pairing Code ke server WhatsApp...</div>';
       try {
-        const res = await fetch('/api/pairing-code', {
+        const res = await fetch('/api/wa/connect-pairing', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ phone })
+          body: JSON.stringify({ phoneNumber })
         });
         const data = await res.json();
-        if (data.pairingCode) {
-          document.getElementById('pair-result').innerHTML = '<div style="background:#064e3b;border:1px solid #059669;padding:12px;border-radius:10px;"><div style="color:#6ee7b7;font-size:12px;">KODE PAIRING WHATSAPP:</div><div style="font-size:26px;letter-spacing:6px;color:#fff;margin:6px 0;">' + data.pairingCode + '</div><div style="color:#d1fae5;font-size:12px;">Buka WhatsApp di HP lain/utama > Perangkat Tertaut > Tautkan dengan nomor telepon</div></div>';
-        } else {
-          document.getElementById('pair-result').innerText = data.error || 'Gagal meminta kode';
+        if (!data.ok) {
+          document.getElementById('pair-box').innerHTML = '<div class="toast" style="color:#fda4af;">' + (data.error || 'Gagal meminta kode') + '</div>';
+          return;
         }
+        await loadState();
       } catch (e) {
-        document.getElementById('pair-result').innerText = 'Error: ' + e.message;
+        document.getElementById('pair-box').innerHTML = '<div class="toast" style="color:#fda4af;">Gagal menghubungi server lokal.</div>';
       }
     }
-    loadStatus();
-    setInterval(loadStatus, 3500);
+
+    async function disconnectWa() {
+      await fetch('/api/wa/disconnect', { method: 'POST' });
+      document.getElementById('pair-box').innerHTML = '';
+      await loadState();
+    }
+
+    async function saveIdentity() {
+      const botName = document.getElementById('cfg-botname').value.trim() || 'WABot';
+      const prefix = document.getElementById('cfg-prefix').value.trim() || '.';
+      const ownerNumber = document.getElementById('cfg-owner').value.trim() || '${OFFICIAL_OWNER_NUMBER}';
+      const stickerPackName = document.getElementById('cfg-pack').value.trim() || 'WABot Sticker';
+      const selfMode = document.getElementById('cfg-selfmode').checked;
+
+      await fetch('/api/config', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          botName,
+          prefix,
+          stickerPackName,
+          selfMode,
+          antiBan: { ...(currentCfg?.antiBan || {}), ownerNumber }
+        })
+      });
+      document.getElementById('toast-identity').innerText = 'Pengaturan utama tersimpan.';
+      setTimeout(() => { document.getElementById('toast-identity').innerText = ''; }, 2500);
+      await loadState();
+    }
+
+    async function saveTemplates() {
+      const menuHeader = document.getElementById('tpl-menuheader').value;
+      const welcomeMsg = document.getElementById('tpl-welcome').value;
+      const goodbyeMsg = document.getElementById('tpl-goodbye').value;
+      await fetch('/api/config', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          templates: {
+            ...(currentCfg?.templates || {}),
+            menuHeader,
+            welcomeMsg,
+            goodbyeMsg
+          }
+        })
+      });
+      document.getElementById('toast-tpl').innerText = 'Template balasan berhasil diperbarui.';
+      setTimeout(() => { document.getElementById('toast-tpl').innerText = ''; }, 2500);
+      await loadState();
+    }
+
+    loadState();
+    setInterval(loadState, 3000);
   </script>
 </body>
 </html>`);

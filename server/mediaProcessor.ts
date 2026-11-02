@@ -4,8 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import QRCode from 'qrcode';
-import sharp from 'sharp';
 import { getFfmpegBin } from './ffmpegBin.ts';
+import {
+  applyImageFilterAdapter,
+  enhanceImageHdAdapter,
+  type ImageFilterKind,
+} from './imageAdapter.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -18,14 +22,7 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   }
 }
 
-export type ImageFilterMode =
-  | 'hitamkan'
-  | 'grayscale'
-  | 'invert'
-  | 'blur'
-  | 'mirror'
-  | 'flip'
-  | 'sepia';
+export type ImageFilterMode = ImageFilterKind;
 
 export type AudioEffectMode =
   | 'bass'
@@ -40,57 +37,14 @@ export async function enhanceImageHd(imageBuffer: Buffer): Promise<{
   width: number;
   height: number;
 }> {
-  const meta = await sharp(imageBuffer).metadata();
-  const origW = meta.width || 600;
-  const origH = meta.height || 600;
-  const scaleFactor = Math.min(2, 2048 / Math.max(origW, origH, 1));
-  const targetW = Math.max(origW, Math.round(origW * Math.max(1.25, scaleFactor)));
-  const targetH = Math.max(origH, Math.round(origH * Math.max(1.25, scaleFactor)));
-
-  const out = await sharp(imageBuffer)
-    .rotate()
-    .resize(targetW, targetH, { kernel: 'lanczos3', fit: 'fill' })
-    .modulate({ brightness: 1.02, saturation: 1.05 })
-    .sharpen({ sigma: 1.2, m1: 1.0, m2: 2.4 })
-    .jpeg({ quality: 94, mozjpeg: true })
-    .toBuffer();
-
-  return { buffer: out, width: targetW, height: targetH };
+  return enhanceImageHdAdapter(imageBuffer);
 }
 
 export async function applyImageFilter(
   imageBuffer: Buffer,
   filter: ImageFilterMode
 ): Promise<Buffer> {
-  let pipeline = sharp(imageBuffer).rotate();
-
-  switch (filter) {
-    case 'hitamkan':
-    case 'grayscale':
-      pipeline = pipeline.grayscale().linear(1.12, -8);
-      break;
-    case 'invert':
-      pipeline = pipeline.negate({ alpha: false });
-      break;
-    case 'blur':
-      pipeline = pipeline.blur(8);
-      break;
-    case 'mirror':
-      pipeline = pipeline.flop();
-      break;
-    case 'flip':
-      pipeline = pipeline.flip();
-      break;
-    case 'sepia':
-      pipeline = pipeline.recomb([
-        [0.393, 0.769, 0.189],
-        [0.349, 0.686, 0.168],
-        [0.272, 0.534, 0.131],
-      ]);
-      break;
-  }
-
-  return pipeline.jpeg({ quality: 91 }).toBuffer();
+  return applyImageFilterAdapter(imageBuffer, filter);
 }
 
 export async function convertVideoToPtv(videoBuffer: Buffer): Promise<Buffer> {

@@ -19,7 +19,6 @@ type ActiveWorkspace =
   | 'simulator'
   | 'catalog'
   | 'connection'
-  | 'termux'
   | 'security'
   | 'settings';
 
@@ -51,6 +50,9 @@ export default function App() {
   } = useBotRealtime();
 
   const [activeTab, setActiveTab] = useState<ActiveWorkspace>('simulator');
+  const [connectionSubTab, setConnectionSubTab] = useState<'wa' | 'termux'>(
+    'wa'
+  );
   const [securitySubTab, setSecuritySubTab] = useState<'antiban' | 'gateway'>(
     'antiban'
   );
@@ -100,8 +102,7 @@ export default function App() {
   const navItems: Array<{ id: ActiveWorkspace; label: string }> = [
     { id: 'simulator', label: 'Simulator' },
     { id: 'catalog', label: 'Menu & Fitur' },
-    { id: 'connection', label: 'Koneksi WA' },
-    { id: 'termux', label: 'Pasang di Termux' },
+    { id: 'connection', label: 'Koneksi & Server' },
     { id: 'security', label: 'Keamanan & API' },
     { id: 'settings', label: 'Pengaturan' },
   ];
@@ -184,16 +185,19 @@ export default function App() {
                     : 'Mesin Server Bot Belum Merespon'}
                 </div>
                 <p className="text-xs text-amber-800/90 dark:text-amber-300/90 leading-relaxed">
-                  Gunakan server Node.js 24/7 murni gratis tanpa kartu kredit (Wispbyte) sesuai panduan di tab Koneksi WA agar sesi dan perintah WhatsApp tetap aktif nonstop walau browser ditutup.
+                  Gunakan HP cadangan Xiaomi Redmi 9C (Termux 24/7) atau server Node.js sesuai panduan di tab Koneksi &amp; Server agar sesi WhatsApp tetap aktif nonstop walau browser ditutup.
                 </p>
               </div>
             </div>
             <button
               type="button"
-              onClick={() => setActiveTab('connection')}
+              onClick={() => {
+                setConnectionSubTab('termux');
+                setActiveTab('connection');
+              }}
               className="px-4 py-2 rounded-xl bg-amber-900 dark:bg-amber-500 text-white dark:text-zinc-950 text-xs font-semibold hover:opacity-90 transition-opacity whitespace-nowrap shrink-0 self-start sm:self-center"
             >
-              Cek Koneksi Server
+              Panduan Server 24/7
             </button>
           </div>
         )}
@@ -314,27 +318,64 @@ export default function App() {
         )}
 
         {activeTab === 'connection' && (
-          <ConnectionView
-            waState={waState}
-            config={config}
-            socketConnected={socketConnected}
-            backendUrl={backendUrl}
-            backendUnreachable={backendUnreachable}
-            isStaticHost={isStaticHost}
-            onUpdateBackendUrl={updateBackendUrl}
-            onConnectQR={connectQR}
-            onConnectPairing={connectPairing}
-            onDisconnect={disconnectWA}
-            onUpdateConfig={updateConfig}
-          />
-        )}
+          <div className="space-y-5">
+            <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 max-w-fit">
+              <button
+                type="button"
+                onClick={() => setConnectionSubTab('wa')}
+                className={`px-4 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  connectionSubTab === 'wa'
+                    ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+                }`}
+              >
+                Tautkan Perangkat WhatsApp
+              </button>
+              <button
+                type="button"
+                onClick={() => setConnectionSubTab('termux')}
+                className={`px-4 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                  connectionSubTab === 'termux'
+                    ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+                }`}
+              >
+                Server HP Termux 24/7 (Redmi 9C)
+              </button>
+            </div>
 
-        {activeTab === 'termux' && (
-          <TermuxManagerView
-            waState={waState}
-            config={config}
-            onNavigateToConnection={() => setActiveTab('connection')}
-          />
+            {connectionSubTab === 'wa' ? (
+              <ConnectionView
+                waState={waState}
+                config={config}
+                socketConnected={socketConnected}
+                backendUrl={backendUrl}
+                backendUnreachable={backendUnreachable}
+                isStaticHost={isStaticHost}
+                onUpdateBackendUrl={updateBackendUrl}
+                onConnectQR={connectQR}
+                onConnectPairing={connectPairing}
+                onDisconnect={disconnectWA}
+                onUpdateConfig={updateConfig}
+                onOpenTermuxGuide={() => setConnectionSubTab('termux')}
+              />
+            ) : (
+              <TermuxManagerView
+                waState={waState}
+                config={config}
+                onNavigateToConnection={() => setConnectionSubTab('wa')}
+                onNavigateToCatalog={() => setActiveTab('catalog')}
+                onNavigateToTemplates={() => {
+                  setSettingsSubTab('templates');
+                  setActiveTab('settings');
+                }}
+                onNavigateToSettings={() => {
+                  setSettingsSubTab('general');
+                  setActiveTab('settings');
+                }}
+              />
+            )}
+          </div>
         )}
 
         {activeTab === 'security' && (

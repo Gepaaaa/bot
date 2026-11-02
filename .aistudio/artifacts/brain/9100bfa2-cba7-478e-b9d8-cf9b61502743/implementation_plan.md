@@ -1,128 +1,111 @@
-# Adaptasi Ekosistem Stiker, Media & Downloader Komplit + Dukungan `.hdsw` Grup & Solusi Hosting 24/7
+# Audit & Rancangan Instalasi Termux 24/7 untuk Xiaomi Redmi 9C (3/32)
 
-Memperluas kemampuan **GepaBot** dengan rangkaian perkakas stiker statis/animasi, konverter gambar-video-audio, serta pengunduh media lintas platform ala **RYO-YAMADA-MD**, membuka fitur **`.hdsw` agar bisa dipakai langsung di dalam Grup** secara aman, merapikan Web Dashboard, serta menyediakan solusi arsitektur **Deployment Vercel (Split Backend) & Server 24/7**.
+Perombakan menyeluruh alur pemasangan dan mesin runtime bot agar berjalan 100% mulus, hemat RAM, dan bebas gagal kompilasi pada **Xiaomi Redmi 9C (RAM 3GB / Memori 32GB)** menggunakan Termux, lengkap dengan akses kontrol ganda melalui browser **localhost:3000** serta perintah terminal instan.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> Rencana ini telah diperbarui untuk menjawab dua poin terbaru Anda sekaligus mempertahankan seluruh pilihan sebelumnya:
+> **Temuan Utama Audit Hardware Redmi 9C (3/32):** Meskipun prosesor MediaTek Helio G35 mendukung 64-bit, ROM bawaan pabrik (MIUI 12) pada Redmi 9C berjalan dalam **mode sistem 32-bit (`armv7l` / `android-arm`)**. Rancangan skrip sebelumnya pasti gagal di Redmi 9C karena memaksa HP menjalankan kompilasi antarmuka modern dan modul C++ (`sharp` / bundler 64-bit) yang tidak menyediakan *binary* 32-bit Android.
 
-- **`.hdsw` Kini Aktif di Grup Maupun Chat Pribadi (Aman Anti-Ban)**: Pembatasan `.hdsw` khusus chat pribadi dihapus. Saat anggota atau admin mengirim/membalas *Dokumen* foto atau video ukuran asli dengan `.hdsw` di dalam grup, bot akan membalas media ukuran asli (gaya unggahan WA Web jernih tanpa kompresi) **langsung di ruang grup tersebut** (me-reply pesan pengirim), bukan mengirim pesan pribadi (*cold DM*) ke nomor anggota yang belum dikenal. Dengan begitu, anggota tinggal meneruskan (*Forward*) media jernih tersebut ke Status WA mereka tanpa memicu deteksi spam DM dari Meta.
-- **Mengapa Deploy di Vercel Belum Jalan & Solusi Arsitekturnya**:
-  > [!WARNING]
-  > **Penyebab Teknis di Vercel**: Vercel adalah platform *Stateless / Serverless* yang hanya menayangkan tampilan web statis dan mematikan fungsi server dalam hitungan detik setelah halaman dimuat. Padahal, mesin WhatsApp Multi-Device membutuhkan **koneksi soket terus-menerus 24 jam**, saluran *WebSocket real-time* untuk kode QR/Pairing, ruang simpan sesi permanen, dan pemroses video/audio aktif. Akibatnya, di Vercel tampilan depan bisa terbuka tetapi mesin belakang bot tidak pernah hidup untuk menautkan WhatsApp.
-  - **Solusi Ganda yang Diterapkan**:
-    1. **Mode Hybrid (Tampilan Web di Vercel + Mesin Bot di Server 24/7)**: Menambahkan pengaturan **Alamat Server Bot Eksternal** langsung di Dashboard beserta izin koneksi lintas domain (*CORS & Remote WebSocket*), serta aturan *routing* halaman agar web di Vercel tidak error saat dimuat ulang dan bisa langsung terhubung ke mesin bot Anda.
-    2. **Paket Siap Deploy Utuh 24/7 (Cloud Run / Railway / Render / VPS)**: Menyediakan konfigurasi kontainer produksi lengkap dengan mesin pengolah media sehingga seluruh aplikasi (Dashboard + Mesin Bot WA) bisa dijalankan 24/7 dalam satu klik di platform server persisten (termasuk fitur Deploy bawaan AI Studio Cloud Run, Railway, Render, atau VPS), lengkap dengan panel **Diagnostik & Panduan Hosting** di dalam aplikasi.
-- **Paket Fitur Komplit (Stiker, Media & Downloader)**: Mengadaptasi pembuatan stiker komplit (`.s` foto & video/GIF bergerak, Quote Chat `.qc` & `.iqc`, `.brat`/`.bratcolor`/`.bratvid`, `.ttp`/`.attp`, `.emojimix`, `.wm`, `.toimg`, `.tovid`), perkakas media & audio (`.hdsw` grup/pribadi, `.hd`, filter gambar, pembuka *View Once* `.rvo`, video bulat `.toptv`, `.tomp3`, `.tovn`, efek suara `.bass`/`.nightcore`/`.slow`/`.fast`/`.robot`/`.reverse`, `.tourl`, `.qrcode`), serta pengunduh lintas platform (`.aio`, TikTok Video & Slide Foto `.ttslide`, Instagram, Facebook, X/Twitter, Pinterest, CapCut, MediaFire, dan `.play`/YouTube).
-- **Prefix Tunggal (`.`) & Perisai Anti-Ban Penuh**: Mempertahankan awalan tunggal konsisten dan mewajibkan setiap perintah baru melewati *cooldown* pengguna, simulasi mengetik/merekam suara natural, antrean kirim berjeda, serta batas ukuran berkas aman.
+- **Keputusan Terkonfirmasi 1 — Target Perangkat (`Redmi 9C 3/32`)**: Mesin bot dioptimalkan khusus untuk sistem 32-bit `armv7l` dengan batas memori aman (`256 MB` heap Node.js) agar MIUI tidak mematikan proses saat sisa RAM dari 3GB menipis.
+- **Keputusan Terkonfirmasi 2 — Dua Jalur Pemasangan Sekaligus**: Menyediakan **(A) Paket Siap Pakai Offline (`.tar.gz`)** yang sudah berisi antarmuka web matang (tinggal unduh ke folder *Download* HP lalu ekstrak 1 baris di Termux, bebas kendala autentikasi link) serta **(B) Jalur Git Clone Pribadi** yang bersih untuk repositori GitHub milikmu sendiri.
+- **Keputusan Terkonfirmasi 3 — Kontrol Ganda (`localhost:3000` + CLI Termux)**: Seluruh pengaturan menu, template balasan, prefix, anti-ban, simulator, dan Pairing WA dapat dikelola penuh lewat Chrome di `http://localhost:3000` (atau dari HP utama/laptop satu WiFi) sekaligus lewat perintah terminal `bot` di Termux.
+
+> [!WARNING]
+> **7 Bug Kritis pada Rancangan Sebelumnya yang Akan Diperbaiki:**
+> 1. **Kegagalan `armv7l` (32-bit) saat Build & Startup**: Paket bundler dan pengolah gambar C++ tidak memiliki binary untuk sistem 32-bit Redmi 9C. Solusinya: antarmuka web & bundel server sudah dipra-kompilasi di dalam paket unduhan, dan mesin stiker otomatis beralih ke jalur **WebAssembly + FFmpeg bawaan Termux (`libwebp`)** ketika mendeteksi arsitektur 32-bit.
+> 2. **Link `curl` Langsung Terblokir Sesi Login**: Mengambil skrip lewat `curl` ke alamat preview internal akan mengembalikan halaman login HTML, bukan skrip bash. Solusinya: unduh paket `.tar.gz` satu klik lewat browser, lalu jalankan ekstraksi lokal dari folder `Download` HP.
+> 3. **Pairing di Termux Tidak Bisa Diketik saat Mode PM2**: Perintah `pm2 logs` hanya menampilkan teks satu arah dan tidak meneruskan ketikan nomor HP ke mesin bot. Solusinya: perintah pintasan `bot pair 628xxx` yang berkomunikasi langsung ke API lokal `127.0.0.1:3000`.
+> 4. **Endpoint Pairing Darurat Salah Alamat (404)**: Halaman cadangan sebelumnya memanggil rute yang tidak ada (`/api/pairing-code`), sehingga tombol pairing gagal berfungsi. Akan diselaraskan ke rute resmi mesin bot.
+> 5. **Proses Ganda (Zombie Process) di PM2**: Menjalankan pembungkus yang melahirkan sub-proses membuat PM2 gagal mematikan port `3000` dengan bersih saat restart. PM2 akan langsung menjalankan bundel server tunggal.
+> 6. **Error `grep -oP` di Android**: Perintah deteksi IP WiFi memakai sintaks yang sering ditolak oleh utilitas bawaan Android sehingga menghentikan skrip di tengah jalan. Akan diganti pembacaan antarmuka jaringan langsung dari Node.js.
+> 7. **Pembersihan Identitas Lama**: Menghapus seluruh sisa tautan repositori eksternal lama yang masih tertinggal di skrip dan tampilan panduan.
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **Apa yang Dihadirkan Pembaruan Ini**: Menjadikan GepaBot asisten kreatif dan pengunduh media serba lengkap cukup dengan satu titik (`.`) di grup maupun chat pribadi — mulai dari konversi dokumen ke media Status WA jernih (`.hdsw`) langsung di grup, pembuatan stiker gelembung percakapan (`.qc`) dan stiker bergerak, pengubah suara & pembuka pesan sekali lihat (`.rvo`), hingga pengunduh video dan slide foto sosial media, didukung arsitektur hosting yang jelas untuk pemakaian 24/7.
-- **Target Pengguna**: Pemilik bot, admin komunitas, dan anggota grup WhatsApp yang membutuhkan perkakas harian cepat dan tajam tanpa mengorbankan keamanan akun.
-- **Nilai Utama**: Pemrosesan stiker, video, gambar, dan efek audio dilakukan mandiri di mesin server sehingga responsif dan tidak bergantung pada layanan konverter luar yang sering gangguan, sementara antarmuka web dapat dijalankan fleksibel baik secara utuh di server kontainer maupun terpisah melalui Vercel.
+- **Apa yang Dilakukan**: Mengubah Xiaomi Redmi 9C nganggur menjadi server WhatsApp Multi-Fitur pribadi 24/7 yang mandiri, hemat penyimpanan (di bawah 200 MB dari ruang 32GB), dan ringan di RAM 3GB.
+- **Target Pengguna**: Pemilik bot yang ingin menjalankan bot nonstop di rumah memakai koneksi WiFi sendiri (jauh lebih aman dari pemblokiran nomor oleh Meta dibandingkan IP datacenter cloud) tanpa pusing mengurus error kompilasi Linux di HP.
+- **Nilai Utama**: Sekali pasang langsung jalan—tanpa gagal instalasi C++/32-bit, layar Redmi 9C bisa dimatikan penuh sambil dicolok casan, sementara pengaturan template atau menu bisa dibuka kapan saja dari HP utama lewat jaringan WiFi rumah.
 
 ---
 
 ## 2. User Experience & Visual Design
 
-### Alur Penggunaan Utama (Key User Flows)
+- **Alur Penggunaan Utama (End-to-End di Redmi 9C)**:
+  1. **Persiapan Paket**: Di panel web, pengguna menekan tombol **Unduh Paket Siap Pakai Termux (`.tar.gz`)** yang sudah berisi tampilan web matang dan mesin bot siap jalan (atau menyalin perintah *Git Clone* untuk repo pribadinya).
+  2. **Eksekusi 1 Baris di Termux**: Di Redmi 9C (Termux versi F-Droid), pengguna mengizinkan akses penyimpanan (`termux-setup-storage`) lalu menempel 1 baris perintah instalasi lokal. Skrip memasang Node.js LTS, FFmpeg Termux, dan PM2 tanpa kompilasi C++ yang berat.
+  3. **Tautkan Nomor WA**: Pengguna bisa memilih mengetik `bot pair 628xxx` langsung di layar Termux untuk mendapatkan 8 digit Pairing Code, atau membuka Chrome di `http://localhost:3000`.
+  4. **Kelola Menu & Template Kapan Saja**: Dari Chrome di Redmi 9C (`http://localhost:3000`) maupun dari HP utama/laptop satu WiFi (`http://192.168.x.x:3000`), pengguna membuka **Panel Kontrol Lengkap** untuk mengedit template sambutan, mengaktifkan/mematikan fitur di katalog menu, mengatur cooldown anti-ban, dan memantau status sesi.
 
-1. **Menggunakan `.hdsw` Langsung di Grup maupun Chat Pribadi**:
-   - Anggota grup mengirim berkas Foto/Video lewat menu **Dokumen** (agar byte asli tidak dikompresi WhatsApp) dengan caption `.hdsw`, atau membalas dokumen yang sudah dikirim di grup dengan `.hdsw` (opsional `.hdsw nocaption` untuk hasil bersih tanpa teks).
-   - Bot memberi reaksi `⏳`, memproses metadata dimensi asli dan pratinjau jernih, lalu membalas langsung di ruang grup tersebut sebagai pesan Foto/Video standar berkualitas asli (reaksi berubah menjadi `✔️`). Pengirim maupun anggota grup lain cukup menekan **Teruskan (Forward) → Status Saya**.
-2. **Membuat & Memodifikasi Stiker Komplit**:
-   - Mengirim/membalas foto atau video pendek dengan `.s` untuk menghasilkan stiker statis maupun bergerak; mengetik `.qc <teks>` atau me-reply pesan anggota grup dengan `.qc` untuk membuat stiker gelembung chat lengkap dengan nama dan warna pengirim; serta memakai `.iqc`, `.bratcolor`, `.bratvid`, `.attp`, dan `.emojimix`.
-   - Membalas stiker dengan `.wm Nama Pack | Author` untuk mengganti identitas hak cipta stiker, atau `.toimg` dan `.tovid` untuk mengembalikan stiker menjadi foto PNG maupun video MP4.
-3. **Mengolah Media, View Once & Efek Audio**:
-   - Membalas pesan *View Once* dengan `.rvo` untuk menampilkan ulang media di chat, membalas video dengan `.toptv` untuk mengubahnya menjadi Video Note bulat, atau menggunakan `.hd`, `.hitamkan`, `.grayscale`, `.blur`, `.mirror`, `.qrcode`, dan `.tourl`.
-   - Membalas video/audio dengan `.tomp3`, `.tovn`, atau efek suara (`.bass`, `.nightcore`, `.slow`, `.fast`, `.robot`, `.reverse`) yang otomatis menampilkan indikator *"sedang merekam audio"* sebelum dikirim.
-4. **Mengunduh Video & Album Slide Lintas Platform**:
-   - Menggunakan `.aio <link>` untuk deteksi otomatis, `.tt` / `.ttslide <link>` untuk mengunduh video TikTok tanpa watermark maupun rangkaian slide foto beserta audionya secara berjeda aman, serta `.ig`, `.fb`, `.tw`, `.pin`, `.capcut`, `.mf`, dan `.play <judul lagu>`.
-5. **Menghubungkan Hosting & Menjelajahi Dashboard 5-Ruang Kerja**:
-   - Bilah navigasi atas dirapikan menjadi 5 menu satu baris: **Simulator Chat**, **Katalog & Studio**, **Koneksi WA**, **Keamanan & Gateway**, serta **Pengaturan & Template**.
-   - Apabila pengguna membuka Dashboard dari domain statis seperti Vercel, aplikasi otomatis mendeteksi ketiadaan soket lokal dan menampilkan kotak **Koneksi Server Bot 24/7 & Panduan Deploy** yang jelas agar pengguna dapat menempelkan URL mesin bot aktif mereka atau men-deploy server kontainer penuh dengan mudah.
-
-### Identitas Visual & Tata Letak Dashboard
-
-- **Arah Estetika**: Konsol SaaS minimalis dan tenang dengan hirarki informasi tajam serta bebas dekorasi berlebihan.
-- **Palet Warna (60-30-10)**:
-  - **60% Latar Utama (`--background`)**: Terang hangat (`#FAF9F6`) dan gelap pekat (`#0C0C0E`).
-  - **30% Panel Struktural (`--surface`)**: Permukaan satu tingkat (`#FFFFFF` / `#141417`) dengan garis batas tipis 1px dan garis pemisah baris tanpa tumpukan kartu di dalam kartu.
-  - **10% Aksen Fungsional (`--primary`)**: Hijau zamrud (`#059669` / `#10B981`) untuk aksi utama dan penanda koneksi aktif; kuning amber dan merah khusus indikator peringatan/kegagalan yang disertai teks keterangan jelas.
-- **Tipografi & Keterbacaan Angka**:
-  - **Plus Jakarta Sans** untuk judul dan navigasi utama, **DM Sans** untuk teks bacaan dan gelembung simulasi chat, serta **JetBrains Mono** (`tabular-nums`) untuk seluruh sintaks command, angka statistik, waktu proses, dan ukuran berkas.
-  - Keterangan kategori, daftar alias, dan syarat media ditulis menggunakan pemisah titik tengah (`·`) yang bersih tanpa lencana kapsul warna-warni pada elemen non-interaktif.
+- **Identitas Visual & Tata Letak Panel Kontrol**:
+  - *Aesthetic Direction*: Konsol kontrol developer modern yang bersih, fungsional, dan bebas dekorasi berlebihan (*clean utilitarian SaaS console*).
+  - *Color Palette & Mood*: Kanvas netral terang/gelap berimbang (`#FAF9F6` pada mode terang, `#0C0C0E` dan permukaan `#141417` pada mode gelap) dengan aksen hijau zamrud (`#059669` / `#10B981`) khusus untuk aksi utama dan status koneksi aktif, serta kuning amber untuk peringatan penting.
+  - *Typography & Hierarchy*: Judul tegas proporsional menggunakan keluarga sans modern, teks instruksi yang nyaman dibaca di layar HP kecil (Redmi 9C berlayar HD+ 720p), serta angka metrik, alamat IP, port, dan kode perintah menggunakan font monospace dengan angka sejajar (`tabular-nums`).
+  - *Component Styling & Top Bar Contract*: Bilah navigasi atas dijaga tetap ringkas dengan **5 menu utama satu baris** (*Simulator*, *Menu & Fitur*, *Koneksi & Server*, *Keamanan & API*, *Pengaturan*) agar tidak bertumpuk atau terpotong. Pusat pemasangan Termux digabungkan secara rapi di dalam ruang kerja **Koneksi & Server** menggunakan pemilih tab bersih tanpa kartu bersarang (*no cards-within-cards*) dan tanpa lencana kapsul dekoratif.
+- **Umpan Balik Interaktif**: Tombol salin perintah memberikan konfirmasi instan (`< 150ms`), indikator pembungkus paket `.tar.gz` menampilkan progres pengunduhan nyata, dan daftar alamat IP WiFi lokal dideteksi otomatis oleh server agar langsung bisa disalin.
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Keputusan 1: Balasan `.hdsw` Langsung di Ruang Grup (Tanpa Cold DM)**
-  - *Pendekatan Terpilih*: Mengirim hasil konversi media ukuran asli `.hdsw` langsung sebagai balasan (*quoted reply*) di ruang chat tempat perintah diketik — baik di Chat Pribadi maupun di Grup.
-  - *Alasan*: Sebelumnya pengiriman hasil ke chat pribadi anggota grup memicu pemblokiran WhatsApp karena dianggap mengirim spam DM ke nomor asing. Membalas langsung di dalam grup 100% aman dari aturan *cold DM*, tetap mempertahankan kualitas byte asli untuk diteruskan ke Status WA, dan bisa dinikmati bersama di grup.
+- **Keputusan 1: Pra-Kompilasi Paket Web & Server sebelum Masuk ke Redmi 9C**
+  - *Pendekatan Terpilih*: Server mengemas hasil kompilasi antarmuka (`dist/`) dan bundel mesin server tunggal ke dalam arsip `.tar.gz` khusus Termux saat diunduh, serta menyertakan skrip pembangun bundel untuk pengguna jalur GitHub.
+  - *Mengapa*: Menghilangkan kebutuhan memasang bundler berat di Redmi 9C 32-bit, mempercepat instalasi di memori eMMC 32GB dari belasan menit menjadi kurang dari 1 menit, dan menghemat ratusan MB ruang penyimpanan.
+  - *Alternatif yang Dilewati*: Menjalankan `vite build` langsung di dalam Termux Redmi 9C (gagal pada sistem operasi 32-bit `armv7l` dan memakan RAM berlebih).
 
-- **Keputusan 2: Arsitektur Koneksi Fleksibel untuk Mengatasi Keterbatasan Serverless Vercel**
-  - *Pendekatan Terpilih*: Memisahkan alamat koneksi API & WebSocket di antarmuka web agar dapat diarahkan ke URL server bot eksternal (disimpan di peramban atau variabel lingkungan), menambahkan dukungan lintas domain di server, menyertakan aturan *rewrite* halaman tunggal untuk Vercel, serta menyiapkan cetak biru kontainer lengkap (Node + mesin pengolah video/audio) untuk platform server 24/7.
-  - *Alasan*: Koneksi WhatsApp Baileys wajib menyala terus-menerus di latar belakang sehingga mustahil hidup di fungsi *serverless* Vercel murni. Dengan pendekatan ini, pengguna bebas memilih: tetap memakai Vercel untuk tampilan Dashboard sambil menghubungkannya ke mesin bot 24/7, atau men-deploy keduanya sekaligus di Cloud Run / Railway / Render / VPS.
+- **Keputusan 2: Mesin Pengolah Gambar & Stiker Adaptif (Hybrid Native + WASM/FFmpeg)**
+  - *Pendekatan Terpilih*: Membuat lapisan abstraksi pengolah media yang memakai `sharp` bila tersedia (di Cloud/PC 64-bit), dan otomatis beralih ke kombinasi **perender SVG WebAssembly (`@resvg/resvg-wasm`) + `ffmpeg` bawaan Termux (`libwebp`)** pada sistem 32-bit `armv7l`.
+  - *Mengapa*: Memastikan seluruh fitur stiker gambar, stiker video, teks `.brat`, bubble chat `.qc`/`.iqc`, `.ttp`/`.attp`, `.meme`, `.toimg`, hingga filter gambar berjalan 100% di Redmi 9C tanpa satu pun error *module not found* atau gagal kompilasi `node-gyp`.
+  - *Alternatif yang Dilewati*: Memasang Ubuntu via `proot-distro` di Redmi 9C (karena kernel OS bawaan Redmi 9C tetap 32-bit, container Ubuntu tetap berjalan sebagai `armhf` 32-bit dan hanya membebani RAM 3GB).
 
-- **Keputusan 3: Pemrosesan Media Lokal & Pengiriman Slide Berjeda Anti-Ban**
-  - *Pendekatan Terpilih*: Merender stiker statis/animasi, `.qc`, konversi audio/video, dan efek suara secara lokal di server, serta menyalurkan setiap pengiriman balasan (termasuk rangkaian foto `.ttslide` dan media besar `.hdsw`) melewati antrean keluar berjeda (*paced outbound queue*) dengan batas ukuran aman 35 MB.
-  - *Alasan*: Menjamin kecepatan dan ketajaman hasil tanpa ketergantungan API pembuat stiker luar, sekaligus menjaga ritme pengiriman pesan tetap terlihat manusiawi di mata sistem keamanan Meta.
+- **Keputusan 3: Kontrol PM2 Langsung Tanpa Proses Pembungkus Berantai**
+  - *Pendekatan Terpilih*: PM2 menjalankan bundel server langsung dengan batas `--max-old-space-size=256`, sementara perintah terminal `bot` berkomunikasi lewat HTTP lokal ke `127.0.0.1:3000`.
+  - *Mengapa*: Mencegah kebocoran RAM akibat dua proses Node.js bertumpuk dan memungkinkan pengguna melakukan pairing WA (`bot pair 628...`), cek status (`bot status`), cek IP WiFi (`bot ip`), maupun ganti prefix langsung dari layar Termux kapan saja.
 
 ---
 
-## 4. Technical Architecture & Data Strategy
+## 4. Technical Architecture & Data Strategy *(Technical Reference)*
 
-### Diagram Arsitektur Koneksi, Hosting & Pemrosesan Bot
+- **Diagram Arsitektur Sistem di Redmi 9C (Termux 24/7)**:
 
-```text
-┌────────────────────────────────────────────────────────────────────────────────────┐
-│           ANTARMUKA WEB DASHBOARD (Bisa di Server Terpadu atau di Vercel)          │
-│                                                                                    │
-│  ┌────────────────┐ ┌──────────────────┐ ┌──────────────┐ ┌──────────────────────┐ │
-│  │ Simulator Chat │ │ Katalog & Studio │ │ Koneksi WA & │ │ Keamanan, Gateway,   │ │
-│  │ (.hdsw Grup,   │ │ (Filter Kategori │ │ Konfigurasi  │ │ Pengaturan &         │ │
-│  │  Video, Audio) │ │  & Toggle Aktif) │ │ URL Server   │ │ Template Balasan     │ │
-│  └───────┬────────┘ └────────┬─────────┘ └──────┬───────┘ └──────────┬───────────┘ │
-└──────────┴───────────────────┴─────────┬────────┴────────────────────┴─────────────┘
-                                         │ HTTP REST + Real-Time WebSocket
-                                         │ (Otomatis Lokal atau Lintas Domain / CORS)
-                                         ▼
-┌────────────────────────────────────────────────────────────────────────────────────┐
-│        MESIN SERVER BOT PERSISTEN 24/7 (Cloud Run / Railway / Render / VPS)        │
-│                                                                                    │
-│  ┌──────────────────────────────┐        ┌──────────────────────────────────────┐  │
-│  │ Perisai Anti-Ban & Antrean   │◄──────►│ Router Command Awalan Tunggal (".")  │  │
-│  │ (Cooldown, Typing/Recording, │        │ (Reaksi ⏳/✔️/❌, Konteks Grup & Pribadi,│  │
-│  │  Paced Queue, Kunci Manual)  │        │  Ekstraksi Reply Media & ViewOnce)   │  │
-│  └──────────────┬───────────────┘        └─────┬────────────────┬───────────────┘  │
-│                 │                              │                │                  │
-│                 ▼                              ▼                ▼                  │
-│  ┌──────────────────────────┐   ┌─────────────────────┐  ┌──────────────────────┐  │
-│  │ Studio Stiker & Maker    │   │ Konverter & .hdsw   │  │ Multi-Downloader     │  │
-│  │ (.s Foto/Vid, .qc, .iqc, │   │ (.hdsw Grup/Pribadi,│  │ (.aio, .tt, .ttslide,│  │
-│  │  .brat/.bratvid, .attp,  │   │  .hd, .rvo, .toptv, │  │  .ig, .fb, .tw, .pin,│  │
-│  │  .wm, .toimg, .tovid,    │   │  .tomp3, .tovn,     │  │  .capcut, .mf, .play,│  │
-│  │  .meme, .emojimix)       │   │  Efek Audio, QR)    │  │  .yt / .ytmp3)       │  │
-│  └──────────────────────────┘   └─────────────────────┘  └──────────────────────┘  │
-└────────────────────────────────────────────────────────────────────────────────────┘
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                   XIAOMI REDMI 9C (3GB RAM · armv7l)                    │
+│                                                                         │
+│  ┌──────────────────────────┐       ┌────────────────────────────────┐  │
+│  │  CLI Pintasan Termux     │ HTTP  │  PM2 Daemon (Auto-Restart)     │  │
+│  │  • bot status / bot ip   │──────▶│  Node.js LTS (--max-old-256MB) │  │
+│  │  • bot pair 628xxx       │ Lokal │  • Express REST + WebSocket    │  │
+│  │  • bot logs / restart    │       │  • Static Web Panel (Port 3000)│  │
+│  └──────────────────────────┘       └───────────────┬────────────────┘  │
+│                                                     │                   │
+│         ┌───────────────────────────────────────────┼───────────┐       │
+│         ▼                                           ▼           ▼       │
+│  ┌──────────────────────┐  ┌──────────────────────────┐  ┌───────────┐  │
+│  │ Baileys Multi-Device │  │ Universal Media Engine   │  │ Penyimpan │  │
+│  │ • Auto-Resume Sesi   │  │ • SVG -> PNG (Resvg WASM)│  │ Lokal HP  │  │
+│  │ • Anti-Ban Cooldown  │  │ • WebP/Audio/Video       │  │ • Sesi WA │  │
+│  │ • Command Processor  │  │   (Termux Native FFmpeg) │  │ • Template│  │
+│  └──────────────────────┘  └──────────────────────────┘  └───────────┘  │
+└─────────────────────────────────────────┬───────────────────────────────┘
+                                          │ HTTP / WebSocket (Port 3000)
+                    ┌─────────────────────┴─────────────────────┐
+                    ▼                                           ▼
+     ┌─────────────────────────────┐             ┌─────────────────────────────┐
+     │ Chrome di Redmi 9C          │             │ Browser HP Utama / Laptop   │
+     │ http://localhost:3000       │             │ http://192.168.x.x:3000     │
+     │ (Atur Menu, Template, Pair) │             │ (Kontrol Jarak Jauh Se-WiFi)│
+     └─────────────────────────────┘             └─────────────────────────────┘
 ```
 
-### Model Data & Status
+- **Model Data & Penyimpanan Sesi**:
+  - Seluruh kredensial autentikasi WhatsApp (`.baileys_auth`) dan konfigurasi kustom pengguna (nama bot, prefix, nomor owner, daftar fitur aktif/nonaktif, template sambutan/keluar grup, aturan auto-responder) disimpan langsung ke penyimpanan internal folder kerja Termux (`~/wabot`) sehingga aman dari penghapusan cache sistem dan otomatis tersambung kembali saat HP dinyalakan ulang.
+  - Endpoint informasi jaringan baru pada server membaca antarmuka jaringan lokal (`os.networkInterfaces()`) secara aman lintas versi Android untuk menampilkan daftar alamat IP LAN WiFi aktif di halaman Koneksi maupun di CLI Termux.
 
-- **Pengelola Alamat Backend Dinamis**: Menyimpan konfigurasi opsional alamat server bot (bawaan otomatis mengikuti domain aktif, namun dapat diubah ke alamat server eksternal `https://...` / `wss://...` saat antarmuka dibuka dari hosting statis seperti Vercel) lengkap dengan indikator status jangkauan server.
-- **Dukungan `.hdsw` Konteks Grup & Pribadi**: Memperbarui alur ekstraksi dokumen di soket WhatsApp dan Simulator agar menerima dokumen foto/video dari ruang grup maupun pribadi, mempertahankan byte asli video/foto, dan mengirimkan hasilnya kembali di ruang percakapan yang sama.
-- **Konteks & Balasan Multi-Media Lengkap**: Mendukung pemrosesan pesan masuk berupa foto, video pendek, audio/Voice Note, stiker statis/animasi, dokumen HD, serta pesan *View Once*, dan mendukung balasan berupa stiker WebP ber-EXIF, video bulat PTV, Voice Note PTT, MP3, maupun galeri foto berurutan.
-
-### Pemetaan Interaksi Komponen & Penanganan Status
-
-- **Panel Koneksi WA & Diagnostik Hosting**:
-  - Menampilkan status sambungan ke mesin server bot secara *real-time*. Bila antarmuka berjalan di Vercel tanpa mesin belakang yang terhubung, muncul peringatan informatif beserta input **Hubungkan URL Server Bot** dan panduan ringkas cara menjalankan mesin bot 24/7 di Cloud Run / Railway / Render / VPS.
-- **Simulator Chat Grup & Pribadi**:
-  - Membuka akses uji coba lampiran *Dokumen Foto/Video HD* (`.hdsw`) baik saat tab Simulator berada di **Chat Pribadi** maupun **Grup Komunitas**, ditambah tombol uji cepat untuk Video, Audio/VN, Stiker, *View Once*, dan fitur *Reply* berantai pada pesan hasil bot.
-- **Konsolidasi Ruang Kerja & Menu `.menu` Terkategori**:
-  - Menyusun ulang tampilan `.menu` di WhatsApp per sub-kategori (`.menu stiker`, `.menu downloader`, `.menu media`, `.menu audio`, `.menu grup`, `.menu utilitas`) serta menyatukan halaman pengaturan serumpun di Web Dashboard agar seluruh fitur baru dan fitur lama tertata rapi dalam 5 tab utama.
+- **Pemetaan Interaksi Komponen & Penanganan Status**:
+  - **Generator Paket Siap Pakai Termux (`/api/termux-bundle.tar.gz`)**: Saat pengguna mengklik tombol unduh paket di panel web, server memastikan aset antarmuka `dist/` dan bundel server siap pakai telah tersedia, lalu mengalirkan arsip terkompresi ringan tanpa `node_modules` agar cepat diunduh di jaringan seluler maupun WiFi.
+  - **Skrip Installer Adaptif (`termux.sh`)**: Mendeteksi arsitektur CPU/OS (`uname -m`), mengaktifkan `termux-wake-lock`, memasang paket inti Termux (`nodejs-lts`, `ffmpeg`, `libwebp`), memasang hanya dependensi runtime yang kompatibel dengan 32-bit/64-bit (`--omit=dev --ignore-scripts` bila pada `armv7l` diikuti inisialisasi WASM), mendaftarkan perintah CLI `bot`, dan menyalakan layanan PM2.
+  - **CLI Kontrol Termux (`bot`)**: Menangani argumen perintah (`pair`, `status`, `ip`, `logs`, `restart`, `stop`) dengan validasi nomor telepon dan penanganan pesan error yang jelas apabila server masih dalam proses pemanasan awal.
+  - **Panduan Anti-Mati Khusus MIUI 12 (Redmi 9C)**: Menampilkan instruksi spesifik menu MIUI (*Penghemat Baterai Aplikasi -> Tidak ada pembatasan*, *Mulai Otomatis / Autostart*, dan penguncian aplikasi di *Recent Apps*) tepat di sebelah langkah instalasi.

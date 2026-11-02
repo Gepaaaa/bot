@@ -10,4 +10,5 @@ coverage/
 .bot-state.json
 .wabot-state.json
 server.mjs
+server.bundle.mjs
 

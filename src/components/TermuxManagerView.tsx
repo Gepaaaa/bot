@@ -1,54 +1,57 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Smartphone,
-  Copy,
   Check,
-  Zap,
-  Terminal,
-  AlertCircle,
+  Copy,
+  Download,
   ExternalLink,
-  ShieldCheck,
-  Server,
-  RefreshCw,
-  Cpu,
-  Layers,
+  GitBranch,
   Globe,
   Radio,
+  ShieldCheck,
+  Sliders,
+  Smartphone,
+  Terminal,
 } from 'lucide-react';
-import type { WAConnectionState, BotConfig } from '../shared/types.ts';
+import type { BotConfig, WAConnectionState } from '../shared/types.ts';
 
 interface TermuxManagerViewProps {
   waState: WAConnectionState;
   config: BotConfig;
   onNavigateToConnection?: () => void;
+  onNavigateToCatalog?: () => void;
+  onNavigateToTemplates?: () => void;
+  onNavigateToSettings?: () => void;
+}
+
+interface NetworkInfoSnapshot {
+  port: number;
+  localhostUrl: string;
+  lanUrls: string[];
+  arch: string;
+  platform: string;
+  nodeVersion: string;
+  imageBackend: string;
+  memoryRssMb: number;
 }
 
 export function TermuxManagerView({
   waState,
   config,
   onNavigateToConnection,
+  onNavigateToCatalog,
+  onNavigateToTemplates,
+  onNavigateToSettings,
 }: TermuxManagerViewProps) {
-  const [copiedDirectInstall, setCopiedDirectInstall] = useState(false);
-  const [copiedOneShot, setCopiedOneShot] = useState(false);
-  const [copiedCurl, setCopiedCurl] = useState(false);
-  const [copiedGit, setCopiedGit] = useState(false);
-  const [copiedSharpFix, setCopiedSharpFix] = useState(false);
-  const [copiedNoSuchFile, setCopiedNoSuchFile] = useState(false);
-  const [copiedLocalhost, setCopiedLocalhost] = useState(false);
-  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
-
-  const [isLocalhost, setIsLocalhost] = useState(false);
-  const [currentHost, setCurrentHost] = useState('');
-  const [originUrl, setOriginUrl] = useState(
-    'https://ais-pre-zxm2hfackhflczswcx624t-404922539023.asia-southeast1.run.app'
-  );
+  const [installMode, setInstallMode] = useState<'bundle' | 'git'>('bundle');
+  const [gitRepoUrl, setGitRepoUrl] = useState('');
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [netInfo, setNetInfo] = useState<NetworkInfoSnapshot | null>(null);
+  const [isLocalNetworkHost, setIsLocalNetworkHost] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const h = window.location.hostname;
-      setCurrentHost(window.location.host);
-      setOriginUrl(window.location.origin);
-      setIsLocalhost(
+      setIsLocalNetworkHost(
         h === 'localhost' ||
           h === '127.0.0.1' ||
           h.startsWith('192.168.') ||
@@ -56,473 +59,551 @@ export function TermuxManagerView({
           h.startsWith('172.')
       );
     }
+
+    let cancelled = false;
+    fetch('/api/network-info')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.ok) {
+          setNetInfo(data as NetworkInfoSnapshot);
+        }
+      })
+      .catch(() => {
+        // Ignore when unreachable
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // Perintah 1-Baris Langsung dari Project Ini (Bukan Repo GitHub Luar)
-  const directInstallCommand = `curl -sL "${originUrl}/api/termux-install" | bash`;
-
-  // 1-Baris Sapu Jagad untuk Git
-  const oneShotAllInOneCommand =
-    'termux-wake-lock && pkg update -y && pkg install -y git nodejs-lts ffmpeg && mkdir -p ~/wabot && cd ~/wabot && (git clone https://github.com/Gepaaaa/panel-.git . 2>/dev/null || git pull 2>/dev/null || true) && ([ -f termux.sh ] && bash termux.sh || (npm install --legacy-peer-deps --no-audit --no-fund && npm install @img/sharp-wasm32 --no-audit --no-fund 2>/dev/null && npm install -g pm2 --no-audit --no-fund 2>/dev/null && (printf \'#!/data/data/com.termux/files/usr/bin/bash\\npm2 logs wabot\\n\' > /data/data/com.termux/files/usr/bin/bot 2>/dev/null && chmod +x /data/data/com.termux/files/usr/bin/bot 2>/dev/null || true) && pm2 delete wabot 2>/dev/null || true; pm2 start index.js --name "wabot" && pm2 save 2>/dev/null || true; pm2 logs wabot))';
-
-  const curlCommand =
-    'curl -sL https://raw.githubusercontent.com/Gepaaaa/panel-/main/termux.sh | bash';
-  const gitCommand =
-    'pkg update -y && pkg install -y git nodejs-lts && git clone https://github.com/Gepaaaa/panel-.git ~/wabot && cd ~/wabot && bash termux.sh';
-  const noSuchFileFixCommand =
-    'cd ~/wabot 2>/dev/null || cd ~/panel- 2>/dev/null || (git clone https://github.com/Gepaaaa/panel-.git ~/wabot && cd ~/wabot); [ -f termux.sh ] && bash termux.sh || (npm install --legacy-peer-deps && node index.js)';
-  const sharpFixCommand =
-    "mkdir -p dist && echo '<html><body>WABot</body></html>' > dist/index.html && npm install @img/sharp-wasm32 && node index.js";
-
-  const handleCopy = (
-    text: string,
-    setter: (v: boolean) => void
-  ) => {
+  const copyText = (key: string, value: string) => {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(text).catch(() => {});
-      setter(true);
-      setTimeout(() => setter(false), 2000);
+      navigator.clipboard.writeText(value).catch(() => {});
+      setCopiedKey(key);
+      setTimeout(() => {
+        setCopiedKey((prev) => (prev === key ? null : prev));
+      }, 2000);
     }
   };
 
-  const handleCopyCmd = (cmd: string) => {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(cmd).catch(() => {});
-      setCopiedCmd(cmd);
-      setTimeout(() => setCopiedCmd(null), 2000);
-    }
-  };
+  const storageSetupCmd = 'termux-setup-storage';
+  const bundleExtractRunCmd =
+    'mkdir -p ~/wabot && tar -xzf ~/storage/downloads/wabot-redmi9c-ready.tar.gz -C ~/wabot && cd ~/wabot && bash termux.sh';
 
-  const pm2Commands = [
+  const cleanRepoUrl =
+    gitRepoUrl.trim() || 'https://github.com/USERNAME_KAMU/NAMA_REPO_BOT.git';
+  const gitCloneRunCmd = `pkg update -y && pkg install -y git && rm -rf ~/wabot && git clone ${cleanRepoUrl} ~/wabot && cd ~/wabot && bash termux.sh`;
+  const gitUpdateCmd = 'cd ~/wabot && git pull && pm2 restart wabot';
+
+  const lanExampleUrl =
+    netInfo?.lanUrls && netInfo.lanUrls.length > 0
+      ? netInfo.lanUrls[0]
+      : 'http://192.168.1.X:3000';
+
+  const cliShortcuts = [
     {
       cmd: 'bot',
-      desc: 'Shortcut instan membuka monitor log, status bot & kode pairing realtime.',
-      category: 'Paling Sering Digunakan',
+      label: 'Menu Interaktif Lengkap',
+      desc: 'Buka menu pilih angka (1-5) untuk cek IP WiFi, minta Pairing Code, ubah prefix, atau restart bot.',
     },
     {
-      cmd: 'pm2 status',
-      desc: 'Cek apakah bot sedang aktif (online), uptime, dan konsumsi memori RAM HP.',
-      category: 'Diagnostik',
+      cmd: 'bot pair 6281234567890',
+      label: 'Pairing WA Langsung',
+      desc: 'Ganti ujungnya dengan nomor WA bot kamu untuk langsung mencetak 8-digit Pairing Code di layar Termux.',
     },
     {
-      cmd: 'pm2 logs wabot',
-      desc: 'Pantau pesan masuk, pembuatan stiker, download medsos, dan error realtime.',
-      category: 'Diagnostik',
+      cmd: 'bot status',
+      label: 'Cek Status, RAM & IP WiFi',
+      desc: 'Menampilkan status tautan WA, konsumsi RAM Redmi 9C, dan alamat IP WiFi untuk dibuka dari HP utama.',
     },
     {
-      cmd: 'pm2 restart wabot',
-      desc: 'Mulai ulang engine bot seketika tanpa harus merestart HP Android kamu.',
-      category: 'Kontrol',
+      cmd: `bot prefix ${config.prefix}`,
+      label: 'Ubah Prefix Cepat',
+      desc: 'Mengubah awalan perintah bot (. / ! / #) langsung dari terminal tanpa perlu membuka browser.',
     },
     {
-      cmd: 'pm2 stop wabot',
-      desc: 'Hentikan bot sementara waktu ketika ingin istirahat atau maintenance.',
-      category: 'Kontrol',
+      cmd: 'bot logs',
+      label: 'Pantau Chat Masuk',
+      desc: 'Melihat aktivitas pesan dan pembuatan stiker secara real-time (tekan CTRL + C untuk menutup tampilan log).',
+    },
+    {
+      cmd: 'bot restart',
+      label: 'Muat Ulang Mesin Bot',
+      desc: 'Merestart proses PM2 dengan batas aman memori 256 MB tanpa memutus sesi WhatsApp yang tersimpan.',
     },
   ];
 
   return (
     <div className="space-y-6">
-      {/* Intro Header */}
-      <div className="bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-5">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center justify-center shrink-0">
-            <Smartphone className="w-6 h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-lg font-display font-bold text-zinc-900 dark:text-zinc-100">
-                Termux 24/7 &amp; Localhost Management
-              </h2>
-              {isLocalhost ? (
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                  🟢 Terhubung via Localhost ({currentHost})
-                </span>
-              ) : (
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700">
-                  🌐 Mode Web Panel
-                </span>
+      {/* Section 1: Header & Hardware Audit Summary for Redmi 9C 3/32 */}
+      <div className="bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-6 space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1.5 max-w-3xl">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+              <span>Target Teruji: Xiaomi Redmi 9C (3GB RAM / 32GB ROM)</span>
+              <span aria-hidden="true">·</span>
+              <span>32-Bit ARMv7 &amp; 64-Bit Ready</span>
+              {netInfo && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-mono tabular-nums text-emerald-700 dark:text-emerald-400">
+                    RAM Server {netInfo.memoryRssMb} MB ({netInfo.arch})
+                  </span>
+                </>
               )}
             </div>
-            <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1 leading-relaxed">
-              Jalankan bot langsung di memori HP Android menggunakan Termux + PM2 agar aktif 24/7 tanpa VPS, lalu kelola seluruh pengaturannya lewat browser di <code className="font-mono text-emerald-600 dark:text-emerald-400">http://localhost:3000</code>.
+            <h2 className="text-lg font-display font-bold text-zinc-900 dark:text-zinc-100">
+              Instalasi Server Pribadi Termux 24/7 &amp; Pusat Kontrol Localhost
+            </h2>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">
+              Rancangan kode ini sudah diaudit khusus untuk arsitektur Android 32-bit (<code className="font-mono">armv7l</code>) pada MIUI 12 Redmi 9C: menggunakan engine stiker WebAssembly (<code className="font-mono">@resvg/resvg-wasm</code> + <code className="font-mono">ffmpeg</code>) tanpa modul C++ berat yang sering gagal install, serta batas memori hemat <code className="font-mono tabular-nums">256 MB</code> di PM2.
             </p>
           </div>
-        </div>
 
-        <div className="flex items-center gap-2 self-stretch sm:self-auto shrink-0">
-          <a
-            href="http://localhost:3000"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-md shadow-emerald-700/20 active:scale-95 transition-all whitespace-nowrap"
-          >
-            <Globe className="w-4 h-4" />
-            <span>Buka Localhost (3000)</span>
-            <ExternalLink className="w-3.5 h-3.5 opacity-80" />
-          </a>
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <a
+              href="/api/termux-bundle.tar.gz"
+              download="wabot-redmi9c-ready.tar.gz"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-900 dark:bg-emerald-600 text-white text-xs font-medium hover:opacity-90 transition-opacity whitespace-nowrap"
+            >
+              <Download className="w-4 h-4" />
+              Unduh Paket Redmi 9C (.tar.gz)
+            </a>
+            {isLocalNetworkHost && onNavigateToConnection && (
+              <button
+                type="button"
+                onClick={onNavigateToConnection}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-[#FAF9F6] dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors whitespace-nowrap"
+              >
+                <Smartphone className="w-4 h-4" />
+                {waState.status === 'connected'
+                  ? 'Cek Sesi WA Aktif'
+                  : 'Tautkan WA Sekarang'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* LOCALHOST ACCESS HERO FEATURE */}
-      <div className="p-6 rounded-2xl bg-gradient-to-br from-emerald-950/40 via-zinc-900/90 to-zinc-950 border border-emerald-500/40 shadow-xl space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2.5">
-            <span className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 font-bold text-sm">
-              🌐
-            </span>
-            <div>
-              <h3 className="text-sm sm:text-base font-bold text-white">
-                Akses &amp; Kelola Bot via Localhost di HP Kamu
-              </h3>
-              <p className="text-xs text-zinc-400">
-                Tanpa internet kuota server, panel kontrol ini bisa dibuka langsung di browser HP
-              </p>
-            </div>
-          </div>
-          <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/40">
-            PORT 3000 READY
-          </span>
+      {/* Section 2: Answering "Terus Nanti Kontrolnya di Mana? Menu, Template, dll Itu?" */}
+      <div className="bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-6 space-y-5">
+        <div className="space-y-1">
+          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+            Setelah Bot Jalan di Redmi 9C, Kontrol Menu &amp; Template-nya di Mana?
+          </h3>
+          <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400">
+            Begitu PM2 menyala di Termux, HP Redmi 9C kamu otomatis menjalankan <strong>Web Control Panel yang persis sama dengan halaman ini</strong> di port <span className="font-mono tabular-nums">3000</span>. Kamu punya 3 cara mengelolanya kapan saja:
+          </p>
         </div>
 
-        <p className="text-xs text-zinc-300 leading-relaxed">
-          Saat kamu menjalankan bot di Termux, server HTTP bawaan bot langsung mendengarkan di host <code className="font-mono text-emerald-300 bg-zinc-900 px-1.5 py-0.5 rounded">0.0.0.0:3000</code>. Kamu bisa membuka dan mengontrol seluruh fitur bot lewat Google Chrome di HP:
-        </p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-1">
+          {/* Control Option 1: Chrome on Redmi 9C */}
+          <div className="p-4 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900/70 border border-zinc-200/80 dark:border-zinc-800 flex flex-col justify-between gap-3">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                  <Globe className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  1. Browser Chrome di Redmi 9C
+                </span>
+                <button
+                  type="button"
+                  onClick={() => copyText('localhost', 'http://localhost:3000')}
+                  className="text-xs font-mono text-emerald-700 dark:text-emerald-400 hover:underline inline-flex items-center gap-1"
+                >
+                  {copiedKey === 'localhost' ? (
+                    <>
+                      <Check className="w-3 h-3" /> Tersalin
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" /> Salin
+                    </>
+                  )}
+                </button>
+              </div>
+              <div className="px-3 py-2 rounded-lg bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 font-mono text-xs text-zinc-900 dark:text-emerald-300 select-all">
+                http://localhost:3000
+              </div>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                Buka Chrome di HP Redmi 9C lalu ketik alamat di atas. Semua tab <strong>Menu &amp; Fitur</strong>, <strong>Template Balasan Chat</strong>, <strong>Prefix</strong>, dan <strong>Pairing WA</strong> langsung terbuka tanpa kuota internet luar.
+              </p>
+            </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-          {/* Box 1: Buka di HP Sendiri */}
-          <div className="p-4 rounded-xl bg-zinc-950/80 border border-zinc-800 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                <Smartphone className="w-4 h-4 text-emerald-400" />
-                Di HP yang Menjalankan Termux
-              </span>
+            <div className="flex flex-wrap gap-2 pt-1">
+              {onNavigateToCatalog && (
+                <button
+                  type="button"
+                  onClick={onNavigateToCatalog}
+                  className="px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors inline-flex items-center gap-1"
+                >
+                  <Sliders className="w-3 h-3" />
+                  Menu &amp; Fitur
+                </button>
+              )}
+              {onNavigateToTemplates && (
+                <button
+                  type="button"
+                  onClick={onNavigateToTemplates}
+                  className="px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors inline-flex items-center gap-1"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Template Balasan
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Control Option 2: Main Phone / Laptop over WiFi */}
+          <div className="p-4 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900/70 border border-zinc-200/80 dark:border-zinc-800 flex flex-col justify-between gap-3">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                  <Radio className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  2. Dari HP Utama / Laptop (Satu WiFi)
+                </span>
+                {netInfo?.lanUrls?.[0] && (
+                  <button
+                    type="button"
+                    onClick={() => copyText('lan', netInfo.lanUrls[0])}
+                    className="text-xs font-mono text-emerald-700 dark:text-emerald-400 hover:underline inline-flex items-center gap-1"
+                  >
+                    {copiedKey === 'lan' ? (
+                      <>
+                        <Check className="w-3 h-3" /> Tersalin
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3" /> Salin
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+              <div className="px-3 py-2 rounded-lg bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 font-mono text-xs text-zinc-900 dark:text-emerald-300 select-all">
+                {lanExampleUrl}
+              </div>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                Taruh Redmi 9C di pojok rumah, lalu buka alamat IP WiFi Redmi 9C (muncul otomatis saat ketik <code className="font-mono">bot status</code> di Termux) dari browser HP utamamu untuk mengedit menu &amp; template dari jarak dekat.
+              </p>
+            </div>
+
+            {onNavigateToSettings && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={onNavigateToSettings}
+                  className="px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
+                >
+                  Pengaturan Owner &amp; Prefix
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Control Option 3: Termux 'bot' CLI */}
+          <div className="p-4 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900/70 border border-zinc-200/80 dark:border-zinc-800 flex flex-col justify-between gap-3">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                  <Terminal className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  3. Perintah Cepat di Termux
+                </span>
+                <button
+                  type="button"
+                  onClick={() => copyText('botcli', 'bot')}
+                  className="text-xs font-mono text-emerald-700 dark:text-emerald-400 hover:underline inline-flex items-center gap-1"
+                >
+                  {copiedKey === 'botcli' ? (
+                    <>
+                      <Check className="w-3 h-3" /> Tersalin
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" /> Salin
+                    </>
+                  )}
+                </button>
+              </div>
+              <div className="px-3 py-2 rounded-lg bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 font-mono text-xs text-zinc-900 dark:text-emerald-300 select-all">
+                bot
+              </div>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                Malas buka browser? Cukup ketik <code className="font-mono">bot</code> di Termux untuk memunculkan menu interaktif angka: minta Pairing Code 8 digit, ganti prefix, cek pemakaian RAM, atau restart bot.
+              </p>
+            </div>
+            <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+              Data tersimpan permanen di ~/wabot
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Section 3: Step-by-Step Installation (Both Pre-built Package & Git Clone) */}
+      <div className="bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-6 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+              Cara Memasang Kode ke Termux Redmi 9C (Pilih Metode Transfer)
+            </h3>
+            <p className="text-xs text-zinc-600 dark:text-zinc-400">
+              Pastikan kamu menginstal aplikasi <strong>Termux resmi dari f-droid.org</strong> (bukan versi Play Store lama).
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 shrink-0 self-start">
+            <button
+              type="button"
+              onClick={() => setInstallMode('bundle')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1.5 whitespace-nowrap ${
+                installMode === 'bundle'
+                  ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+              }`}
+            >
+              <Download className="w-3.5 h-3.5" />
+              Cara A: Paket Siap Pakai (.tar.gz)
+            </button>
+            <button
+              type="button"
+              onClick={() => setInstallMode('git')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1.5 whitespace-nowrap ${
+                installMode === 'git'
+                  ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200'
+              }`}
+            >
+              <GitBranch className="w-3.5 h-3.5" />
+              Cara B: Git Clone (Repo GitHub)
+            </button>
+          </div>
+        </div>
+
+        {installMode === 'bundle' ? (
+          <div className="space-y-5 pt-2 border-t border-zinc-200/80 dark:border-zinc-800">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+              {/* Step 1 */}
+              <div className="space-y-2.5">
+                <div className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">
+                  LANGKAH 01 — Unduh Paket ke HP
+                </div>
+                <p>
+                  Unduh paket <code className="font-mono">wabot-redmi9c-ready.tar.gz</code> dan pastikan filenya berada di folder <strong>Download</strong> pada HP Redmi 9C kamu (bisa unduh langsung di Redmi 9C atau kirim lewat WhatsApp/ShareIt lalu simpan ke Download).
+                </p>
+                <a
+                  href="/api/termux-bundle.tar.gz"
+                  download="wabot-redmi9c-ready.tar.gz"
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-zinc-900 dark:bg-emerald-600 text-white text-xs font-medium hover:opacity-90 transition-opacity"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Unduh wabot-redmi9c-ready.tar.gz
+                </a>
+              </div>
+
+              {/* Step 2 */}
+              <div className="space-y-2.5">
+                <div className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">
+                  LANGKAH 02 — Izinkan Folder Download
+                </div>
+                <p>
+                  Buka aplikasi Termux di Redmi 9C, ketik perintah ini sekali saja, lalu ketuk <strong>Izinkan (Allow)</strong> saat muncul pop-up akses penyimpanan:
+                </p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-3 py-2 rounded-lg bg-[#FAF9F6] dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 font-mono text-zinc-900 dark:text-emerald-300 select-all">
+                    {storageSetupCmd}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => copyText('storage', storageSetupCmd)}
+                    className="px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors shrink-0"
+                  >
+                    {copiedKey === 'storage' ? 'Tersalin' : 'Salin'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 3 */}
+              <div className="space-y-2.5">
+                <div className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">
+                  LANGKAH 03 — Ekstrak &amp; Nyalakan 24/7
+                </div>
+                <p>
+                  Salin &amp; tempel perintah 1-baris di bawah ini ke Termux. Seluruh tampilan Web Panel penuh + mesin bot otomatis terpasang dan langsung jalan di PM2:
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2.5">
+              <pre className="p-4 rounded-xl bg-[#FAF9F6] dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs font-mono text-zinc-900 dark:text-emerald-300 overflow-x-auto whitespace-pre-wrap break-all select-all leading-relaxed">
+                {bundleExtractRunCmd}
+              </pre>
               <button
                 type="button"
-                onClick={() =>
-                  handleCopy('http://localhost:3000', setCopiedLocalhost)
-                }
-                className="text-[11px] font-mono text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                onClick={() => copyText('bundleRun', bundleExtractRunCmd)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-900 dark:bg-emerald-600 text-white text-xs font-medium hover:opacity-90 transition-opacity"
               >
-                {copiedLocalhost ? (
+                {copiedKey === 'bundleRun' ? (
                   <>
-                    <Check className="w-3 h-3" />
-                    <span>Tersalin</span>
+                    <Check className="w-4 h-4" />
+                    Perintah Ekstrak &amp; Jalan Berhasil Disalin
                   </>
                 ) : (
                   <>
-                    <Copy className="w-3 h-3" />
-                    <span>Salin URL</span>
+                    <Copy className="w-4 h-4" />
+                    Salin Perintah Ekstrak &amp; Jalankan Otomatis
                   </>
                 )}
               </button>
             </div>
-            <div className="p-2.5 rounded-lg bg-zinc-900 font-mono text-xs text-emerald-300 border border-zinc-800 break-all select-all">
-              http://localhost:3000
-            </div>
-            <p className="text-[11px] text-zinc-400">
-              Buka Google Chrome di HP kamu, ketik link di atas untuk scan QR, minta Pairing Code, tes simulator, atau atur prefix bot.
-            </p>
           </div>
-
-          {/* Box 2: Buka dari Laptop / PC satu WiFi */}
-          <div className="p-4 rounded-xl bg-zinc-950/80 border border-zinc-800 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
-                <Radio className="w-4 h-4 text-cyan-400" />
-                Dari Laptop / PC (Satu WiFi / Hotspot)
-              </span>
-              <span className="text-[10px] text-zinc-500 font-mono">LAN WiFi</span>
-            </div>
-            <div className="p-2.5 rounded-lg bg-zinc-900 font-mono text-xs text-cyan-300 border border-zinc-800 break-all select-all">
-              http://[IP-HP-KAMU]:3000
-            </div>
-            <p className="text-[11px] text-zinc-400">
-              Ketik <code className="text-zinc-300 font-mono">ip -4 addr show wlan0</code> di Termux untuk cek IP HP kamu (contoh: <code className="text-zinc-300 font-mono">http://192.168.1.5:3000</code>).
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* 1-SHOT AUTO-INSTALLER HERO BOX (DARI PROJECT INI LANGSUNG) */}
-      <div className="p-6 rounded-2xl bg-zinc-900/95 border-2 border-emerald-500/60 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <span className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 font-bold text-sm">
-              🚀
-            </span>
-            <div>
-              <h3 className="text-sm sm:text-base font-bold text-white">
-                Metode 1 (Paling Direkomendasikan): Pasang Langsung dari Project Ini
-              </h3>
-              <p className="text-xs text-emerald-400 font-medium">
-                100% Mengunduh kode &amp; fitur bot lengkap yang ada di project ini (Bukan repo luar)
+        ) : (
+          <div className="space-y-5 pt-2 border-t border-zinc-200/80 dark:border-zinc-800">
+            <div className="space-y-2 max-w-2xl">
+              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                Masukkan URL Repository GitHub Milikmu Sendiri (setelah kamu Export/Push project ini ke GitHub):
+              </label>
+              <input
+                type="url"
+                value={gitRepoUrl}
+                onChange={(e) => setGitRepoUrl(e.target.value)}
+                placeholder="https://github.com/username-kamu/wabot-multi-feature.git"
+                className="w-full px-4 py-2.5 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 font-mono text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
+              />
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Pada metode Git Clone, Node.js 22 LTS di Termux menjalankan <code className="font-mono">server.ts</code> secara langsung beserta Localhost Lite Panel di <code className="font-mono">http://localhost:3000</code> untuk mengatur Pairing, Menu, Prefix, dan Template Balasan.
               </p>
             </div>
-          </div>
-          <span className="text-xs px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/50">
-            DARI PROJECT INI
-          </span>
-        </div>
 
-        <p className="text-xs text-zinc-300 leading-relaxed">
-          Perintah ini <strong>langsung mengunduh seluruh berkas dari project ini</strong> (termasuk engine stiker, antarmuka localhost:3000, PM2 daemon, dan Baileys v7), mengekstraknya ke <code className="text-emerald-400 font-mono">~/wabot</code>, dan menjalankannya otomatis:
-        </p>
+            <div className="space-y-2.5">
+              <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                Perintah 1-Baris Git Clone &amp; Jalankan di Termux:
+              </div>
+              <pre className="p-4 rounded-xl bg-[#FAF9F6] dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs font-mono text-zinc-900 dark:text-emerald-300 overflow-x-auto whitespace-pre-wrap break-all select-all leading-relaxed">
+                {gitCloneRunCmd}
+              </pre>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => copyText('gitRun', gitCloneRunCmd)}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-900 dark:bg-emerald-600 text-white text-xs font-medium hover:opacity-90 transition-opacity"
+                >
+                  {copiedKey === 'gitRun' ? (
+                    <>
+                      <Check className="w-4 h-4" />
+                      Perintah Git Clone Tersalin
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      Salin Perintah Git Clone
+                    </>
+                  )}
+                </button>
 
-        {/* Primary Direct Project Installer Command */}
-        <div className="space-y-2">
-          <div className="relative">
-            <pre className="p-4 rounded-xl bg-black border border-emerald-500/30 text-xs font-mono text-emerald-300 overflow-x-auto whitespace-pre-wrap break-all select-all leading-relaxed shadow-inner">
-              {directInstallCommand}
-            </pre>
+                <button
+                  type="button"
+                  onClick={() => copyText('gitUpdate', gitUpdateCmd)}
+                  className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 text-xs font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
+                >
+                  {copiedKey === 'gitUpdate' ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      Perintah Update Tersalin
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      Salin Perintah Update Repo ({gitUpdateCmd})
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <button
-              type="button"
-              onClick={() => handleCopy(directInstallCommand, setCopiedDirectInstall)}
-              className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-emerald-700/30 active:scale-95 transition-all"
-            >
-              {copiedDirectInstall ? (
-                <>
-                  <Check className="w-5 h-5 text-white" />
-                  <span>Perintah Berhasil Disalin! Paste di Termux</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-5 h-5" />
-                  <span>Salin Perintah Pasang Project Ini</span>
-                </>
-              )}
-            </button>
-            <a
-              href={`${originUrl}/api/project-bundle.tar.gz`}
-              download="wabot-project.tar.gz"
-              className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold border border-zinc-700 active:scale-95 transition-all whitespace-nowrap"
-            >
-              <ExternalLink className="w-4 h-4 text-emerald-400" />
-              <span>Download Berkas (.tar.gz)</span>
-            </a>
-          </div>
-        </div>
-
-        {/* Penjelasan Kenapa Sebelumnya Clone Repo Lain */}
-        <div className="pt-3 border-t border-zinc-800 text-xs space-y-1.5 text-zinc-400">
-          <p className="font-semibold text-zinc-300">
-            💡 Mengapa sebelumnya yang di-clone adalah <code className="text-amber-400 font-mono">Gepaaaa/panel-</code>?
-          </p>
-          <p className="leading-relaxed">
-            Karena sebelumnya kamu meminta menghubungkan dengan link GitHub tersebut (<code className="text-zinc-300">https://github.com/Gepaaaa/panel-</code>). Namun karena seluruh perbaikan kode, fitur stiker, dan panel localhost baru saja dibuat di <strong>project ini</strong> dan belum kamu push ke GitHub milikmu, maka repository di GitHub masih berisi file lama. Dengan <strong>Metode 1 di atas</strong>, Termux langsung mengambil file terbaru dari project ini tanpa tergantung GitHub luar!
-          </p>
-        </div>
-
-        {/* Git Clone Method */}
-        <div className="pt-3 border-t border-zinc-800/80 space-y-1.5">
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span>Metode 2: Gunakan Git Clone (Jika kamu ingin pakai Repo GitHub kamu sendiri)</span>
-            <span className="font-mono text-[10px]">GIT CLONE</span>
-          </div>
-          <div className="relative">
-            <pre className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs font-mono text-zinc-300 overflow-x-auto whitespace-pre-wrap break-all select-all leading-relaxed">
-              {oneShotAllInOneCommand}
-            </pre>
-          </div>
-          <button
-            type="button"
-            onClick={() => handleCopy(oneShotAllInOneCommand, setCopiedOneShot)}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold active:scale-95 transition-all"
-          >
-            {copiedOneShot ? (
-              <>
-                <Check className="w-4 h-4 text-emerald-400" />
-                <span>Perintah Git Disalin!</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4" />
-                <span>Salin Perintah Git Clone</span>
-              </>
-            )}
-          </button>
-        </div>
+        )}
       </div>
 
-      {/* Troubleshooting: No such file or directory */}
-      <div className="p-5 rounded-2xl bg-amber-950/40 border border-amber-600/40 space-y-3">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-            <h4 className="text-xs sm:text-sm font-bold text-amber-300">
-              Solusi Error:{' '}
-              <code className="font-mono text-zinc-200 bg-zinc-950 px-1.5 py-0.5 rounded text-[11px]">
-                bash : termux.sh : No such file or directory
-              </code>
-            </h4>
-          </div>
-          <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-900/60 text-amber-200 border border-amber-700/60 font-mono">
-            Solusi Folder &amp; Unduhan
-          </span>
-        </div>
-
-        <p className="text-xs text-zinc-300 leading-relaxed">
-          <strong>Penyebab:</strong> Terminal Termux saat ini berada di folder awal (<code className="text-amber-300 font-mono">~</code>) dan belum masuk ke folder bot tempat <code className="text-amber-300 font-mono">termux.sh</code> berada, atau repository belum ter-clone.
-        </p>
-
-        <div className="bg-zinc-950/80 p-3 rounded-xl border border-zinc-800 space-y-2 text-xs">
-          <p className="text-zinc-300 font-semibold">Gunakan perintah sapu-jagad ini (otomatis deteksi folder, clone jika belum ada, &amp; langsung jalankan):</p>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-            <code className="flex-1 p-2.5 rounded-lg bg-zinc-900 text-xs font-mono text-amber-300 border border-zinc-800 select-all overflow-x-auto whitespace-pre-wrap">
-              {noSuchFileFixCommand}
-            </code>
-            <button
-              type="button"
-              onClick={() => handleCopy(noSuchFileFixCommand, setCopiedNoSuchFile)}
-              className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold whitespace-nowrap active:scale-95 transition-all shadow-md shadow-amber-800/20 shrink-0"
-            >
-              {copiedNoSuchFile ? 'Perintah Perbaikan Tersalin!' : 'Salin Perintah Solusi'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Troubleshooting Sharp / Android ARM (32-bit & 64-bit) */}
-      <div className="p-5 rounded-2xl bg-cyan-950/40 border border-cyan-600/40 space-y-3">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-cyan-400 shrink-0" />
-            <h4 className="text-xs sm:text-sm font-bold text-cyan-300">
-              Solusi Error:{' '}
-              <code className="font-mono text-zinc-200 bg-zinc-950 px-1.5 py-0.5 rounded text-[11px]">
-                Could not load the "sharp" module using android-arm
-              </code>
-            </h4>
-          </div>
-          <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-cyan-900/60 text-cyan-200 border border-cyan-700/60 font-mono">
-            Fix Android 32-Bit ARMv7 &amp; 64-Bit
-          </span>
-        </div>
-
-        <p className="text-xs text-zinc-300 leading-relaxed">
-          Penyebab: HP Android tipe tertentu (terutama 32-bit ARM atau arsitektur tanpa toolchain C++ lokal) membutuhkan library WebAssembly untuk pengolah gambar stiker. Di repo ini, paket <code className="text-cyan-300 font-mono">@img/sharp-wasm32</code> sudah terpasang. Jika masih mengalami kendala di folder <code className="text-cyan-300 font-mono">~/wabot</code>, cukup jalankan:
-        </p>
-
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          <code className="flex-1 p-2.5 rounded-xl bg-zinc-950 text-xs font-mono text-cyan-300 border border-zinc-800 select-all overflow-x-auto whitespace-pre-wrap">
-            {sharpFixCommand}
-          </code>
-          <button
-            type="button"
-            onClick={() => handleCopy(sharpFixCommand, setCopiedSharpFix)}
-            className="px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold whitespace-nowrap active:scale-95 transition-all shadow-md shadow-cyan-800/20 shrink-0"
-          >
-            {copiedSharpFix ? 'Perintah Sharp Tersalin!' : 'Salin Perintah Fix Sharp'}
-          </button>
-        </div>
-      </div>
-
-      {/* Perintah Cepat PM2 di Termux */}
+      {/* Section 4: Termux CLI Command Reference */}
       <div className="bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-6 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <Terminal className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-            <h3 className="text-sm sm:text-base font-display font-bold text-zinc-900 dark:text-zinc-100">
-              Pusat Kontrol Perintah Termux &amp; PM2
-            </h3>
-          </div>
-          <span className="text-xs text-zinc-500 font-mono">
-            Klik perintah untuk langsung menyalin
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+            Daftar Perintah Terminal Termux (Klik untuk Menyalin)
+          </h3>
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+            Bisa diketik kapan saja saat membuka aplikasi Termux
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {pm2Commands.map((item) => {
-            const isJustCopied = copiedCmd === item.cmd;
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+          {cliShortcuts.map((item) => {
+            const isCopied = copiedKey === item.cmd;
             return (
-              <div
+              <button
                 key={item.cmd}
-                onClick={() => handleCopyCmd(item.cmd)}
-                className="p-3.5 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-zinc-900/60 hover:border-emerald-500/50 cursor-pointer transition-all flex flex-col justify-between gap-2 group"
+                type="button"
+                onClick={() => copyText(item.cmd, item.cmd)}
+                className="text-left p-4 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-zinc-900/60 hover:border-emerald-500/60 transition-colors space-y-1.5"
               >
-                <div className="flex items-center justify-between">
-                  <code className="font-mono text-xs font-bold text-emerald-700 dark:text-emerald-400 group-hover:underline">
+                <div className="flex items-center justify-between gap-2">
+                  <code className="font-mono text-xs font-semibold text-emerald-700 dark:text-emerald-400">
                     {item.cmd}
                   </code>
-                  <span className="text-[10px] text-zinc-500 font-medium">
-                    {isJustCopied ? (
-                      <span className="text-emerald-600 font-semibold flex items-center gap-1">
-                        <Check className="w-3 h-3" /> Tersalin
-                      </span>
-                    ) : (
-                      item.category
-                    )}
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400 shrink-0">
+                    {isCopied ? 'Tersalin' : 'Salin'}
                   </span>
                 </div>
-                <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">
+                <div className="text-xs font-medium text-zinc-900 dark:text-zinc-200">
+                  {item.label}
+                </div>
+                <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
                   {item.desc}
                 </p>
-              </div>
+              </button>
             );
           })}
         </div>
       </div>
 
-      {/* Guide Cards (3 Langkah Mudah) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="p-5 rounded-2xl bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 space-y-2">
-          <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-semibold text-xs">
-            <span className="w-6 h-6 rounded-full bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center font-mono">
-              1
-            </span>
-            <span>Instal Termux Resmi (F-Droid)</span>
+      {/* Section 5: Specific Xiaomi Redmi 9C (MIUI 12, 3GB RAM) Anti-Kill Checklist */}
+      <div className="bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-6 space-y-4">
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+              3 Setelan Wajib MIUI di Xiaomi Redmi 9C (3/32) Agar Bot Anti-Mati Seminggu Penuh
+            </h3>
+            <p className="text-xs text-zinc-600 dark:text-zinc-400">
+              MIUI pada Redmi 9C memiliki penghemat RAM 3GB yang agresif. Lakukan 3 pengaturan ini sekali saja supaya Termux tidak pernah ditutup paksa saat layar HP mati:
+            </p>
           </div>
-          <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-            Unduh aplikasi <strong>Termux</strong> dari <strong>f-droid.org</strong> (jangan dari Google Play Store karena versinya sudah usang/deprecated dan tidak bisa update repositori).
-          </p>
         </div>
 
-        <div className="p-5 rounded-2xl bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 space-y-2">
-          <div className="flex items-center gap-2 text-cyan-600 dark:text-cyan-400 font-semibold text-xs">
-            <span className="w-6 h-6 rounded-full bg-cyan-500/10 dark:bg-cyan-500/20 flex items-center justify-center font-mono">
-              2
-            </span>
-            <span>Aktifkan Wake Lock</span>
-          </div>
-          <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-            Perintah otomatis di atas sudah memasang <code className="text-cyan-600 dark:text-cyan-400 font-mono">termux-wake-lock</code> agar HP tidak menidurkan proses komputasi saat layar mati.
-          </p>
-        </div>
-
-        <div className="p-5 rounded-2xl bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 space-y-2">
-          <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400 font-semibold text-xs">
-            <span className="w-6 h-6 rounded-full bg-purple-500/10 dark:bg-purple-500/20 flex items-center justify-center font-mono">
-              3
-            </span>
-            <span>Jalankan dengan PM2</span>
-          </div>
-          <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-            PM2 secara otomatis merestart bot jika terjadi error atau koneksi WhatsApp terputus. Bot kamu akan aktif 24/7 non-stop tanpa takut tertutup!
-          </p>
-        </div>
-      </div>
-
-      {/* Tip for Battery Optimization */}
-      <div className="p-5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-600/30 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-3">
-        <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-        <div className="space-y-1.5 leading-relaxed">
-          <strong className="text-amber-950 dark:text-amber-100 text-sm">
-            Tips Wajib Agar Bot Tidak Dimatikan Sistem HP (Xiaomi, Samsung, Oppo, Vivo, Infinix):
-          </strong>
-          <ul className="list-disc list-inside space-y-1 text-zinc-700 dark:text-zinc-300">
-            <li>
-              Buka <strong>Pengaturan HP &rarr; Aplikasi &rarr; Termux &rarr; Penghemat Baterai (Battery Saver)</strong>: Ubah menjadi <strong>"Tidak ada pembatasan" (No Restrictions)</strong>.
-            </li>
-            <li>
-              Aktifkan opsi <strong>"Mulai Otomatis" (Autostart)</strong> agar Termux dapat berjalan saat HP baru dinyalakan.
-            </li>
-            <li>
-              Buka Recent Apps (aplikasi berjalan), lalu <strong>kunci ikon gembok</strong> pada Termux agar tidak terhapus saat kamu membersihkan RAM HP.
-            </li>
-          </ul>
-        </div>
+        <ol className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-2 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+          <li className="space-y-1.5">
+            <div className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">
+              01. Aktifkan Mulai Otomatis (Autostart)
+            </div>
+            <p>
+              Buka <strong>Setelan Redmi 9C &rarr; Aplikasi &rarr; Kelola aplikasi &rarr; cari Termux</strong>, lalu nyalakan saklar <strong>Mulai otomatis (Autostart)</strong> dan izinkan notifikasi Termux tetap tampil.
+            </p>
+          </li>
+          <li className="space-y-1.5">
+            <div className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">
+              02. Matikan Pembatasan Baterai MIUI
+            </div>
+            <p>
+              Masih di halaman info aplikasi Termux, ketuk menu <strong>Penghemat baterai (Battery saver)</strong> lalu ubah dari <em>Penghemat baterai MIUI</em> menjadi <strong>Tidak ada pembatasan (No restrictions)</strong>.
+            </p>
+          </li>
+          <li className="space-y-1.5">
+            <div className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">
+              03. Kunci Gembok di Recent Apps
+            </div>
+            <p>
+              Tekan tombol kotak (Recent Apps) di bawah layar Redmi 9C, <strong>tekan dan tahan kartu aplikasi Termux</strong> selama 1 detik, lalu ketuk ikon <strong>Gembok</strong> sampai muncul tanda terkunci di atas kartu Termux.
+            </p>
+          </li>
+        </ol>
       </div>
     </div>
   );

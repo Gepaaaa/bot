@@ -3,9 +3,18 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import sharp from 'sharp';
 import WebP from 'node-webpmux';
 import { getFfmpegBin } from './ffmpegBin.ts';
+import {
+  compositeMemeToWebp,
+  imageBufferToStickerWebp,
+  pngBufferToWebp,
+  renderBratFramePngAdapter,
+  renderSvgToPng,
+  renderSvgToWebp,
+  webpBufferToPng,
+  webpStickerToMp4Buffer,
+} from './imageAdapter.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -73,15 +82,7 @@ export async function imageToStickerWebp(
   packName: string,
   author: string
 ): Promise<Buffer> {
-  const rawWebp = await sharp(imageBuffer, { animated: true })
-    .rotate()
-    .resize(512, 512, {
-      fit: 'contain',
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
-    })
-    .webp({ quality: 84 })
-    .toBuffer();
-
+  const rawWebp = await imageBufferToStickerWebp(imageBuffer);
   return injectWhatsAppExif(rawWebp, packName, author);
 }
 
@@ -131,108 +132,11 @@ export async function videoToAnimatedStickerWebp(
 }
 
 export async function stickerWebpToPng(webpBuffer: Buffer): Promise<Buffer> {
-  return sharp(webpBuffer, { animated: false }).png().toBuffer();
+  return webpBufferToPng(webpBuffer);
 }
 
 export async function animatedWebpToMp4(webpBuffer: Buffer): Promise<Buffer> {
-  return withTempDir(async (dir) => {
-    const meta = await sharp(webpBuffer, { animated: true }).metadata();
-    const pages = Math.min(meta.pages || 1, 90);
-    const pageHeight =
-      meta.pageHeight ||
-      (meta.height && meta.pages ? Math.floor(meta.height / meta.pages) : meta.height || 512);
-    const width = meta.width || 512;
-
-    if (pages <= 1) {
-      // Static sticker -> 3-second clean MP4 loop
-      const singlePng = path.join(dir, 'frame.png');
-      const outMp4 = path.join(dir, 'out.mp4');
-      await sharp(webpBuffer)
-        .flatten({ background: '#111114' })
-        .resize(512, 512, { fit: 'contain', background: '#111114' })
-        .png()
-        .toFile(singlePng);
-
-      await execFileAsync(
-        getFfmpegBin(),
-        [
-          '-y',
-          '-loop',
-          '1',
-          '-i',
-          singlePng,
-          '-t',
-          '3',
-          '-c:v',
-          'libx264',
-          '-pix_fmt',
-          'yuv420p',
-          '-movflags',
-          '+faststart',
-          outMp4,
-        ],
-        { timeout: 20000 }
-      );
-      return fs.readFile(outMp4);
-    }
-
-    // Extract frames from animated WebP tall strip
-    const delays = meta.delay || [];
-    const avgDelayMs =
-      delays.length > 0
-        ? Math.max(
-            40,
-            Math.round(delays.reduce((a, b) => a + b, 0) / delays.length)
-          )
-        : 90;
-    const fps = Math.max(4, Math.min(25, Math.round(1000 / avgDelayMs)));
-
-    const stripPng = await sharp(webpBuffer, { animated: true })
-      .flatten({ background: '#111114' })
-      .png()
-      .toBuffer();
-
-    for (let i = 0; i < pages; i += 1) {
-      const framePath = path.join(
-        dir,
-        `frame_${String(i).padStart(3, '0')}.png`
-      );
-      await sharp(stripPng)
-        .extract({
-          left: 0,
-          top: i * pageHeight,
-          width,
-          height: pageHeight,
-        })
-        .resize(512, 512, { fit: 'contain', background: '#111114' })
-        .png()
-        .toFile(framePath);
-    }
-
-    const outMp4 = path.join(dir, 'out.mp4');
-    await execFileAsync(
-      getFfmpegBin(),
-      [
-        '-y',
-        '-framerate',
-        String(fps),
-        '-i',
-        path.join(dir, 'frame_%03d.png'),
-        '-vf',
-        'scale=trunc(iw/2)*2:trunc(ih/2)*2',
-        '-c:v',
-        'libx264',
-        '-pix_fmt',
-        'yuv420p',
-        '-movflags',
-        '+faststart',
-        outMp4,
-      ],
-      { timeout: 25000 }
-    );
-
-    return fs.readFile(outMp4);
-  });
+  return webpStickerToMp4Buffer(webpBuffer);
 }
 
 function wrapTextLines(
@@ -338,13 +242,7 @@ async function renderBratFramePng(
     ${svgTextElements}
   </svg>`;
 
-  const lowFiPng = await sharp(Buffer.from(svg))
-    .resize(330, 330)
-    .blur(1.15)
-    .png()
-    .toBuffer();
-
-  return sharp(lowFiPng).resize(512, 512, { kernel: 'linear' }).png().toBuffer();
+  return renderBratFramePngAdapter(svg);
 }
 
 export async function createBratSticker(
@@ -354,7 +252,7 @@ export async function createBratSticker(
   author: string
 ): Promise<Buffer> {
   const pngBuf = await renderBratFramePng(rawText, colorKey);
-  const finalWebp = await sharp(pngBuf).webp({ quality: 84 }).toBuffer();
+  const finalWebp = await pngBufferToWebp(pngBuf, 84);
   return injectWhatsAppExif(finalWebp, packName, author);
 }
 
@@ -443,7 +341,7 @@ export async function createTtpSticker(
   author: string
 ): Promise<Buffer> {
   const svg = buildTtpSvg(rawText, '#FFFFFF', '#09090B');
-  const webp = await sharp(Buffer.from(svg)).webp({ quality: 90 }).toBuffer();
+  const webp = await renderSvgToWebp(svg, 90);
   return injectWhatsAppExif(webp, packName, author);
 }
 
@@ -465,7 +363,7 @@ export async function createAttpSticker(
     ];
     for (let i = 0; i < colors.length; i += 1) {
       const svg = buildTtpSvg(rawText, colors[i], '#09090B');
-      const png = await sharp(Buffer.from(svg)).png().toBuffer();
+      const png = await renderSvgToPng(svg);
       await fs.writeFile(
         path.join(dir, `frame_${String(i).padStart(3, '0')}.png`),
         png
@@ -614,7 +512,7 @@ export async function createQuoteChatSticker(
     </svg>`;
   }
 
-  const webp = await sharp(Buffer.from(svg)).webp({ quality: 92 }).toBuffer();
+  const webp = await renderSvgToWebp(svg, 92);
   return injectWhatsAppExif(webp, opts.packName, opts.author);
 }
 
@@ -695,7 +593,7 @@ export async function createEmojiMixSticker(
     <text x="185" y="295" text-anchor="middle" font-size="165">${escapeXml(e1)}</text>
     <text x="330" y="315" text-anchor="middle" font-size="165">${escapeXml(e2)}</text>
   </svg>`;
-  const webp = await sharp(Buffer.from(fallbackSvg)).webp({ quality: 90 }).toBuffer();
+  const webp = await renderSvgToWebp(fallbackSvg, 90);
   return injectWhatsAppExif(webp, packName, author);
 }
 
@@ -719,7 +617,7 @@ async function getFallbackMemeBackground(): Promise<Buffer> {
       </defs>
       <rect width="512" height="512" fill="url(#g)"/>
     </svg>`;
-    return sharp(Buffer.from(fallbackSvg)).png().toBuffer();
+    return renderSvgToPng(fallbackSvg);
   }
 }
 
@@ -761,19 +659,11 @@ export async function createMemeSticker(
     })
     .join('\n');
 
-  const overlaySvg = Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  const overlaySvg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
       ${topSvg}
       ${bottomSvg}
-    </svg>`
-  );
+    </svg>`;
 
-  const webpBuffer = await sharp(sourceBuffer)
-    .rotate()
-    .resize(512, 512, { fit: 'cover' })
-    .composite([{ input: overlaySvg, top: 0, left: 0 }])
-    .webp({ quality: 88 })
-    .toBuffer();
-
+  const webpBuffer = await compositeMemeToWebp(sourceBuffer, overlaySvg);
   return injectWhatsAppExif(webpBuffer, packName, author);
 }
