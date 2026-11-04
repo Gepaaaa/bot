@@ -87,11 +87,140 @@ class WhatsAppSessionManager {
   private lastHidetagPerGroup = new Map<string, number>();
   private recentViewOnceCache = new Map<string, CachedViewOnce>();
   private lastViewOnceByChat = new Map<string, string>();
+  private avatarCache = new Map<
+    string,
+    { buffer: Buffer | null; expiresAt: number }
+  >();
   private outboundQueue: Promise<void> = Promise.resolve();
   private lastOutboundSentAt = 0;
 
   constructor() {
     void this.loadRecentViewOnceFromDisk();
+  }
+
+  private normalizeUserJid(rawJid?: string | null): string | null {
+    if (!rawJid) return null;
+    const trimmed = rawJid.trim();
+    if (!trimmed || trimmed.endsWith('@g.us') || trimmed === 'status@broadcast') {
+      return null;
+    }
+    const atIdx = trimmed.indexOf('@');
+    if (atIdx === -1) {
+      const digits = trimmed.replace(/[^0-9]/g, '');
+      return digits.length >= 8 ? `${digits}@s.whatsapp.net` : null;
+    }
+    const userPart = trimmed.slice(0, atIdx).split(':')[0]?.trim() || '';
+    const domainPart = trimmed.slice(atIdx + 1).trim().toLowerCase();
+    if (!userPart) return null;
+    if (domainPart === 's.whatsapp.net' || domainPart === 'c.us') {
+      return `${userPart}@s.whatsapp.net`;
+    }
+    if (domainPart === 'lid') {
+      return `${userPart}@lid`;
+    }
+    return null;
+  }
+
+  private async fetchUserProfilePicBuffer(
+    sock: WASocket,
+    candidateJids: Array<string | undefined | null>
+  ): Promise<Buffer | null> {
+    const normalizedJids: string[] = [];
+    for (const raw of candidateJids) {
+      const norm = this.normalizeUserJid(raw);
+      if (norm && !normalizedJids.includes(norm)) {
+        normalizedJids.push(norm);
+      }
+    }
+    if (normalizedJids.length === 0) return null;
+
+    const now = Date.now();
+    for (const jid of normalizedJids) {
+      const cached = this.avatarCache.get(jid);
+      if (cached && cached.expiresAt > now && cached.buffer) {
+        return cached.buffer;
+      }
+    }
+
+    const allNegativelyCached = normalizedJids.every((jid) => {
+      const cached = this.avatarCache.get(jid);
+      return Boolean(cached && cached.expiresAt > now && cached.buffer === null);
+    });
+    if (allNegativelyCached) {
+      return null;
+    }
+
+    const queryPpUrl = async (
+      jid: string,
+      kind: 'image' | 'preview',
+      timeoutMs: number
+    ): Promise<string | null> => {
+      try {
+        const url = await Promise.race<string | undefined>([
+          sock.profilePictureUrl(jid, kind),
+          new Promise<undefined>((resolve) =>
+            setTimeout(() => resolve(undefined), timeoutMs)
+          ),
+        ]);
+        return url && /^https?:\/\//i.test(url) ? url : null;
+      } catch {
+        return null;
+      }
+    };
+
+    for (const jid of normalizedJids) {
+      const ppUrl =
+        (await queryPpUrl(jid, 'image', 4500)) ||
+        (await queryPpUrl(jid, 'preview', 3500));
+      if (!ppUrl) continue;
+
+      try {
+        const fetched = await fetchRemoteBuffer(ppUrl, 8000);
+        if (fetched.buffer && fetched.buffer.length > 0) {
+          const normalizedImg = await ensureWhatsappImageBuffer(
+            fetched.buffer,
+            fetched.contentType || 'image/jpeg'
+          );
+          if (this.avatarCache.size >= 60) {
+            const oldestKey = this.avatarCache.keys().next().value;
+            if (oldestKey) this.avatarCache.delete(oldestKey);
+          }
+          for (const aliasJid of normalizedJids) {
+            this.avatarCache.set(aliasJid, {
+              buffer: normalizedImg.buffer,
+              expiresAt: Date.now() + 5 * 60 * 1000,
+            });
+          }
+          return normalizedImg.buffer;
+        }
+      } catch {
+        // Try next candidate JID
+      }
+    }
+
+    for (const jid of normalizedJids) {
+      this.avatarCache.set(jid, {
+        buffer: null,
+        expiresAt: Date.now() + 45 * 1000,
+      });
+    }
+    return null;
+  }
+
+  public async getProfilePictureForUser(
+    phoneOrJid?: string | null
+  ): Promise<Buffer | null> {
+    if (!this.sock) return null;
+    const candidates: Array<string | undefined | null> = [phoneOrJid];
+    if (this.sock.user?.id) {
+      const botPhone = this.sock.user.id.split(':')[0]?.split('@')[0] || '';
+      const cleanTarget = (phoneOrJid || '').replace(/[^0-9]/g, '');
+      if (!cleanTarget || cleanTarget === botPhone) {
+        candidates.push(this.sock.user.id);
+        candidates.push((this.sock.user as { lid?: string }).lid);
+      }
+    }
+    return this.fetchUserProfilePicBuffer(this.sock, candidates);
   }
 
   private sleepRandom(minMs: number, maxMs: number): Promise<void> {
@@ -2067,10 +2196,33 @@ class WhatsAppSessionManager {
       unwrappedQuoted?.videoMessage?.caption ||
       unwrappedQuoted?.documentMessage?.caption ||
       undefined;
-    const quotedSenderPhone = quotedParticipantJid
-      ? quotedParticipantJid.split(':')[0]?.split('@')[0]
-      : undefined;
-    const quotedSenderName = quotedSenderPhone
+    const quotedBaseId = quotedParticipantJid
+      ? quotedParticipantJid.split(':')[0]?.split('@')[0] || ''
+      : '';
+    const foundQuotedMember =
+      quotedBaseId && groupMembers
+        ? groupMembers.find(
+            (m) =>
+              m.jid === quotedParticipantJid ||
+              m.jid.split(':')[0]?.split('@')[0] === quotedBaseId ||
+              (m.lid &&
+                (m.lid === quotedParticipantJid ||
+                  m.lid.split(':')[0]?.split('@')[0] === quotedBaseId))
+          )
+        : undefined;
+    const quotedSenderPhone =
+      foundQuotedMember?.phone ||
+      (quotedParticipantJid
+        ? quotedParticipantJid.split(':')[0]?.split('@')[0]
+        : undefined);
+    const isSelfQuoted =
+      Boolean(quotedParticipantJid) &&
+      (quotedParticipantJid === senderJid ||
+        (senderAltJid && quotedParticipantJid === senderAltJid) ||
+        (quotedSenderPhone && quotedSenderPhone === senderPhone));
+    const quotedSenderName = isSelfQuoted
+      ? senderName
+      : quotedSenderPhone
       ? `+${quotedSenderPhone}`
       : undefined;
 
@@ -2079,6 +2231,16 @@ class WhatsAppSessionManager {
     const firstToken = lowerText.startsWith(pfx.toLowerCase())
       ? lowerText.slice(pfx.length).trim().split(/\s+/)[0] || ''
       : '';
+
+    const needsQcAvatar = [
+      'qc',
+      'quotely',
+      'quotechat',
+      'bubble',
+      'iqc',
+      'iphoneqc',
+      'ioschat',
+    ].includes(firstToken);
 
     const needsImage = [
       's',
@@ -2227,24 +2389,65 @@ class WhatsAppSessionManager {
       'tourl',
     ].includes(firstToken);
 
-    const [imageBuffer, videoBuffer, audioBuffer, stickerBuffer, voResult] =
-      await Promise.all([
-        needsImage
-          ? this.extractAttachedOrQuotedMediaByKind(sock, msg, 'image')
-          : Promise.resolve(null),
-        needsVideo
-          ? this.extractAttachedOrQuotedMediaByKind(sock, msg, 'video')
-          : Promise.resolve(null),
-        needsAudio
-          ? this.extractAttachedOrQuotedMediaByKind(sock, msg, 'audio')
-          : Promise.resolve(null),
-        needsSticker
-          ? this.extractAttachedOrQuotedMediaByKind(sock, msg, 'sticker')
-          : Promise.resolve(null),
-        needsViewOnce
-          ? this.extractViewOnceForRvo(sock, msg)
-          : Promise.resolve(null),
-      ]);
+    const senderAvatarJids: Array<string | undefined | null> = [
+      /^[0-9]{8,16}$/.test(senderPhone)
+        ? `${senderPhone}@s.whatsapp.net`
+        : undefined,
+      senderAltJid,
+      senderJid,
+      ...(groupMembers
+        ? groupMembers
+            .filter((m) => m.phone === senderPhone || m.jid === senderJid)
+            .flatMap((m) => [m.jid, m.lid])
+        : []),
+      ...(msg.key.fromMe
+        ? [
+            sock.user?.id,
+            (sock.user as { lid?: string } | undefined)?.lid,
+          ]
+        : []),
+    ];
+
+    const quotedAvatarJids: Array<string | undefined | null> = [
+      quotedSenderPhone && /^[0-9]{8,16}$/.test(quotedSenderPhone)
+        ? `${quotedSenderPhone}@s.whatsapp.net`
+        : undefined,
+      quotedParticipantJid,
+      foundQuotedMember?.jid,
+      foundQuotedMember?.lid,
+    ];
+
+    const [
+      imageBuffer,
+      videoBuffer,
+      audioBuffer,
+      stickerBuffer,
+      voResult,
+      senderAvatarBuffer,
+      quotedAvatarBuffer,
+    ] = await Promise.all([
+      needsImage
+        ? this.extractAttachedOrQuotedMediaByKind(sock, msg, 'image')
+        : Promise.resolve(null),
+      needsVideo
+        ? this.extractAttachedOrQuotedMediaByKind(sock, msg, 'video')
+        : Promise.resolve(null),
+      needsAudio
+        ? this.extractAttachedOrQuotedMediaByKind(sock, msg, 'audio')
+        : Promise.resolve(null),
+      needsSticker
+        ? this.extractAttachedOrQuotedMediaByKind(sock, msg, 'sticker')
+        : Promise.resolve(null),
+      needsViewOnce
+        ? this.extractViewOnceForRvo(sock, msg)
+        : Promise.resolve(null),
+      needsQcAvatar
+        ? this.fetchUserProfilePicBuffer(sock, senderAvatarJids)
+        : Promise.resolve(null),
+      needsQcAvatar && quotedParticipantJid && !isSelfQuoted
+        ? this.fetchUserProfilePicBuffer(sock, quotedAvatarJids)
+        : Promise.resolve(null),
+    ]);
     const viewOnceMedia = voResult?.payload ?? null;
     const viewOnceError = voResult?.errorHint ?? null;
 
@@ -2296,6 +2499,8 @@ class WhatsAppSessionManager {
       videoBuffer,
       audioBuffer,
       stickerBuffer,
+      senderAvatarBuffer,
+      quotedAvatarBuffer,
       viewOnceMedia,
       viewOnceError,
       quotedText,

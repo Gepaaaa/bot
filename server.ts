@@ -945,6 +945,23 @@ async function startServer() {
 
       botStore.addSimulatorMessage(userMsg);
 
+      const simPfx = botStore.config.prefix.toLowerCase();
+      const simFirstToken = text.toLowerCase().startsWith(simPfx)
+        ? text.toLowerCase().slice(simPfx.length).trim().split(/\s+/)[0] || ''
+        : '';
+      const isSimQc = [
+        'qc',
+        'quotely',
+        'quotechat',
+        'bubble',
+        'iqc',
+        'iphoneqc',
+        'ioschat',
+      ].includes(simFirstToken);
+      const simSenderAvatar = isSimQc
+        ? await waManager.getProfilePictureForUser(senderPhone)
+        : null;
+
       const execStartedAt = Date.now();
       const botResult = await processBotMessage({
         source: 'simulator',
@@ -961,6 +978,7 @@ async function startServer() {
         videoBuffer,
         audioBuffer,
         stickerBuffer,
+        senderAvatarBuffer: simSenderAvatar,
         viewOnceMedia,
         quotedText,
         quotedSenderName,
@@ -1283,6 +1301,7 @@ async function startServer() {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
+        allowedHosts: true,
         hmr: process.env.DISABLE_HMR === 'true' ? false : { server },
         watch: process.env.DISABLE_HMR === 'true' ? null : undefined,
       },

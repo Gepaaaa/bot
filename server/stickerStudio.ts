@@ -7,9 +7,12 @@ import WebP from 'node-webpmux';
 import { getFfmpegBin } from './ffmpegBin.ts';
 import {
   compositeMemeToWebp,
+  ensureWhatsappImageBuffer,
   imageBufferToStickerWebp,
+  measureSvgTextWidth,
   pngBufferToWebp,
   renderBratFramePngAdapter,
+  renderSvgConsistentToWebp,
   renderSvgToPng,
   renderSvgToWebp,
   webpBufferToPng,
@@ -404,6 +407,7 @@ export interface QuoteChatOptions {
   style: 'wa' | 'ios';
   packName: string;
   author: string;
+  avatarBuffer?: Buffer | null;
 }
 
 const QC_NAME_COLORS = [
@@ -423,18 +427,154 @@ function pickNameColor(name: string): string {
   return QC_NAME_COLORS[hash % QC_NAME_COLORS.length];
 }
 
+async function splitLongWordByPixelWidth(
+  word: string,
+  maxLinePx: number,
+  fontSize: number,
+  fontWeight: number | string
+): Promise<string[]> {
+  const chars = Array.from(word);
+  const chunks: string[] = [];
+  let current = '';
+
+  for (const ch of chars) {
+    const candidate = current + ch;
+    const width = await measureSvgTextWidth(candidate, fontSize, fontWeight);
+    if (width <= maxLinePx || current.length === 0) {
+      current = candidate;
+    } else {
+      chunks.push(current);
+      current = ch;
+    }
+  }
+  if (current) {
+    chunks.push(current);
+  }
+  return chunks;
+}
+
+async function wrapTextByPixelWidth(
+  rawText: string,
+  maxLinePx: number,
+  fontSize: number,
+  maxLines: number,
+  fontWeight: number | string = 400
+): Promise<string[]> {
+  const paragraphs = rawText
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((p) => p.trim())
+    .filter((p, idx, arr) => p.length > 0 || (arr.length === 1 && idx === 0));
+
+  const lines: string[] = [];
+
+  for (const para of paragraphs) {
+    if (lines.length >= maxLines) break;
+    const words = para.split(/\s+/).filter(Boolean);
+    if (words.length === 0) continue;
+
+    let current = '';
+    for (const rawWord of words) {
+      if (lines.length >= maxLines) break;
+
+      const wordWidth = await measureSvgTextWidth(
+        rawWord,
+        fontSize,
+        fontWeight
+      );
+      const segments =
+        wordWidth > maxLinePx
+          ? await splitLongWordByPixelWidth(
+              rawWord,
+              maxLinePx,
+              fontSize,
+              fontWeight
+            )
+          : [rawWord];
+
+      for (const seg of segments) {
+        if (lines.length >= maxLines) break;
+        if (!current) {
+          current = seg;
+        } else {
+          const candidate = `${current} ${seg}`;
+          const candidateWidth = await measureSvgTextWidth(
+            candidate,
+            fontSize,
+            fontWeight
+          );
+          if (candidateWidth <= maxLinePx) {
+            current = candidate;
+          } else {
+            lines.push(current);
+            current = seg;
+            if (lines.length >= maxLines) {
+              current = '';
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (current && lines.length < maxLines) {
+      lines.push(current);
+    }
+  }
+
+  return lines.length > 0 ? lines : ['Halo!'];
+}
+
+async function buildAvatarSvgMarkup(
+  avatarBuffer: Buffer | null | undefined,
+  cx: number,
+  cy: number,
+  r: number,
+  accentColor: string
+): Promise<{ defs: string; body: string }> {
+  const clipId = 'qcAvatarClip';
+  const defs = `<clipPath id="${clipId}"><circle cx="${cx}" cy="${cy}" r="${r}" /></clipPath>`;
+
+  if (avatarBuffer && avatarBuffer.length > 0) {
+    try {
+      const normalized = await ensureWhatsappImageBuffer(avatarBuffer);
+      const b64 = normalized.buffer.toString('base64');
+      const dataUri = `data:${normalized.mimeType};base64,${b64}`;
+      const size = r * 2;
+      const body = [
+        `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#1F2C34" />`,
+        `<image href="${dataUri}" x="${cx - r}" y="${cy - r}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${clipId})" />`,
+        `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#FFFFFF" stroke-opacity="0.14" stroke-width="1.5" />`,
+      ].join('\n');
+      return { defs, body };
+    } catch {
+      // Fall back to default silhouette avatar below
+    }
+  }
+
+  // Authentic WhatsApp-style default contact silhouette when user has no profile photo
+  const headR = Math.round(r * 0.34);
+  const headCy = Math.round(cy - r * 0.16);
+  const bodyRx = Math.round(r * 0.64);
+  const bodyRy = Math.round(r * 0.52);
+  const bodyCy = Math.round(cy + r * 0.68);
+  const body = [
+    `<g clip-path="url(#${clipId})">`,
+    `  <circle cx="${cx}" cy="${cy}" r="${r}" fill="#2A3942" />`,
+    `  <circle cx="${cx}" cy="${headCy}" r="${headR}" fill="#CFD8DC" />`,
+    `  <ellipse cx="${cx}" cy="${bodyCy}" rx="${bodyRx}" ry="${bodyRy}" fill="#CFD8DC" />`,
+    `</g>`,
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${accentColor}" stroke-opacity="0.35" stroke-width="1.5" />`,
+  ].join('\n');
+
+  return { defs, body };
+}
+
 export async function createQuoteChatSticker(
   opts: QuoteChatOptions
 ): Promise<Buffer> {
-  const cleanName = (opts.senderName || 'Pengguna').slice(0, 26);
-  const cleanText = (opts.text || 'Halo!').trim().slice(0, 220);
-  const initials = cleanName
-    .replace(/[^a-zA-Z0-9\s]/g, '')
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((s) => s[0]?.toUpperCase() || '')
-    .join('') || 'WA';
+  const cleanName = (opts.senderName || 'Pengguna').trim().slice(0, 25) || 'Pengguna';
+  const cleanText = (opts.text || 'Halo!').trim().slice(0, 260) || 'Halo!';
 
   const now = new Date();
   const timeStr = now.toLocaleTimeString('id-ID', {
@@ -443,76 +583,167 @@ export async function createQuoteChatSticker(
   });
 
   const accent = pickNameColor(cleanName);
-  const wrapped = wrapTextLines(cleanText, 26, 7);
-  const lineH = 29;
-  const textBlockH = wrapped.length * lineH;
 
   let svg: string;
   if (opts.style === 'ios') {
-    const bubbleH = Math.max(88, 56 + textBlockH);
-    const topY = Math.round((512 - (bubbleH + 34)) / 2);
+    const avatarR = 30;
+    const avatarCx = 32;
+    const bubbleX = 76;
+    const padX = 18;
+    const maxBubbleW = 404;
+    const maxContentW = maxBubbleW - padX * 2;
+    const textFontSize = 23;
+    const lineH = 29;
+
+    const wrapped = await wrapTextByPixelWidth(
+      cleanText,
+      maxContentW,
+      textFontSize,
+      8,
+      400
+    );
+    const lineWidths = await Promise.all(
+      wrapped.map((ln) => measureSvgTextWidth(ln, textFontSize, 400))
+    );
+    const maxLinePx = Math.max(...lineWidths, 18);
+    const contentW = Math.min(maxContentW, Math.ceil(maxLinePx));
+    const bubbleW = Math.max(58, contentW + padX * 2);
+    const bubbleH = Math.max(50, 24 + wrapped.length * lineH);
+
+    const headerLabel = `${cleanName} · ${timeStr}`;
+    const headerPx = await measureSvgTextWidth(headerLabel, 14, 500);
+    const bubbleTopY = 22;
+    const avatarCy = bubbleTopY + bubbleH - avatarR;
+    const avatarMarkup = await buildAvatarSvgMarkup(
+      opts.avatarBuffer,
+      avatarCx,
+      avatarCy,
+      avatarR,
+      '#0A84FF'
+    );
+
     const textSvg = wrapped
       .map(
         (ln, i) =>
-          `<text x="114" y="${
-            topY + 62 + i * lineH
-          }" font-family="-apple-system, Helvetica Neue, Arial, DejaVu Sans, sans-serif" font-size="23" font-weight="400" fill="#FFFFFF">${escapeXml(
+          `<text x="${bubbleX + padX}" y="${
+            bubbleTopY + 31 + i * lineH
+          }" xml:space="preserve" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="${textFontSize}" font-weight="400" fill="#FFFFFF">${escapeXml(
             ln
           )}</text>`
       )
       .join('\n');
 
+    const naturalW = Math.max(bubbleX + bubbleW, bubbleX + 8 + Math.ceil(headerPx));
+    const naturalH = bubbleTopY + bubbleH + 4;
+    const scale = Math.min(1.42, 484 / Math.max(naturalW, 1), 480 / Math.max(naturalH, 1));
+    const tx = 14;
+    const ty = Math.max(12, Math.round((512 - naturalH * scale) / 2));
+
     svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-      <text x="98" y="${topY + 14}" font-family="-apple-system, Helvetica Neue, Arial, sans-serif" font-size="16" font-weight="500" fill="#8E8E93">${escapeXml(
-        cleanName
-      )} · iMessage · ${escapeXml(timeStr)}</text>
-      <circle cx="48" cy="${topY + 26 + bubbleH - 28}" r="30" fill="#2C2C2E" />
-      <text x="48" y="${
-        topY + 26 + bubbleH - 19
-      }" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#FFFFFF">${escapeXml(
-      initials
-    )}</text>
-      <rect x="92" y="${topY + 26}" width="396" height="${bubbleH}" rx="28" fill="#0A84FF" />
-      ${textSvg}
+      <defs>${avatarMarkup.defs}</defs>
+      <g transform="translate(${tx}, ${ty}) scale(${scale.toFixed(4)})">
+        <text x="${bubbleX + 10}" y="14" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="14" font-weight="500" fill="#8E8E93">${escapeXml(
+          headerLabel
+        )}</text>
+        ${avatarMarkup.body}
+        <rect x="${bubbleX}" y="${bubbleTopY}" width="${bubbleW}" height="${bubbleH}" rx="24" fill="#0A84FF" />
+        ${textSvg}
+      </g>
     </svg>`;
   } else {
-    const bubbleH = Math.max(108, 72 + textBlockH);
-    const topY = Math.round((512 - bubbleH) / 2);
+    const avatarR = 32;
+    const avatarCx = 34;
+    const avatarCy = 34;
+    const bubbleX = 80;
+    const padX = 16;
+    const maxBubbleW = 404;
+    const maxContentW = maxBubbleW - padX * 2;
+
+    const nameFontSize = 16;
+    const textFontSize = 24;
+    const timeFontSize = 13;
+    const lineH = 30;
+
+    const wrapped = await wrapTextByPixelWidth(
+      cleanText,
+      maxContentW,
+      textFontSize,
+      8,
+      400
+    );
+
+    const [namePx, timePx, ...lineWidths] = await Promise.all([
+      measureSvgTextWidth(cleanName, nameFontSize, 700),
+      measureSvgTextWidth(timeStr, timeFontSize, 400),
+      ...wrapped.map((ln) => measureSvgTextWidth(ln, textFontSize, 400)),
+    ]);
+
+    const maxLinePx = Math.max(...lineWidths, 16);
+    // Bubble content width strictly fits max(name, text) without adding extra horizontal width for timestamp
+    const contentW = Math.min(
+      maxContentW,
+      Math.ceil(Math.max(namePx, maxLinePx, timePx))
+    );
+    const bubbleW = Math.max(66, contentW + padX * 2);
+
+    const lastLinePx = lineWidths[lineWidths.length - 1] || 0;
+    const inlineTimeFits = contentW - lastLinePx >= timePx + 12;
+
+    const firstTextY = 54;
+    const lastTextY = firstTextY + (wrapped.length - 1) * lineH;
+    const timeY = inlineTimeFits ? lastTextY + 4 : lastTextY + 19;
+    const bubbleH = inlineTimeFits ? lastTextY + 17 : timeY + 11;
+
+    const avatarMarkup = await buildAvatarSvgMarkup(
+      opts.avatarBuffer,
+      avatarCx,
+      avatarCy,
+      avatarR,
+      accent
+    );
+
     const textSvg = wrapped
       .map(
         (ln, i) =>
-          `<text x="114" y="${
-            topY + 66 + i * lineH
-          }" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="22" fill="#F4F4F5">${escapeXml(
+          `<text x="${bubbleX + padX}" y="${
+            firstTextY + i * lineH
+          }" xml:space="preserve" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="${textFontSize}" font-weight="400" fill="#F4F4F5">${escapeXml(
             ln
           )}</text>`
       )
       .join('\n');
 
+    const naturalW = bubbleX + bubbleW;
+    const naturalH = Math.max(avatarCy + avatarR + 4, bubbleH);
+    const scale = Math.min(
+      1.42,
+      484 / Math.max(naturalW, 1),
+      480 / Math.max(naturalH, 1)
+    );
+    const tx = 14;
+    const ty = Math.max(12, Math.round((512 - naturalH * scale) / 2));
+
     svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-      <circle cx="46" cy="${topY + 34}" r="32" fill="${accent}" fill-opacity="0.22" stroke="${accent}" stroke-width="2" />
-      <text x="46" y="${
-        topY + 42
-      }" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="${accent}">${escapeXml(
-      initials
-    )}</text>
-      <path d="M84 ${topY + 18} L98 ${topY + 18} L98 ${topY + 34} Z" fill="#1F2C34" />
-      <rect x="94" y="${topY}" width="402" height="${bubbleH}" rx="22" fill="#1F2C34" />
-      <text x="114" y="${
-        topY + 32
-      }" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="20" font-weight="700" fill="${accent}">${escapeXml(
-      cleanName
-    )}</text>
-      ${textSvg}
-      <text x="476" y="${
-        topY + bubbleH - 14
-      }" text-anchor="end" font-family="Arial, sans-serif" font-size="15" fill="#8696A0">${escapeXml(
-      timeStr
-    )}</text>
+      <defs>${avatarMarkup.defs}</defs>
+      <g transform="translate(${tx}, ${ty}) scale(${scale.toFixed(4)})">
+        ${avatarMarkup.body}
+        <path d="M ${bubbleX - 10} 0 L ${bubbleX + 12} 0 L ${bubbleX + 4} 18 Z" fill="#1F2C34" />
+        <rect x="${bubbleX}" y="0" width="${bubbleW}" height="${bubbleH}" rx="18" fill="#1F2C34" />
+        <rect x="${bubbleX}" y="0" width="18" height="18" fill="#1F2C34" />
+        <text x="${bubbleX + padX}" y="24" xml:space="preserve" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="${nameFontSize}" font-weight="700" fill="${accent}">${escapeXml(
+          cleanName
+        )}</text>
+        ${textSvg}
+        <text x="${
+          bubbleX + bubbleW - 13
+        }" y="${timeY}" text-anchor="end" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="${timeFontSize}" fill="#8696A0">${escapeXml(
+          timeStr
+        )}</text>
+      </g>
     </svg>`;
   }
 
-  const webp = await renderSvgToWebp(svg, 92);
+  const webp = await renderSvgConsistentToWebp(svg, 92);
   return injectWhatsAppExif(webp, opts.packName, opts.author);
 }
 

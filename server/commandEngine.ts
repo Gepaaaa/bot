@@ -106,6 +106,8 @@ export interface IncomingBotContext {
   videoBuffer?: Buffer | null;
   audioBuffer?: Buffer | null;
   stickerBuffer?: Buffer | null;
+  senderAvatarBuffer?: Buffer | null;
+  quotedAvatarBuffer?: Buffer | null;
   viewOnceMedia?: IncomingViewOncePayload | null;
   viewOnceError?: string | null;
   quotedText?: string;
@@ -1633,16 +1635,28 @@ export async function processBotMessage(
             `Ketik teks setelah perintah atau balas (reply) pesan teman dengan *${config.prefix}${matchedCmd.id}*.\nContoh: *${config.prefix}${matchedCmd.example}*`
           );
         }
-        const bubbleSender =
+        const rawSender =
           !argsText && ctx.quotedSenderName
             ? ctx.quotedSenderName
             : ctx.senderName;
+        const bubbleSender =
+          ctx.source === 'simulator'
+            ? rawSender.replace(/\s*\((Owner|Member)\)\s*$/i, '').trim() ||
+              rawSender
+            : rawSender;
+        // Otomatis pasang foto profil user pemberi perintah qc (atau jika reply murni tanpa teks ke pesan orang lain dan PP tersedia, fallback ke PP pemberi perintah)
+        const avatarBuffer =
+          ctx.senderAvatarBuffer ??
+          (!argsText && ctx.quotedAvatarBuffer ? ctx.quotedAvatarBuffer : null) ??
+          ctx.imageBuffer ??
+          null;
         const stickerBuf = await createQuoteChatSticker({
           text: bubbleText,
           senderName: bubbleSender,
           style: matchedCmd.id === 'iqc' ? 'ios' : 'wa',
           packName: config.stickerPackName,
           author: config.stickerAuthor,
+          avatarBuffer,
         });
         const webUrl = botStore.storeSticker(stickerBuf);
         botStore.incrementStat('stickersCreated');

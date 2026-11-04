@@ -181,6 +181,88 @@ async function renderSvgViaResvgWasm(svg: string): Promise<Buffer> {
   }
 }
 
+function xmlEscapeAttr(raw: string): string {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+export async function measureSvgTextWidth(
+  text: string,
+  fontSize: number,
+  fontWeight: number | string = 400
+): Promise<number> {
+  if (!text) return 0;
+  const trimmed = text.replace(/\r/g, '');
+  if (!trimmed.trim()) {
+    return trimmed.length * fontSize * 0.28;
+  }
+
+  await ensureResvgInitialized();
+  const fonts = await loadFontBuffersOnce();
+  const familyAttr =
+    fonts.buffers.length > 0
+      ? `${fonts.family}, Arial, Helvetica, DejaVu Sans, sans-serif`
+      : 'Arial, Helvetica, DejaVu Sans, sans-serif';
+
+  // Preserve leading/trailing spaces accuracy via xml:space="preserve"
+  const probeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="256"><text x="32" y="128" xml:space="preserve" font-family="${familyAttr}" font-size="${fontSize}" font-weight="${fontWeight}">${xmlEscapeAttr(
+    trimmed
+  )}</text></svg>`;
+
+  const resvg = new Resvg(probeSvg, {
+    font:
+      fonts.buffers.length > 0
+        ? {
+            fontBuffers: fonts.buffers,
+            defaultFontFamily: fonts.family,
+            sansSerifFamily: fonts.family,
+          }
+        : {
+            loadSystemFonts: true,
+          },
+  });
+
+  let bboxWidth = 0;
+  try {
+    const bbox = resvg.getBBox();
+    if (bbox) {
+      try {
+        bboxWidth = Math.max(0, bbox.x - 32 + bbox.width);
+      } finally {
+        bbox.free();
+      }
+    }
+  } finally {
+    resvg.free();
+  }
+
+  // Guard against unmapped astral emoji glyphs having narrower .notdef boxes in basic TTF fonts
+  let emojiExtra = 0;
+  for (const ch of Array.from(trimmed)) {
+    const cp = ch.codePointAt(0) || 0;
+    if (cp >= 0x1f300) {
+      emojiExtra += fontSize * 0.35;
+    }
+  }
+
+  const trailingSpaces = trimmed.length - trimmed.trimEnd().length;
+  const spaceExtra = trailingSpaces > 0 ? trailingSpaces * fontSize * 0.28 : 0;
+
+  return Math.max(bboxWidth + spaceExtra, emojiExtra > 0 ? bboxWidth + emojiExtra * 0.4 : 0);
+}
+
+export async function renderSvgConsistentToWebp(
+  svg: string,
+  quality = 92
+): Promise<Buffer> {
+  const pngBuf = await renderSvgViaResvgWasm(svg);
+  return pngBufferToWebp(pngBuf, quality);
+}
+
 export function sniffImageMetadata(buf: Buffer): {
   format: 'png' | 'jpeg' | 'webp' | 'gif' | 'unknown';
   width?: number;

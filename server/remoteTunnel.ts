@@ -105,24 +105,60 @@ export function isTrustedLocalOrPreviewHost(rawHost?: string): boolean {
     return true;
   }
 
-  // AI Studio Cloud Run preview environment (already authenticated by Google AI Studio)
-  if (host.endsWith('.run.app') || host.endsWith('.googleusercontent.com')) {
+  // AI Studio & Cloud Run preview environments (already authenticated by Google AI Studio)
+  if (
+    host.endsWith('.run.app') ||
+    host.endsWith('.googleusercontent.com') ||
+    host.endsWith('.google.com') ||
+    host.endsWith('.goog') ||
+    host.endsWith('.cloudworkstations.dev') ||
+    host.endsWith('.web.app')
+  ) {
     return true;
   }
 
   return false;
 }
 
-function isRequestFromPublicTunnel(headers: http.IncomingHttpHeaders): boolean {
-  // Cloudflare Quick Tunnel always injects cf-ray / cf-connecting-ip
-  if (headers['cf-ray'] || headers['cf-connecting-ip']) {
-    return true;
-  }
+function isRequestFromPublicTunnel(
+  headers: http.IncomingHttpHeaders,
+  activePublicUrl?: string | null
+): boolean {
   const forwardedHost = Array.isArray(headers['x-forwarded-host'])
     ? headers['x-forwarded-host'][0]
     : headers['x-forwarded-host'];
-  const effectiveHost = (forwardedHost || headers.host || '').split(',')[0].trim();
-  return !isTrustedLocalOrPreviewHost(effectiveHost);
+  const effectiveHost = (forwardedHost || headers.host || '')
+    .split(',')[0]
+    .split(':')[0]
+    .trim()
+    .toLowerCase();
+
+  if (isTrustedLocalOrPreviewHost(effectiveHost)) {
+    return false;
+  }
+
+  if (
+    effectiveHost.endsWith('.trycloudflare.com') ||
+    effectiveHost.endsWith('.lhr.life')
+  ) {
+    return true;
+  }
+
+  if (activePublicUrl) {
+    try {
+      const tunnelHost = new URL(activePublicUrl).hostname.toLowerCase();
+      if (effectiveHost === tunnelHost) {
+        return true;
+      }
+    } catch {
+      // Ignore malformed tunnel URL
+    }
+    if (headers['cf-ray'] || headers['cf-connecting-ip']) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 class RemoteTunnelManager {
@@ -423,7 +459,7 @@ class RemoteTunnelManager {
 
   public isAuthorizedWsUpgrade(req: http.IncomingMessage): boolean {
     const host = req.headers.host;
-    if (!isRequestFromPublicTunnel(req.headers)) {
+    if (!isRequestFromPublicTunnel(req.headers, this.publicUrl)) {
       return true;
     }
     const cookies = parseCookies(req.headers.cookie);
@@ -452,7 +488,7 @@ class RemoteTunnelManager {
       return;
     }
 
-    if (!isRequestFromPublicTunnel(req.headers)) {
+    if (!isRequestFromPublicTunnel(req.headers, this.publicUrl)) {
       next();
       return;
     }

@@ -4,6 +4,71 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
+interface QueryResultRow {
+  key: string;
+  value: string;
+}
+
+interface PoolLike {
+  query<T = QueryResultRow>(
+    text: string,
+    values?: unknown[]
+  ): Promise<{ rows: T[] }>;
+  end(): Promise<void>;
+}
+
+const mockKvStore = new Map<string, { value: string; updatedAt: number }>();
+
+function createMockPool(): PoolLike {
+  return {
+    async query<T = QueryResultRow>(
+      text: string,
+      values: unknown[] = []
+    ): Promise<{ rows: T[] }> {
+      const normalized = text.trim().toUpperCase();
+      if (normalized.startsWith('SELECT KEY, VALUE FROM WABOT_KV')) {
+        const rows: QueryResultRow[] = [];
+        for (const [key, entry] of mockKvStore.entries()) {
+          rows.push({ key, value: entry.value });
+        }
+        return { rows: rows as unknown as T[] };
+      }
+      if (normalized.startsWith('INSERT INTO WABOT_KV')) {
+        if (normalized.includes("VALUES ('STATE:BOT-STATE.JSON'")) {
+          const val = String(values[0] ?? '');
+          const ts = Number(values[1] ?? Date.now());
+          mockKvStore.set('state:bot-state.json', { value: val, updatedAt: ts });
+        } else {
+          const key = String(values[0] ?? '');
+          const val = String(values[1] ?? '');
+          const ts = Number(values[2] ?? Date.now());
+          if (key) {
+            mockKvStore.set(key, { value: val, updatedAt: ts });
+          }
+        }
+        return { rows: [] };
+      }
+      if (normalized.startsWith("DELETE FROM WABOT_KV WHERE KEY LIKE 'AUTH:%'")) {
+        for (const key of Array.from(mockKvStore.keys())) {
+          if (key.startsWith('auth:')) {
+            mockKvStore.delete(key);
+          }
+        }
+        return { rows: [] };
+      }
+      if (normalized.startsWith('DELETE FROM WABOT_KV WHERE KEY = $1')) {
+        const key = String(values[0] ?? '');
+        mockKvStore.delete(key);
+        return { rows: [] };
+      }
+      return { rows: [] };
+    },
+    async end(): Promise<void> {
+      // No-op for in-memory mock pool
+    },
+  };
+}
+
 function shouldForceSsl(connectionString: string): boolean {
   const lower = connectionString.toLowerCase();
   return (
@@ -17,8 +82,9 @@ function shouldForceSsl(connectionString: string): boolean {
 }
 
 class CloudSessionSync {
-  private pool: pg.Pool | null = null;
+  private pool: PoolLike | null = null;
   private ready = false;
+  private usingMock = false;
   private lastSyncedAuth = new Map<string, string>();
   private lastSyncedState = '';
   private authTimer: ReturnType<typeof setTimeout> | null = null;
@@ -27,23 +93,35 @@ class CloudSessionSync {
   private activeAuthSync: Promise<void> = Promise.resolve();
 
   public isEnabled(): boolean {
-    return this.ready && this.pool !== null;
+    return this.ready && this.pool !== null && !this.usingMock;
   }
 
-  private async connectPool(connectionString: string): Promise<pg.Pool | null> {
-    const preferSsl = shouldForceSsl(connectionString);
-    const candidates = preferSsl
+  private async connectPool(connectionString: string): Promise<PoolLike | null> {
+    const isUnixSocket = connectionString.includes('/cloudsql/');
+    const preferSsl = !isUnixSocket && shouldForceSsl(connectionString);
+    const candidates = isUnixSocket
+      ? [false]
+      : preferSsl
       ? [{ rejectUnauthorized: false }, false]
       : [false, { rejectUnauthorized: false }];
 
     for (const sslOption of candidates) {
-      const candidatePool = new Pool({
-        connectionString,
-        ssl: sslOption,
-        max: 3,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 8000,
-      });
+      let candidatePool: pg.Pool;
+      try {
+        candidatePool = new Pool({
+          connectionString,
+          ssl: sslOption,
+          max: 3,
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 3000,
+        });
+      } catch (err) {
+        console.warn(
+          '[CloudSync] Pool initialization failed — mock active:',
+          err instanceof Error ? err.message : String(err)
+        );
+        return null;
+      }
 
       candidatePool.on('error', (err) => {
         console.warn('[CloudSync] Idle PostgreSQL client notice:', err.message);
@@ -57,7 +135,7 @@ class CloudSessionSync {
             updated_at BIGINT NOT NULL
           )
         `);
-        return candidatePool;
+        return candidatePool as unknown as PoolLike;
       } catch (err) {
         try {
           await candidatePool.end();
@@ -83,12 +161,16 @@ class CloudSessionSync {
     const connected = await this.connectPool(dbUrl);
     if (!connected) {
       console.warn(
-        '[CloudSync] DATABASE_URL ditemukan namun gagal terhubung; menggunakan penyimpanan lokal.'
+        '[CloudSync] DB not connected — in-memory mock & local storage fallback active.'
       );
+      this.pool = createMockPool();
+      this.usingMock = true;
+      this.ready = true;
       return;
     }
 
     this.pool = connected;
+    this.usingMock = false;
     this.ready = true;
 
     try {
@@ -126,7 +208,7 @@ class CloudSessionSync {
   }
 
   public scheduleAuthSync(authDir: string): void {
-    if (!this.isEnabled()) return;
+    if (!this.ready || !this.pool) return;
     if (this.authTimer) {
       clearTimeout(this.authTimer);
     }
@@ -138,7 +220,7 @@ class CloudSessionSync {
   }
 
   public flushAuthNow(authDir: string): Promise<void> {
-    if (!this.isEnabled() || !this.pool) return Promise.resolve();
+    if (!this.ready || !this.pool) return Promise.resolve();
     if (this.authTimer) {
       clearTimeout(this.authTimer);
       this.authTimer = null;
@@ -214,7 +296,7 @@ class CloudSessionSync {
   }
 
   public scheduleStateSync(stateJson: string): void {
-    if (!this.isEnabled()) return;
+    if (!this.ready || !this.pool) return;
     if (stateJson === this.lastSyncedState) return;
     this.pendingStateJson = stateJson;
 
@@ -229,7 +311,7 @@ class CloudSessionSync {
   }
 
   public async flushStateNow(explicitJson?: string): Promise<void> {
-    if (!this.isEnabled() || !this.pool) return;
+    if (!this.ready || !this.pool) return;
     if (this.stateTimer) {
       clearTimeout(this.stateTimer);
       this.stateTimer = null;
@@ -258,7 +340,7 @@ class CloudSessionSync {
       this.authTimer = null;
     }
     this.lastSyncedAuth.clear();
-    if (!this.isEnabled() || !this.pool) return;
+    if (!this.ready || !this.pool) return;
 
     try {
       await this.pool.query("DELETE FROM wabot_kv WHERE key LIKE 'auth:%'");

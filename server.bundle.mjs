@@ -1351,6 +1351,52 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
 var { Pool } = pg;
+var mockKvStore = /* @__PURE__ */ new Map();
+function createMockPool() {
+  return {
+    async query(text, values = []) {
+      const normalized = text.trim().toUpperCase();
+      if (normalized.startsWith("SELECT KEY, VALUE FROM WABOT_KV")) {
+        const rows = [];
+        for (const [key, entry] of mockKvStore.entries()) {
+          rows.push({ key, value: entry.value });
+        }
+        return { rows };
+      }
+      if (normalized.startsWith("INSERT INTO WABOT_KV")) {
+        if (normalized.includes("VALUES ('STATE:BOT-STATE.JSON'")) {
+          const val = String(values[0] ?? "");
+          const ts = Number(values[1] ?? Date.now());
+          mockKvStore.set("state:bot-state.json", { value: val, updatedAt: ts });
+        } else {
+          const key = String(values[0] ?? "");
+          const val = String(values[1] ?? "");
+          const ts = Number(values[2] ?? Date.now());
+          if (key) {
+            mockKvStore.set(key, { value: val, updatedAt: ts });
+          }
+        }
+        return { rows: [] };
+      }
+      if (normalized.startsWith("DELETE FROM WABOT_KV WHERE KEY LIKE 'AUTH:%'")) {
+        for (const key of Array.from(mockKvStore.keys())) {
+          if (key.startsWith("auth:")) {
+            mockKvStore.delete(key);
+          }
+        }
+        return { rows: [] };
+      }
+      if (normalized.startsWith("DELETE FROM WABOT_KV WHERE KEY = $1")) {
+        const key = String(values[0] ?? "");
+        mockKvStore.delete(key);
+        return { rows: [] };
+      }
+      return { rows: [] };
+    },
+    async end() {
+    }
+  };
+}
 function shouldForceSsl(connectionString) {
   const lower = connectionString.toLowerCase();
   return lower.includes("sslmode=require") || lower.includes(".render.com") || lower.includes(".neon.tech") || lower.includes(".supabase.co") || lower.includes(".aivencloud.com") || lower.includes(".cockroachlabs.cloud");
@@ -1359,6 +1405,7 @@ var CloudSessionSync = class {
   constructor() {
     this.pool = null;
     this.ready = false;
+    this.usingMock = false;
     this.lastSyncedAuth = /* @__PURE__ */ new Map();
     this.lastSyncedState = "";
     this.authTimer = null;
@@ -1367,19 +1414,29 @@ var CloudSessionSync = class {
     this.activeAuthSync = Promise.resolve();
   }
   isEnabled() {
-    return this.ready && this.pool !== null;
+    return this.ready && this.pool !== null && !this.usingMock;
   }
   async connectPool(connectionString) {
-    const preferSsl = shouldForceSsl(connectionString);
-    const candidates = preferSsl ? [{ rejectUnauthorized: false }, false] : [false, { rejectUnauthorized: false }];
+    const isUnixSocket = connectionString.includes("/cloudsql/");
+    const preferSsl = !isUnixSocket && shouldForceSsl(connectionString);
+    const candidates = isUnixSocket ? [false] : preferSsl ? [{ rejectUnauthorized: false }, false] : [false, { rejectUnauthorized: false }];
     for (const sslOption of candidates) {
-      const candidatePool = new Pool({
-        connectionString,
-        ssl: sslOption,
-        max: 3,
-        idleTimeoutMillis: 3e4,
-        connectionTimeoutMillis: 8e3
-      });
+      let candidatePool;
+      try {
+        candidatePool = new Pool({
+          connectionString,
+          ssl: sslOption,
+          max: 3,
+          idleTimeoutMillis: 3e4,
+          connectionTimeoutMillis: 3e3
+        });
+      } catch (err) {
+        console.warn(
+          "[CloudSync] Pool initialization failed \u2014 mock active:",
+          err instanceof Error ? err.message : String(err)
+        );
+        return null;
+      }
       candidatePool.on("error", (err) => {
         console.warn("[CloudSync] Idle PostgreSQL client notice:", err.message);
       });
@@ -1413,11 +1470,15 @@ var CloudSessionSync = class {
     const connected = await this.connectPool(dbUrl);
     if (!connected) {
       console.warn(
-        "[CloudSync] DATABASE_URL ditemukan namun gagal terhubung; menggunakan penyimpanan lokal."
+        "[CloudSync] DB not connected \u2014 in-memory mock & local storage fallback active."
       );
+      this.pool = createMockPool();
+      this.usingMock = true;
+      this.ready = true;
       return;
     }
     this.pool = connected;
+    this.usingMock = false;
     this.ready = true;
     try {
       const { rows } = await this.pool.query(
@@ -1449,7 +1510,7 @@ var CloudSessionSync = class {
     }
   }
   scheduleAuthSync(authDir) {
-    if (!this.isEnabled()) return;
+    if (!this.ready || !this.pool) return;
     if (this.authTimer) {
       clearTimeout(this.authTimer);
     }
@@ -1460,7 +1521,7 @@ var CloudSessionSync = class {
     this.authTimer.unref();
   }
   flushAuthNow(authDir) {
-    if (!this.isEnabled() || !this.pool) return Promise.resolve();
+    if (!this.ready || !this.pool) return Promise.resolve();
     if (this.authTimer) {
       clearTimeout(this.authTimer);
       this.authTimer = null;
@@ -1525,7 +1586,7 @@ var CloudSessionSync = class {
     return next;
   }
   scheduleStateSync(stateJson) {
-    if (!this.isEnabled()) return;
+    if (!this.ready || !this.pool) return;
     if (stateJson === this.lastSyncedState) return;
     this.pendingStateJson = stateJson;
     if (this.stateTimer) {
@@ -1538,7 +1599,7 @@ var CloudSessionSync = class {
     this.stateTimer.unref();
   }
   async flushStateNow(explicitJson) {
-    if (!this.isEnabled() || !this.pool) return;
+    if (!this.ready || !this.pool) return;
     if (this.stateTimer) {
       clearTimeout(this.stateTimer);
       this.stateTimer = null;
@@ -1564,7 +1625,7 @@ var CloudSessionSync = class {
       this.authTimer = null;
     }
     this.lastSyncedAuth.clear();
-    if (!this.isEnabled() || !this.pool) return;
+    if (!this.ready || !this.pool) return;
     try {
       await this.pool.query("DELETE FROM wabot_kv WHERE key LIKE 'auth:%'");
     } catch (err) {
@@ -2605,6 +2666,58 @@ async function renderSvgViaResvgWasm(svg) {
   } finally {
     resvg.free();
   }
+}
+function xmlEscapeAttr(raw) {
+  return raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+async function measureSvgTextWidth(text, fontSize, fontWeight = 400) {
+  if (!text) return 0;
+  const trimmed = text.replace(/\r/g, "");
+  if (!trimmed.trim()) {
+    return trimmed.length * fontSize * 0.28;
+  }
+  await ensureResvgInitialized();
+  const fonts = await loadFontBuffersOnce();
+  const familyAttr = fonts.buffers.length > 0 ? `${fonts.family}, Arial, Helvetica, DejaVu Sans, sans-serif` : "Arial, Helvetica, DejaVu Sans, sans-serif";
+  const probeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="256"><text x="32" y="128" xml:space="preserve" font-family="${familyAttr}" font-size="${fontSize}" font-weight="${fontWeight}">${xmlEscapeAttr(
+    trimmed
+  )}</text></svg>`;
+  const resvg = new Resvg(probeSvg, {
+    font: fonts.buffers.length > 0 ? {
+      fontBuffers: fonts.buffers,
+      defaultFontFamily: fonts.family,
+      sansSerifFamily: fonts.family
+    } : {
+      loadSystemFonts: true
+    }
+  });
+  let bboxWidth = 0;
+  try {
+    const bbox = resvg.getBBox();
+    if (bbox) {
+      try {
+        bboxWidth = Math.max(0, bbox.x - 32 + bbox.width);
+      } finally {
+        bbox.free();
+      }
+    }
+  } finally {
+    resvg.free();
+  }
+  let emojiExtra = 0;
+  for (const ch of Array.from(trimmed)) {
+    const cp = ch.codePointAt(0) || 0;
+    if (cp >= 127744) {
+      emojiExtra += fontSize * 0.35;
+    }
+  }
+  const trailingSpaces = trimmed.length - trimmed.trimEnd().length;
+  const spaceExtra = trailingSpaces > 0 ? trailingSpaces * fontSize * 0.28 : 0;
+  return Math.max(bboxWidth + spaceExtra, emojiExtra > 0 ? bboxWidth + emojiExtra * 0.4 : 0);
+}
+async function renderSvgConsistentToWebp(svg, quality = 92) {
+  const pngBuf = await renderSvgViaResvgWasm(svg);
+  return pngBufferToWebp(pngBuf, quality);
 }
 function sniffImageMetadata(buf) {
   if (buf.length >= 24 && buf[0] === 137 && buf[1] === 80 && buf[2] === 78 && buf[3] === 71) {
@@ -4944,18 +5057,33 @@ function isTrustedLocalOrPreviewHost(rawHost) {
   if (host.startsWith("192.168.") || host.startsWith("10.") || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) || /^100\.(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-7])\./.test(host) || host.endsWith(".local") || host.endsWith(".ts.net")) {
     return true;
   }
-  if (host.endsWith(".run.app") || host.endsWith(".googleusercontent.com")) {
+  if (host.endsWith(".run.app") || host.endsWith(".googleusercontent.com") || host.endsWith(".google.com") || host.endsWith(".goog") || host.endsWith(".cloudworkstations.dev") || host.endsWith(".web.app")) {
     return true;
   }
   return false;
 }
-function isRequestFromPublicTunnel(headers) {
-  if (headers["cf-ray"] || headers["cf-connecting-ip"]) {
+function isRequestFromPublicTunnel(headers, activePublicUrl) {
+  const forwardedHost = Array.isArray(headers["x-forwarded-host"]) ? headers["x-forwarded-host"][0] : headers["x-forwarded-host"];
+  const effectiveHost = (forwardedHost || headers.host || "").split(",")[0].split(":")[0].trim().toLowerCase();
+  if (isTrustedLocalOrPreviewHost(effectiveHost)) {
+    return false;
+  }
+  if (effectiveHost.endsWith(".trycloudflare.com") || effectiveHost.endsWith(".lhr.life")) {
     return true;
   }
-  const forwardedHost = Array.isArray(headers["x-forwarded-host"]) ? headers["x-forwarded-host"][0] : headers["x-forwarded-host"];
-  const effectiveHost = (forwardedHost || headers.host || "").split(",")[0].trim();
-  return !isTrustedLocalOrPreviewHost(effectiveHost);
+  if (activePublicUrl) {
+    try {
+      const tunnelHost = new URL(activePublicUrl).hostname.toLowerCase();
+      if (effectiveHost === tunnelHost) {
+        return true;
+      }
+    } catch {
+    }
+    if (headers["cf-ray"] || headers["cf-connecting-ip"]) {
+      return true;
+    }
+  }
+  return false;
 }
 var RemoteTunnelManager = class {
   constructor() {
@@ -4973,7 +5101,7 @@ var RemoteTunnelManager = class {
         next();
         return;
       }
-      if (!isRequestFromPublicTunnel(req.headers)) {
+      if (!isRequestFromPublicTunnel(req.headers, this.publicUrl)) {
         next();
         return;
       }
@@ -5321,7 +5449,7 @@ var RemoteTunnelManager = class {
   }
   isAuthorizedWsUpgrade(req) {
     const host = req.headers.host;
-    if (!isRequestFromPublicTunnel(req.headers)) {
+    if (!isRequestFromPublicTunnel(req.headers, this.publicUrl)) {
       return true;
     }
     const cookies = parseCookies(req.headers.cookie);
@@ -5666,64 +5794,249 @@ function pickNameColor(name) {
   }
   return QC_NAME_COLORS[hash % QC_NAME_COLORS.length];
 }
+async function splitLongWordByPixelWidth(word, maxLinePx, fontSize, fontWeight) {
+  const chars = Array.from(word);
+  const chunks = [];
+  let current = "";
+  for (const ch of chars) {
+    const candidate = current + ch;
+    const width = await measureSvgTextWidth(candidate, fontSize, fontWeight);
+    if (width <= maxLinePx || current.length === 0) {
+      current = candidate;
+    } else {
+      chunks.push(current);
+      current = ch;
+    }
+  }
+  if (current) {
+    chunks.push(current);
+  }
+  return chunks;
+}
+async function wrapTextByPixelWidth(rawText, maxLinePx, fontSize, maxLines, fontWeight = 400) {
+  const paragraphs = rawText.replace(/\r\n/g, "\n").split("\n").map((p) => p.trim()).filter((p, idx, arr) => p.length > 0 || arr.length === 1 && idx === 0);
+  const lines = [];
+  for (const para of paragraphs) {
+    if (lines.length >= maxLines) break;
+    const words = para.split(/\s+/).filter(Boolean);
+    if (words.length === 0) continue;
+    let current = "";
+    for (const rawWord of words) {
+      if (lines.length >= maxLines) break;
+      const wordWidth = await measureSvgTextWidth(
+        rawWord,
+        fontSize,
+        fontWeight
+      );
+      const segments = wordWidth > maxLinePx ? await splitLongWordByPixelWidth(
+        rawWord,
+        maxLinePx,
+        fontSize,
+        fontWeight
+      ) : [rawWord];
+      for (const seg of segments) {
+        if (lines.length >= maxLines) break;
+        if (!current) {
+          current = seg;
+        } else {
+          const candidate = `${current} ${seg}`;
+          const candidateWidth = await measureSvgTextWidth(
+            candidate,
+            fontSize,
+            fontWeight
+          );
+          if (candidateWidth <= maxLinePx) {
+            current = candidate;
+          } else {
+            lines.push(current);
+            current = seg;
+            if (lines.length >= maxLines) {
+              current = "";
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (current && lines.length < maxLines) {
+      lines.push(current);
+    }
+  }
+  return lines.length > 0 ? lines : ["Halo!"];
+}
+async function buildAvatarSvgMarkup(avatarBuffer, cx, cy, r, accentColor) {
+  const clipId = "qcAvatarClip";
+  const defs = `<clipPath id="${clipId}"><circle cx="${cx}" cy="${cy}" r="${r}" /></clipPath>`;
+  if (avatarBuffer && avatarBuffer.length > 0) {
+    try {
+      const normalized = await ensureWhatsappImageBuffer(avatarBuffer);
+      const b64 = normalized.buffer.toString("base64");
+      const dataUri = `data:${normalized.mimeType};base64,${b64}`;
+      const size = r * 2;
+      const body2 = [
+        `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#1F2C34" />`,
+        `<image href="${dataUri}" x="${cx - r}" y="${cy - r}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${clipId})" />`,
+        `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#FFFFFF" stroke-opacity="0.14" stroke-width="1.5" />`
+      ].join("\n");
+      return { defs, body: body2 };
+    } catch {
+    }
+  }
+  const headR = Math.round(r * 0.34);
+  const headCy = Math.round(cy - r * 0.16);
+  const bodyRx = Math.round(r * 0.64);
+  const bodyRy = Math.round(r * 0.52);
+  const bodyCy = Math.round(cy + r * 0.68);
+  const body = [
+    `<g clip-path="url(#${clipId})">`,
+    `  <circle cx="${cx}" cy="${cy}" r="${r}" fill="#2A3942" />`,
+    `  <circle cx="${cx}" cy="${headCy}" r="${headR}" fill="#CFD8DC" />`,
+    `  <ellipse cx="${cx}" cy="${bodyCy}" rx="${bodyRx}" ry="${bodyRy}" fill="#CFD8DC" />`,
+    `</g>`,
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${accentColor}" stroke-opacity="0.35" stroke-width="1.5" />`
+  ].join("\n");
+  return { defs, body };
+}
 async function createQuoteChatSticker(opts) {
-  const cleanName = (opts.senderName || "Pengguna").slice(0, 26);
-  const cleanText = (opts.text || "Halo!").trim().slice(0, 220);
-  const initials = cleanName.replace(/[^a-zA-Z0-9\s]/g, "").trim().split(/\s+/).slice(0, 2).map((s) => s[0]?.toUpperCase() || "").join("") || "WA";
+  const cleanName = (opts.senderName || "Pengguna").trim().slice(0, 25) || "Pengguna";
+  const cleanText = (opts.text || "Halo!").trim().slice(0, 260) || "Halo!";
   const now = /* @__PURE__ */ new Date();
   const timeStr = now.toLocaleTimeString("id-ID", {
     hour: "2-digit",
     minute: "2-digit"
   });
   const accent = pickNameColor(cleanName);
-  const wrapped = wrapTextLines(cleanText, 26, 7);
-  const lineH = 29;
-  const textBlockH = wrapped.length * lineH;
   let svg;
   if (opts.style === "ios") {
-    const bubbleH = Math.max(88, 56 + textBlockH);
-    const topY = Math.round((512 - (bubbleH + 34)) / 2);
+    const avatarR = 30;
+    const avatarCx = 32;
+    const bubbleX = 76;
+    const padX = 18;
+    const maxBubbleW = 404;
+    const maxContentW = maxBubbleW - padX * 2;
+    const textFontSize = 23;
+    const lineH = 29;
+    const wrapped = await wrapTextByPixelWidth(
+      cleanText,
+      maxContentW,
+      textFontSize,
+      8,
+      400
+    );
+    const lineWidths = await Promise.all(
+      wrapped.map((ln) => measureSvgTextWidth(ln, textFontSize, 400))
+    );
+    const maxLinePx = Math.max(...lineWidths, 18);
+    const contentW = Math.min(maxContentW, Math.ceil(maxLinePx));
+    const bubbleW = Math.max(58, contentW + padX * 2);
+    const bubbleH = Math.max(50, 24 + wrapped.length * lineH);
+    const headerLabel = `${cleanName} \xB7 ${timeStr}`;
+    const headerPx = await measureSvgTextWidth(headerLabel, 14, 500);
+    const bubbleTopY = 22;
+    const avatarCy = bubbleTopY + bubbleH - avatarR;
+    const avatarMarkup = await buildAvatarSvgMarkup(
+      opts.avatarBuffer,
+      avatarCx,
+      avatarCy,
+      avatarR,
+      "#0A84FF"
+    );
     const textSvg = wrapped.map(
-      (ln, i) => `<text x="114" y="${topY + 62 + i * lineH}" font-family="-apple-system, Helvetica Neue, Arial, DejaVu Sans, sans-serif" font-size="23" font-weight="400" fill="#FFFFFF">${escapeXml(
+      (ln, i) => `<text x="${bubbleX + padX}" y="${bubbleTopY + 31 + i * lineH}" xml:space="preserve" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="${textFontSize}" font-weight="400" fill="#FFFFFF">${escapeXml(
         ln
       )}</text>`
     ).join("\n");
+    const naturalW = Math.max(bubbleX + bubbleW, bubbleX + 8 + Math.ceil(headerPx));
+    const naturalH = bubbleTopY + bubbleH + 4;
+    const scale = Math.min(1.42, 484 / Math.max(naturalW, 1), 480 / Math.max(naturalH, 1));
+    const tx = 14;
+    const ty = Math.max(12, Math.round((512 - naturalH * scale) / 2));
     svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-      <text x="98" y="${topY + 14}" font-family="-apple-system, Helvetica Neue, Arial, sans-serif" font-size="16" font-weight="500" fill="#8E8E93">${escapeXml(
-      cleanName
-    )} \xB7 iMessage \xB7 ${escapeXml(timeStr)}</text>
-      <circle cx="48" cy="${topY + 26 + bubbleH - 28}" r="30" fill="#2C2C2E" />
-      <text x="48" y="${topY + 26 + bubbleH - 19}" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#FFFFFF">${escapeXml(
-      initials
+      <defs>${avatarMarkup.defs}</defs>
+      <g transform="translate(${tx}, ${ty}) scale(${scale.toFixed(4)})">
+        <text x="${bubbleX + 10}" y="14" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="14" font-weight="500" fill="#8E8E93">${escapeXml(
+      headerLabel
     )}</text>
-      <rect x="92" y="${topY + 26}" width="396" height="${bubbleH}" rx="28" fill="#0A84FF" />
-      ${textSvg}
+        ${avatarMarkup.body}
+        <rect x="${bubbleX}" y="${bubbleTopY}" width="${bubbleW}" height="${bubbleH}" rx="24" fill="#0A84FF" />
+        ${textSvg}
+      </g>
     </svg>`;
   } else {
-    const bubbleH = Math.max(108, 72 + textBlockH);
-    const topY = Math.round((512 - bubbleH) / 2);
+    const avatarR = 32;
+    const avatarCx = 34;
+    const avatarCy = 34;
+    const bubbleX = 80;
+    const padX = 16;
+    const maxBubbleW = 404;
+    const maxContentW = maxBubbleW - padX * 2;
+    const nameFontSize = 16;
+    const textFontSize = 24;
+    const timeFontSize = 13;
+    const lineH = 30;
+    const wrapped = await wrapTextByPixelWidth(
+      cleanText,
+      maxContentW,
+      textFontSize,
+      8,
+      400
+    );
+    const [namePx, timePx, ...lineWidths] = await Promise.all([
+      measureSvgTextWidth(cleanName, nameFontSize, 700),
+      measureSvgTextWidth(timeStr, timeFontSize, 400),
+      ...wrapped.map((ln) => measureSvgTextWidth(ln, textFontSize, 400))
+    ]);
+    const maxLinePx = Math.max(...lineWidths, 16);
+    const contentW = Math.min(
+      maxContentW,
+      Math.ceil(Math.max(namePx, maxLinePx, timePx))
+    );
+    const bubbleW = Math.max(66, contentW + padX * 2);
+    const lastLinePx = lineWidths[lineWidths.length - 1] || 0;
+    const inlineTimeFits = contentW - lastLinePx >= timePx + 12;
+    const firstTextY = 54;
+    const lastTextY = firstTextY + (wrapped.length - 1) * lineH;
+    const timeY = inlineTimeFits ? lastTextY + 4 : lastTextY + 19;
+    const bubbleH = inlineTimeFits ? lastTextY + 17 : timeY + 11;
+    const avatarMarkup = await buildAvatarSvgMarkup(
+      opts.avatarBuffer,
+      avatarCx,
+      avatarCy,
+      avatarR,
+      accent
+    );
     const textSvg = wrapped.map(
-      (ln, i) => `<text x="114" y="${topY + 66 + i * lineH}" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="22" fill="#F4F4F5">${escapeXml(
+      (ln, i) => `<text x="${bubbleX + padX}" y="${firstTextY + i * lineH}" xml:space="preserve" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="${textFontSize}" font-weight="400" fill="#F4F4F5">${escapeXml(
         ln
       )}</text>`
     ).join("\n");
+    const naturalW = bubbleX + bubbleW;
+    const naturalH = Math.max(avatarCy + avatarR + 4, bubbleH);
+    const scale = Math.min(
+      1.42,
+      484 / Math.max(naturalW, 1),
+      480 / Math.max(naturalH, 1)
+    );
+    const tx = 14;
+    const ty = Math.max(12, Math.round((512 - naturalH * scale) / 2));
     svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-      <circle cx="46" cy="${topY + 34}" r="32" fill="${accent}" fill-opacity="0.22" stroke="${accent}" stroke-width="2" />
-      <text x="46" y="${topY + 42}" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="${accent}">${escapeXml(
-      initials
-    )}</text>
-      <path d="M84 ${topY + 18} L98 ${topY + 18} L98 ${topY + 34} Z" fill="#1F2C34" />
-      <rect x="94" y="${topY}" width="402" height="${bubbleH}" rx="22" fill="#1F2C34" />
-      <text x="114" y="${topY + 32}" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="20" font-weight="700" fill="${accent}">${escapeXml(
+      <defs>${avatarMarkup.defs}</defs>
+      <g transform="translate(${tx}, ${ty}) scale(${scale.toFixed(4)})">
+        ${avatarMarkup.body}
+        <path d="M ${bubbleX - 10} 0 L ${bubbleX + 12} 0 L ${bubbleX + 4} 18 Z" fill="#1F2C34" />
+        <rect x="${bubbleX}" y="0" width="${bubbleW}" height="${bubbleH}" rx="18" fill="#1F2C34" />
+        <rect x="${bubbleX}" y="0" width="18" height="18" fill="#1F2C34" />
+        <text x="${bubbleX + padX}" y="24" xml:space="preserve" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="${nameFontSize}" font-weight="700" fill="${accent}">${escapeXml(
       cleanName
     )}</text>
-      ${textSvg}
-      <text x="476" y="${topY + bubbleH - 14}" text-anchor="end" font-family="Arial, sans-serif" font-size="15" fill="#8696A0">${escapeXml(
+        ${textSvg}
+        <text x="${bubbleX + bubbleW - 13}" y="${timeY}" text-anchor="end" font-family="Arial, Helvetica, DejaVu Sans, sans-serif" font-size="${timeFontSize}" fill="#8696A0">${escapeXml(
       timeStr
     )}</text>
+      </g>
     </svg>`;
   }
-  const webp = await renderSvgToWebp(svg, 92);
+  const webp = await renderSvgConsistentToWebp(svg, 92);
   return injectWhatsAppExif(webp, opts.packName, opts.author);
 }
 function emojiToCodepointHex(emoji) {
@@ -7223,13 +7536,16 @@ Artis: *${track.author}*`
 Contoh: *${config.prefix}${matchedCmd.example}*`
           );
         }
-        const bubbleSender = !argsText && ctx.quotedSenderName ? ctx.quotedSenderName : ctx.senderName;
+        const rawSender = !argsText && ctx.quotedSenderName ? ctx.quotedSenderName : ctx.senderName;
+        const bubbleSender = ctx.source === "simulator" ? rawSender.replace(/\s*\((Owner|Member)\)\s*$/i, "").trim() || rawSender : rawSender;
+        const avatarBuffer = ctx.senderAvatarBuffer ?? (!argsText && ctx.quotedAvatarBuffer ? ctx.quotedAvatarBuffer : null) ?? ctx.imageBuffer ?? null;
         const stickerBuf = await createQuoteChatSticker({
           text: bubbleText,
           senderName: bubbleSender,
           style: matchedCmd.id === "iqc" ? "ios" : "wa",
           packName: config.stickerPackName,
-          author: config.stickerAuthor
+          author: config.stickerAuthor,
+          avatarBuffer
         });
         const webUrl = botStore.storeSticker(stickerBuf);
         botStore.incrementStat("stickersCreated");
@@ -8602,9 +8918,114 @@ var WhatsAppSessionManager = class {
     this.lastHidetagPerGroup = /* @__PURE__ */ new Map();
     this.recentViewOnceCache = /* @__PURE__ */ new Map();
     this.lastViewOnceByChat = /* @__PURE__ */ new Map();
+    this.avatarCache = /* @__PURE__ */ new Map();
     this.outboundQueue = Promise.resolve();
     this.lastOutboundSentAt = 0;
     void this.loadRecentViewOnceFromDisk();
+  }
+  normalizeUserJid(rawJid) {
+    if (!rawJid) return null;
+    const trimmed = rawJid.trim();
+    if (!trimmed || trimmed.endsWith("@g.us") || trimmed === "status@broadcast") {
+      return null;
+    }
+    const atIdx = trimmed.indexOf("@");
+    if (atIdx === -1) {
+      const digits = trimmed.replace(/[^0-9]/g, "");
+      return digits.length >= 8 ? `${digits}@s.whatsapp.net` : null;
+    }
+    const userPart = trimmed.slice(0, atIdx).split(":")[0]?.trim() || "";
+    const domainPart = trimmed.slice(atIdx + 1).trim().toLowerCase();
+    if (!userPart) return null;
+    if (domainPart === "s.whatsapp.net" || domainPart === "c.us") {
+      return `${userPart}@s.whatsapp.net`;
+    }
+    if (domainPart === "lid") {
+      return `${userPart}@lid`;
+    }
+    return null;
+  }
+  async fetchUserProfilePicBuffer(sock, candidateJids) {
+    const normalizedJids = [];
+    for (const raw of candidateJids) {
+      const norm = this.normalizeUserJid(raw);
+      if (norm && !normalizedJids.includes(norm)) {
+        normalizedJids.push(norm);
+      }
+    }
+    if (normalizedJids.length === 0) return null;
+    const now = Date.now();
+    for (const jid of normalizedJids) {
+      const cached = this.avatarCache.get(jid);
+      if (cached && cached.expiresAt > now && cached.buffer) {
+        return cached.buffer;
+      }
+    }
+    const allNegativelyCached = normalizedJids.every((jid) => {
+      const cached = this.avatarCache.get(jid);
+      return Boolean(cached && cached.expiresAt > now && cached.buffer === null);
+    });
+    if (allNegativelyCached) {
+      return null;
+    }
+    const queryPpUrl = async (jid, kind, timeoutMs) => {
+      try {
+        const url = await Promise.race([
+          sock.profilePictureUrl(jid, kind),
+          new Promise(
+            (resolve) => setTimeout(() => resolve(void 0), timeoutMs)
+          )
+        ]);
+        return url && /^https?:\/\//i.test(url) ? url : null;
+      } catch {
+        return null;
+      }
+    };
+    for (const jid of normalizedJids) {
+      const ppUrl = await queryPpUrl(jid, "image", 4500) || await queryPpUrl(jid, "preview", 3500);
+      if (!ppUrl) continue;
+      try {
+        const fetched = await fetchRemoteBuffer(ppUrl, 8e3);
+        if (fetched.buffer && fetched.buffer.length > 0) {
+          const normalizedImg = await ensureWhatsappImageBuffer(
+            fetched.buffer,
+            fetched.contentType || "image/jpeg"
+          );
+          if (this.avatarCache.size >= 60) {
+            const oldestKey = this.avatarCache.keys().next().value;
+            if (oldestKey) this.avatarCache.delete(oldestKey);
+          }
+          for (const aliasJid of normalizedJids) {
+            this.avatarCache.set(aliasJid, {
+              buffer: normalizedImg.buffer,
+              expiresAt: Date.now() + 5 * 60 * 1e3
+            });
+          }
+          return normalizedImg.buffer;
+        }
+      } catch {
+      }
+    }
+    for (const jid of normalizedJids) {
+      this.avatarCache.set(jid, {
+        buffer: null,
+        expiresAt: Date.now() + 45 * 1e3
+      });
+    }
+    return null;
+  }
+  async getProfilePictureForUser(phoneOrJid) {
+    if (!this.sock) return null;
+    const candidates = [phoneOrJid];
+    if (this.sock.user?.id) {
+      const botPhone = this.sock.user.id.split(":")[0]?.split("@")[0] || "";
+      const cleanTarget = (phoneOrJid || "").replace(/[^0-9]/g, "");
+      if (!cleanTarget || cleanTarget === botPhone) {
+        candidates.push(this.sock.user.id);
+        candidates.push(this.sock.user.lid);
+      }
+    }
+    return this.fetchUserProfilePicBuffer(this.sock, candidates);
   }
   sleepRandom(minMs, maxMs) {
     const duration = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
@@ -10125,11 +10546,25 @@ Batas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam Whats
     const quotedParticipantJid = contextInfo?.participant || void 0;
     const unwrappedQuoted = this.unwrapWaMessage(contextInfo?.quotedMessage);
     const quotedText = unwrappedQuoted?.conversation || unwrappedQuoted?.extendedTextMessage?.text || unwrappedQuoted?.imageMessage?.caption || unwrappedQuoted?.videoMessage?.caption || unwrappedQuoted?.documentMessage?.caption || void 0;
-    const quotedSenderPhone = quotedParticipantJid ? quotedParticipantJid.split(":")[0]?.split("@")[0] : void 0;
-    const quotedSenderName = quotedSenderPhone ? `+${quotedSenderPhone}` : void 0;
+    const quotedBaseId = quotedParticipantJid ? quotedParticipantJid.split(":")[0]?.split("@")[0] || "" : "";
+    const foundQuotedMember = quotedBaseId && groupMembers ? groupMembers.find(
+      (m) => m.jid === quotedParticipantJid || m.jid.split(":")[0]?.split("@")[0] === quotedBaseId || m.lid && (m.lid === quotedParticipantJid || m.lid.split(":")[0]?.split("@")[0] === quotedBaseId)
+    ) : void 0;
+    const quotedSenderPhone = foundQuotedMember?.phone || (quotedParticipantJid ? quotedParticipantJid.split(":")[0]?.split("@")[0] : void 0);
+    const isSelfQuoted = Boolean(quotedParticipantJid) && (quotedParticipantJid === senderJid || senderAltJid && quotedParticipantJid === senderAltJid || quotedSenderPhone && quotedSenderPhone === senderPhone);
+    const quotedSenderName = isSelfQuoted ? senderName : quotedSenderPhone ? `+${quotedSenderPhone}` : void 0;
     const pfx = botStore.config.prefix;
     const lowerText = text.toLowerCase();
     const firstToken = lowerText.startsWith(pfx.toLowerCase()) ? lowerText.slice(pfx.length).trim().split(/\s+/)[0] || "" : "";
+    const needsQcAvatar = [
+      "qc",
+      "quotely",
+      "quotechat",
+      "bubble",
+      "iqc",
+      "iphoneqc",
+      "ioschat"
+    ].includes(firstToken);
     const needsImage = [
       "s",
       "stiker",
@@ -10271,12 +10706,38 @@ Batas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam Whats
       "ptv",
       "tourl"
     ].includes(firstToken);
-    const [imageBuffer, videoBuffer, audioBuffer, stickerBuffer, voResult] = await Promise.all([
+    const senderAvatarJids = [
+      /^[0-9]{8,16}$/.test(senderPhone) ? `${senderPhone}@s.whatsapp.net` : void 0,
+      senderAltJid,
+      senderJid,
+      ...groupMembers ? groupMembers.filter((m) => m.phone === senderPhone || m.jid === senderJid).flatMap((m) => [m.jid, m.lid]) : [],
+      ...msg.key.fromMe ? [
+        sock.user?.id,
+        sock.user?.lid
+      ] : []
+    ];
+    const quotedAvatarJids = [
+      quotedSenderPhone && /^[0-9]{8,16}$/.test(quotedSenderPhone) ? `${quotedSenderPhone}@s.whatsapp.net` : void 0,
+      quotedParticipantJid,
+      foundQuotedMember?.jid,
+      foundQuotedMember?.lid
+    ];
+    const [
+      imageBuffer,
+      videoBuffer,
+      audioBuffer,
+      stickerBuffer,
+      voResult,
+      senderAvatarBuffer,
+      quotedAvatarBuffer
+    ] = await Promise.all([
       needsImage ? this.extractAttachedOrQuotedMediaByKind(sock, msg, "image") : Promise.resolve(null),
       needsVideo ? this.extractAttachedOrQuotedMediaByKind(sock, msg, "video") : Promise.resolve(null),
       needsAudio ? this.extractAttachedOrQuotedMediaByKind(sock, msg, "audio") : Promise.resolve(null),
       needsSticker ? this.extractAttachedOrQuotedMediaByKind(sock, msg, "sticker") : Promise.resolve(null),
-      needsViewOnce ? this.extractViewOnceForRvo(sock, msg) : Promise.resolve(null)
+      needsViewOnce ? this.extractViewOnceForRvo(sock, msg) : Promise.resolve(null),
+      needsQcAvatar ? this.fetchUserProfilePicBuffer(sock, senderAvatarJids) : Promise.resolve(null),
+      needsQcAvatar && quotedParticipantJid && !isSelfQuoted ? this.fetchUserProfilePicBuffer(sock, quotedAvatarJids) : Promise.resolve(null)
     ]);
     const viewOnceMedia = voResult?.payload ?? null;
     const viewOnceError = voResult?.errorHint ?? null;
@@ -10315,6 +10776,8 @@ Batas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam Whats
       videoBuffer,
       audioBuffer,
       stickerBuffer,
+      senderAvatarBuffer,
+      quotedAvatarBuffer,
       viewOnceMedia,
       viewOnceError,
       quotedText,
@@ -11244,6 +11707,18 @@ async function startServer() {
         media: attachedPreviewMedia
       };
       botStore.addSimulatorMessage(userMsg);
+      const simPfx = botStore.config.prefix.toLowerCase();
+      const simFirstToken = text.toLowerCase().startsWith(simPfx) ? text.toLowerCase().slice(simPfx.length).trim().split(/\s+/)[0] || "" : "";
+      const isSimQc = [
+        "qc",
+        "quotely",
+        "quotechat",
+        "bubble",
+        "iqc",
+        "iphoneqc",
+        "ioschat"
+      ].includes(simFirstToken);
+      const simSenderAvatar = isSimQc ? await waManager.getProfilePictureForUser(senderPhone) : null;
       const execStartedAt = Date.now();
       const botResult = await processBotMessage({
         source: "simulator",
@@ -11260,6 +11735,7 @@ async function startServer() {
         videoBuffer,
         audioBuffer,
         stickerBuffer,
+        senderAvatarBuffer: simSenderAvatar,
         viewOnceMedia,
         quotedText,
         quotedSenderName,
@@ -11537,6 +12013,7 @@ ${stepLabel}` : stepLabel : stepLabel;
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
+        allowedHosts: true,
         hmr: process.env.DISABLE_HMR === "true" ? false : { server },
         watch: process.env.DISABLE_HMR === "true" ? null : void 0
       },
