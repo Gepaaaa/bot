@@ -457,9 +457,19 @@ export async function processBotMessage(
     };
   }
 
+  // Support numbered choice input (e.g. "1. .menudownload" or "1. menudownload")
+  let normalizedTrimmed = trimmed;
+  const numberedMatch = trimmed.match(/^([1-7])\.\s*(.+)$/);
+  if (numberedMatch) {
+    const rest = numberedMatch[2].trim();
+    normalizedTrimmed = rest.startsWith(config.prefix)
+      ? rest
+      : `${config.prefix}${rest}`;
+  }
+
   // 3. Single Prefix check
-  if (!trimmed.startsWith(config.prefix)) {
-    const autoReply = evaluateAutoResponder(trimmed, {
+  if (!normalizedTrimmed.startsWith(config.prefix)) {
+    const autoReply = evaluateAutoResponder(normalizedTrimmed, {
       isGroup: Boolean(ctx.isGroup),
       senderPhone: ctx.senderPhone,
       senderName: ctx.senderName,
@@ -475,7 +485,7 @@ export async function processBotMessage(
     return { handled: false };
   }
 
-  const withoutPrefix = trimmed.slice(config.prefix.length).trim();
+  const withoutPrefix = normalizedTrimmed.slice(config.prefix.length).trim();
   if (!withoutPrefix) {
     return { handled: false };
   }
@@ -487,8 +497,20 @@ export async function processBotMessage(
   const argsText =
     firstSpaceIdx === -1 ? '' : withoutPrefix.slice(firstSpaceIdx + 1).trim();
 
+  const NUMBER_TO_MENU: Record<string, string> = {
+    '1': 'menudownload',
+    '2': 'menustiker',
+    '3': 'menumedia',
+    '4': 'menuaudio',
+    '5': 'menugrup',
+    '6': 'menuotomasi',
+    '7': 'menuinfo',
+  };
+
+  const effectiveCmdId = NUMBER_TO_MENU[rawCmd] || rawCmd;
+
   const matchedCmd = COMMAND_CATALOG.find(
-    (c) => c.id === rawCmd || c.aliases.includes(rawCmd)
+    (c) => c.id === effectiveCmdId || c.aliases.includes(effectiveCmdId)
   );
 
   if (!matchedCmd) {
@@ -815,11 +837,19 @@ export async function processBotMessage(
     let result: BotCommandResult = { handled: true, reactionStatus: 'success' };
 
     switch (matchedCmd.id) {
-      case 'menu': {
+      case 'menu':
+      case 'allmenu':
+      case 'menudownload':
+      case 'menustiker':
+      case 'menumedia':
+      case 'menuaudio':
+      case 'menugrup':
+      case 'menuotomasi':
+      case 'menuinfo': {
         result = {
           handled: true,
           reactionStatus: 'success',
-          replyText: buildMenuText(argsText, rawCmd, ctx.senderName),
+          replyText: buildMenuText(argsText, matchedCmd.id, ctx.senderName),
         };
         break;
       }

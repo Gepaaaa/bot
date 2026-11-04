@@ -75,15 +75,15 @@ const MENU_PREVIEW_PRESETS: Array<{
   query: string;
   alias?: string;
 }> = [
-  { id: 'main', label: '.menu (Utama)', query: '' },
-  { id: '1', label: '.menu 1 (Downloader)', query: '1' },
-  { id: '2', label: '.menu 2 (Stiker)', query: '2' },
-  { id: '3', label: '.menu 3 (Media)', query: '3' },
-  { id: '4', label: '.menu 4 (Audio)', query: '4' },
-  { id: '5', label: '.menu 5 (Admin Grup)', query: '5' },
-  { id: '6', label: '.menu 6 (Otomasi)', query: '6' },
-  { id: '7', label: '.menu 7 (Info)', query: '7' },
+  { id: 'main', label: '.menu (Kategori)', query: '' },
   { id: 'all', label: '.allmenu (Lengkap)', query: '', alias: 'allmenu' },
+  { id: '1', label: '.menudownload (01)', query: '', alias: 'menudownload' },
+  { id: '2', label: '.menustiker (02)', query: '', alias: 'menustiker' },
+  { id: '3', label: '.menumedia (03)', query: '', alias: 'menumedia' },
+  { id: '4', label: '.menuaudio (04)', query: '', alias: 'menuaudio' },
+  { id: '5', label: '.menugrup (05)', query: '', alias: 'menugrup' },
+  { id: '6', label: '.menuotomasi (06)', query: '', alias: 'menuotomasi' },
+  { id: '7', label: '.menuinfo (07)', query: '', alias: 'menuinfo' },
 ];
 
 function renderWaFormattedText(raw: string): React.ReactNode {

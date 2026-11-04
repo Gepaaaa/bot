@@ -514,8 +514,16 @@ export function ChatSimulatorView({
             run: () => void executeSend({ text: `${p}tt ${SAMPLE_TIKTOK_URL}` }),
           },
           {
-            label: `${p}menu`,
+            label: `${p}menu (Kategori)`,
             run: () => void executeSend({ text: `${p}menu` }),
+          },
+          {
+            label: `${p}allmenu (Lengkap)`,
+            run: () => void executeSend({ text: `${p}allmenu` }),
+          },
+          {
+            label: `${p}menudownload`,
+            run: () => void executeSend({ text: `${p}menudownload` }),
           },
         ]
       : [

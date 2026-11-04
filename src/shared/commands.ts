@@ -43,7 +43,7 @@ export const DEFAULT_TEMPLATES: BotReplyTemplates = {
   menuHeader:
     '*{botName}*\nPrefix: *{prefix}*  ·  Fitur Aktif: *{totalCommands}*\nOwner: *wa.me/{ownerNumber}*',
   menuFooter:
-    '_Ketik {prefix}menu <1-7> untuk detail kategori · {prefix}owner kontak owner_',
+    '_Ketik *{prefix}menu <1-7>* untuk melihat detail kategori._\n_Ketik *{prefix}owner* untuk menghubungi pengembang._',
   downloaderCaption:
     '*Unduhan Selesai ({platform})*\nJudul: {title}\nKreator: {author}\nDurasi: {duration}',
   audioCaption:
@@ -777,12 +777,84 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
   // ================= UTILITAS & INFO =================
   {
     id: 'menu',
-    aliases: ['help', 'allmenu', 'fitur'],
+    aliases: ['help', 'fitur'],
     category: 'utility',
-    usage: 'menu [kategori / fitur]',
+    usage: 'menu [1-7 / fitur]',
     description:
-      'Tampilkan ringkasan menu rapi, sub-menu kategori (1–7), atau panduan detail suatu command.',
+      'Tampilkan daftar kategori menu (1–7) atau panduan detail fitur bot.',
     example: 'menu',
+  },
+  {
+    id: 'allmenu',
+    aliases: ['semuamenu', 'menulengkap', 'fullmenu'],
+    category: 'utility',
+    usage: 'allmenu',
+    description:
+      'Tampilkan seluruh daftar perintah bot lengkap dari semua kategori dalam satu pesan rapi.',
+    example: 'allmenu',
+  },
+  {
+    id: 'menudownload',
+    aliases: ['menudl', 'menudownloader', 'menuunduh'],
+    category: 'utility',
+    usage: 'menudownload',
+    description:
+      'Tampilkan apa saja perintah unduh sosial media (TikTok, IG, YT, FB, dll.).',
+    example: 'menudownload',
+  },
+  {
+    id: 'menustiker',
+    aliases: ['menusticker', 'menustik'],
+    category: 'utility',
+    usage: 'menustiker',
+    description:
+      'Tampilkan apa saja perintah studio stiker WhatsApp (Brat, QC, Smeme, dll.).',
+    example: 'menustiker',
+  },
+  {
+    id: 'menumedia',
+    aliases: ['menutools'],
+    category: 'utility',
+    usage: 'menumedia',
+    description:
+      'Tampilkan apa saja perintah perkakas media, HD foto, Status HD, dan kode QR.',
+    example: 'menumedia',
+  },
+  {
+    id: 'menuaudio',
+    aliases: ['menumusik', 'menumusic'],
+    category: 'utility',
+    usage: 'menuaudio',
+    description:
+      'Tampilkan apa saja perintah audio, pemutar lagu MP3, dan efek suara.',
+    example: 'menuaudio',
+  },
+  {
+    id: 'menugrup',
+    aliases: ['menugroup', 'menuadmin'],
+    category: 'utility',
+    usage: 'menugrup',
+    description:
+      'Tampilkan apa saja perintah administrasi dan moderasi grup WhatsApp.',
+    example: 'menugrup',
+  },
+  {
+    id: 'menuotomasi',
+    aliases: ['menuset', 'menuauto'],
+    category: 'utility',
+    usage: 'menuotomasi',
+    description:
+      'Tampilkan apa saja perintah otomasi grup (sambutan welcome, out, antilink).',
+    example: 'menuotomasi',
+  },
+  {
+    id: 'menuinfo',
+    aliases: ['menubantuan', 'menuhelp'],
+    category: 'utility',
+    usage: 'menuinfo',
+    description:
+      'Tampilkan apa saja informasi & bantuan, kontak resmi owner, dan panel.',
+    example: 'menuinfo',
   },
   {
     id: 'owner',
@@ -901,7 +973,10 @@ interface CompactMenuRow {
 export interface MenuSectionSpec {
   key: 'downloader' | 'stiker' | 'media' | 'audio' | 'grup' | 'set' | 'info';
   code: string;
+  emoji: string;
   title: string;
+  categoryCmd: string;
+  categoryDesc: string;
   keywords: string[];
   ids: string[];
   compactRows: CompactMenuRow[];
@@ -911,8 +986,23 @@ export const MENU_SECTIONS: MenuSectionSpec[] = [
   {
     key: 'downloader',
     code: '01',
+    emoji: '📂',
     title: 'DOWNLOADER',
-    keywords: ['1', '01', 'dl', 'download', 'downloader', 'unduh', 'sosmed'],
+    categoryCmd: 'menudownload',
+    categoryDesc: '(untuk menampilkan apa saja perintah download)',
+    keywords: [
+      '1',
+      '01',
+      'dl',
+      'download',
+      'downloader',
+      'unduh',
+      'sosmed',
+      'menudownload',
+      'menudl',
+      'menudownloader',
+      'menuunduh',
+    ],
     ids: ['aio', 'tt', 'ttslide', 'ig', 'fb', 'tw', 'pin', 'capcut', 'mf', 'yt'],
     compactRows: [
       { ids: ['aio'], argHint: '<link>', summary: 'Auto-unduh semua sosmed' },
@@ -925,8 +1015,22 @@ export const MENU_SECTIONS: MenuSectionSpec[] = [
   {
     key: 'stiker',
     code: '02',
+    emoji: '🎨',
     title: 'STUDIO STIKER',
-    keywords: ['2', '02', 'stiker', 'sticker', 'maker', 'brat', 'qc'],
+    categoryCmd: 'menustiker',
+    categoryDesc: '(untuk menampilkan apa saja perintah studio stiker)',
+    keywords: [
+      '2',
+      '02',
+      'stiker',
+      'sticker',
+      'maker',
+      'brat',
+      'qc',
+      'menustiker',
+      'menusticker',
+      'menustik',
+    ],
     ids: [
       's',
       'qc',
@@ -955,8 +1059,23 @@ export const MENU_SECTIONS: MenuSectionSpec[] = [
   {
     key: 'media',
     code: '03',
+    emoji: '🛠️',
     title: 'PERKAKAS MEDIA',
-    keywords: ['3', '03', 'media', 'tools', 'hd', 'sw', 'hdsw', 'foto', 'meme'],
+    categoryCmd: 'menumedia',
+    categoryDesc: '(untuk menampilkan apa saja perintah perkakas media)',
+    keywords: [
+      '3',
+      '03',
+      'media',
+      'tools',
+      'hd',
+      'sw',
+      'hdsw',
+      'foto',
+      'meme',
+      'menumedia',
+      'menutools',
+    ],
     ids: ['hdsw', 'hd', 'meme', 'rvo', 'toptv', 'hitamkan', 'imgedit', 'tourl', 'qrcode'],
     compactRows: [
       { ids: ['hdsw'], summary: 'Dokumen ke Status HD (Grup & PC)' },
@@ -969,8 +1088,23 @@ export const MENU_SECTIONS: MenuSectionSpec[] = [
   {
     key: 'audio',
     code: '04',
+    emoji: '🎵',
     title: 'AUDIO & MUSIK',
-    keywords: ['4', '04', 'audio', 'musik', 'music', 'vn', 'sound', 'efek'],
+    categoryCmd: 'menuaudio',
+    categoryDesc: '(untuk menampilkan apa saja perintah audio & musik)',
+    keywords: [
+      '4',
+      '04',
+      'audio',
+      'musik',
+      'music',
+      'vn',
+      'sound',
+      'efek',
+      'menuaudio',
+      'menumusik',
+      'menumusic',
+    ],
     ids: [
       'play',
       'mp3',
@@ -993,20 +1127,34 @@ export const MENU_SECTIONS: MenuSectionSpec[] = [
   {
     key: 'grup',
     code: '05',
+    emoji: '🛡️',
     title: 'ADMIN GRUP',
-    keywords: ['5', '05', 'grup', 'group', 'admin', 'moderasi', 'mod', 'gc'],
+    categoryCmd: 'menugrup',
+    categoryDesc: '(untuk menampilkan apa saja perintah admin grup)',
+    keywords: [
+      '5',
+      '05',
+      'grup',
+      'group',
+      'admin',
+      'moderasi',
+      'mod',
+      'gc',
+      'menugrup',
+      'menugroup',
+      'menuadmin',
+    ],
     ids: [
       'kick',
       'promote',
       'demote',
+      'hidetag',
+      'tagall',
       'group',
       'setname',
       'setdesc',
       'linkgc',
       'revoke',
-      'add',
-      'hidetag',
-      'tagall',
     ],
     compactRows: [
       { ids: ['kick', 'promote', 'demote'], summary: 'Kelola anggota & admin' },
@@ -1019,8 +1167,23 @@ export const MENU_SECTIONS: MenuSectionSpec[] = [
   {
     key: 'set',
     code: '06',
+    emoji: '⚙️',
     title: 'OTOMASI GRUP',
-    keywords: ['6', '06', 'set', 'teks', 'custom', 'otomasi', 'setting', 'sambutan'],
+    categoryCmd: 'menuotomasi',
+    categoryDesc: '(untuk menampilkan apa saja perintah otomasi grup)',
+    keywords: [
+      '6',
+      '06',
+      'set',
+      'teks',
+      'custom',
+      'otomasi',
+      'setting',
+      'sambutan',
+      'menuotomasi',
+      'menuset',
+      'menuauto',
+    ],
     ids: [
       'welcome',
       'out',
@@ -1029,9 +1192,6 @@ export const MENU_SECTIONS: MenuSectionSpec[] = [
       'setout',
       'setpromote',
       'setdemote',
-      'setopen',
-      'setclose',
-      'setantilink',
       'cekset',
       'resetset',
     ],
@@ -1045,9 +1205,24 @@ export const MENU_SECTIONS: MenuSectionSpec[] = [
   {
     key: 'info',
     code: '07',
+    emoji: 'ℹ️',
     title: 'INFO & BANTUAN',
-    keywords: ['7', '07', 'info', 'utilitas', 'utility', 'bot', 'bantuan', 'panel'],
-    ids: ['menu', 'owner', 'ping', 'panel'],
+    categoryCmd: 'menuinfo',
+    categoryDesc: '(untuk menampilkan apa saja informasi & bantuan)',
+    keywords: [
+      '7',
+      '07',
+      'info',
+      'utilitas',
+      'utility',
+      'bot',
+      'bantuan',
+      'panel',
+      'menuinfo',
+      'menubantuan',
+      'menuhelp',
+    ],
+    ids: ['menu', 'allmenu', 'owner', 'ping', 'panel'],
     compactRows: [
       { ids: ['menu'], argHint: '<1-7>', summary: 'Panduan detail per kategori' },
       { ids: ['allmenu'], summary: 'Daftar lengkap semua perintah' },
@@ -1073,7 +1248,7 @@ export interface BuildBotMenuOptions {
   senderName?: string;
 }
 
-const MENU_DIVIDER = '────────────────────';
+const MENU_DIVIDER = '─────────────────────────────';
 
 export function buildBotMenuText(opts: BuildBotMenuOptions): string {
   const p = opts.prefix || '.';
@@ -1094,25 +1269,10 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
     return !disabledSet.has(canonical);
   };
 
-  const totalActive = COMMAND_CATALOG.filter(
-    (c) => !c.suspensionRisk && !disabledSet.has(c.id)
-  ).length;
-
-  const templateVars = {
-    botName: opts.botName,
-    ownerName: opts.ownerName,
-    ownerNumber: cleanOwnerNumber,
-    ownerDisplay: formatPhoneDisplay(cleanOwnerNumber),
-    prefix: p,
-    packName: opts.stickerPackName,
-    authorName: opts.stickerAuthor,
-    website: opts.ownerWebsite || `wa.me/${cleanOwnerNumber}`,
-    totalCommands: totalActive,
-    sender: opts.senderName || 'Pengguna',
-  };
-
-  const header = renderBotTemplate(opts.menuHeaderTemplate, templateVars).trim();
-  const footer = renderBotTemplate(opts.menuFooterTemplate, templateVars).trim();
+  const normalizedAlias = (opts.invokedAlias || '')
+    .trim()
+    .toLowerCase()
+    .replace(new RegExp(`^\\${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), '');
 
   const normalizedQuery = (opts.query || '')
     .trim()
@@ -1120,73 +1280,59 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
     .replace(new RegExp(`^\\${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), '');
 
   const wantsFullList =
-    opts.invokedAlias === 'allmenu' ||
+    normalizedAlias === 'allmenu' ||
     ['all', 'semua', 'lengkap', 'full', 'allmenu'].includes(normalizedQuery);
 
-  // 1. Sub-menu by category (.menu 1, .menu downloader, etc.)
-  if (!wantsFullList && normalizedQuery) {
-    const matchedSection = MENU_SECTIONS.find((sec) =>
-      sec.keywords.includes(normalizedQuery)
-    );
-
-    if (matchedSection) {
-      const lines: string[] = [
-        `*${opts.botName}* · Kategori ${matchedSection.code}`,
-        `*${matchedSection.title}*`,
-        MENU_DIVIDER,
-      ];
-
-      for (const id of matchedSection.ids) {
-        const cmd = COMMAND_CATALOG.find((c) => c.id === id);
-        if (!cmd) continue;
-        const meta = COMPACT_COMMAND_META[id];
-        const statusNote = cmd.suspensionRisk
-          ? ' _(dikunci aman)_'
-          : isEnabled(id)
-          ? ''
-          : ' _(nonaktif)_';
-        const aliasText =
-          cmd.aliases.length > 0
-            ? ` · alias: ${cmd.aliases
-                .slice(0, 3)
-                .map((a) => `${p}${a}`)
-                .join(', ')}`
-            : '';
-        const exampleText = meta?.compactExample || cmd.example;
-
-        lines.push(`• *${p}${meta?.shortUsage || cmd.usage}*${statusNote}`);
-        lines.push(`  ${cmd.description}`);
-        if (!cmd.suspensionRisk) {
-          lines.push(`  _Contoh: ${p}${exampleText}${aliasText}_`);
-        }
-        lines.push('');
-      }
-
-      if (matchedSection.key === 'grup') {
-        lines.push(`*Catatan Keamanan Grup:*`);
-        lines.push(`• Gunakan *${p}linkgc* untuk mengundang anggota baru.`);
-        lines.push(
-          `• Gunakan *${p}group close* untuk pengumuman penting tanpa spam tag.`
-        );
-        lines.push('');
-      }
-
-      if (matchedSection.key === 'set') {
-        lines.push(`*Variabel Otomatis:*`);
-        lines.push(`• *@user* / *@sender* — Mention anggota`);
-        lines.push(`• *@group* — Nama grup WhatsApp`);
-        lines.push('');
-      }
-
-      if (lines[lines.length - 1] === '') {
-        lines.pop();
-      }
+  // 1. Full detailed catalog (.allmenu / .menu all)
+  if (wantsFullList) {
+    const lines: string[] = [];
+    for (let i = 0; i < MENU_SECTIONS.length; i++) {
+      const sec = MENU_SECTIONS[i];
       lines.push(MENU_DIVIDER);
-      lines.push(`_Ketik ${p}menu untuk kembali ke menu utama._`);
-      return lines.join('\n');
+      lines.push(`${sec.emoji} *${sec.code} · ${sec.title}*`);
+      lines.push(MENU_DIVIDER);
+      for (const row of sec.compactRows) {
+        const cmdLabels = row.ids.map((id) => `*${p}${id}*`).join(' / ');
+        const argPart = row.argHint ? ` ${row.argHint}` : '';
+        lines.push(`• ${cmdLabels}${argPart} — ${row.summary}`);
+      }
+      if (i < MENU_SECTIONS.length - 1) {
+        lines.push('');
+      }
     }
+    lines.push(MENU_DIVIDER);
+    lines.push(`_Ketik *${p}menu <1-7>* untuk melihat detail kategori._`);
+    lines.push(`_Ketik *${p}owner* untuk menghubungi pengembang._`);
+    return lines.join('\n');
+  }
 
-    // 2. Single-command detail card (.menu qc, .menu hdsw, etc.)
+  // 2. Specific category request (e.g. .menudownload, .menustiker, .menu 1, .menu download)
+  const matchedSection = MENU_SECTIONS.find(
+    (sec) =>
+      sec.categoryCmd.toLowerCase() === normalizedAlias ||
+      sec.keywords.includes(normalizedAlias) ||
+      (normalizedQuery && sec.keywords.includes(normalizedQuery))
+  );
+
+  if (matchedSection && (normalizedQuery || normalizedAlias !== 'menu')) {
+    const lines: string[] = [
+      MENU_DIVIDER,
+      `${matchedSection.emoji} *${matchedSection.code} · ${matchedSection.title}*`,
+      MENU_DIVIDER,
+    ];
+    for (const row of matchedSection.compactRows) {
+      const cmdLabels = row.ids.map((id) => `*${p}${id}*`).join(' / ');
+      const argPart = row.argHint ? ` ${row.argHint}` : '';
+      lines.push(`• ${cmdLabels}${argPart} — ${row.summary}`);
+    }
+    lines.push(MENU_DIVIDER);
+    lines.push(`_Ketik *${p}menu* untuk kembali ke daftar kategori._`);
+    lines.push(`_Ketik *${p}allmenu* untuk melihat seluruh perintah._`);
+    return lines.join('\n');
+  }
+
+  // 3. Single-command detail card (e.g. .menu qc, .menu hdsw)
+  if (normalizedQuery) {
     const matchedCmd = COMMAND_CATALOG.find(
       (c) => c.id === normalizedQuery || c.aliases.includes(normalizedQuery)
     );
@@ -1207,6 +1353,7 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
         : 'Nonaktif';
 
       return [
+        MENU_DIVIDER,
         `*Detail Perintah · ${p}${matchedCmd.id}*`,
         MENU_DIVIDER,
         `• *Fungsi:* ${matchedCmd.description}`,
@@ -1216,98 +1363,47 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
         `• *Ruang:* ${scopeLabel}`,
         `• *Status:* ${statusLabel}`,
         MENU_DIVIDER,
-        `_Ketik ${p}menu untuk kembali ke daftar utama._`,
+        `_Ketik *${p}menu* untuk kembali ke daftar kategori._`,
+        `_Ketik *${p}allmenu* untuk melihat seluruh perintah._`,
       ].join('\n');
     }
 
-    // 3. Unknown sub-menu filter fallback
+    // Fallback if query not recognized
     return [
+      MENU_DIVIDER,
       `Kategori atau fitur *${opts.query?.trim()}* tidak ditemukan.`,
-      '',
-      `*Daftar Kategori ${opts.botName}:*`,
-      `• *${p}menu 1* — Downloader Sosmed`,
-      `• *${p}menu 2* — Studio Stiker`,
-      `• *${p}menu 3* — Perkakas Media & Status HD`,
-      `• *${p}menu 4* — Audio & Efek Suara`,
-      `• *${p}menu 5* — Admin Grup`,
-      `• *${p}menu 6* — Otomasi & Teks Grup`,
-      `• *${p}menu 7* — Info & Kontak Owner`,
-      `• *${p}allmenu* — Daftar lengkap semua fitur`,
+      MENU_DIVIDER,
+      `*Daftar Kategori:*`,
+      ...MENU_SECTIONS.map(
+        (sec, idx) => `${idx + 1}. *${p}${sec.categoryCmd}* ${sec.categoryDesc}`
+      ),
+      MENU_DIVIDER,
+      `_Ketik *${p}allmenu* untuk melihat semua perintah._`,
     ].join('\n');
   }
 
-  // 4. Full unpaired list (.allmenu / .menu all)
-  if (wantsFullList) {
-    const lines: string[] = [];
-    if (header) {
-      lines.push(header);
-      lines.push(MENU_DIVIDER);
-    }
+  // 4. Default Clean & Tidy Category Overview (.menu)
+  const botTitle = (opts.botName || 'WABOT').toUpperCase();
+  const lines: string[] = [
+    MENU_DIVIDER,
+    `📂 *KATEGORI MENU ${botTitle}*`,
+    MENU_DIVIDER,
+    `Silakan pilih dan ketik perintah kategori di bawah:`,
+    '',
+  ];
 
-    for (const sec of MENU_SECTIONS) {
-      lines.push(`*${sec.code} · ${sec.title}*`);
-      for (const id of sec.ids) {
-        const cmd = COMMAND_CATALOG.find((c) => c.id === id);
-        if (!cmd || cmd.suspensionRisk) continue;
-        const meta = COMPACT_COMMAND_META[id];
-        const statusNote = isEnabled(id) ? '' : ' _(off)_';
-        lines.push(
-          `• *${p}${meta?.shortUsage || cmd.usage}* — ${
-            meta?.shortDesc || cmd.description
-          }${statusNote}`
-        );
-      }
-      lines.push('');
-    }
+  MENU_SECTIONS.forEach((sec, idx) => {
+    lines.push(`${idx + 1}. *${p}${sec.categoryCmd}* ${sec.categoryDesc}`);
+  });
 
-    if (lines[lines.length - 1] === '') {
-      lines.pop();
-    }
-    lines.push(MENU_DIVIDER);
-    lines.push(`_Ketik ${p}menu <nama_fitur> untuk contoh & alias lengkap._`);
-    if (footer) {
-      lines.push(footer);
-    }
-    return lines.join('\n');
-  }
-
-  // 5. Default Clean & Tidy Overview (.menu)
-  const lines: string[] = [];
-  if (header) {
-    lines.push(header);
-    lines.push(MENU_DIVIDER);
-  }
-
-  for (const sec of MENU_SECTIONS) {
-    const visibleRows = sec.compactRows.filter((row) =>
-      row.ids.some((id) => !isSuspensionLocked(id))
-    );
-    if (visibleRows.length === 0) continue;
-
-    lines.push(`*${sec.code} · ${sec.title}*`);
-    for (const row of visibleRows) {
-      const activeIds = row.ids.filter((id) => !isSuspensionLocked(id));
-      const allDisabled = activeIds.every((id) => !isEnabled(id));
-      const cmdLabels = activeIds
-        .map((id) => {
-          const singleOff = !allDisabled && !isEnabled(id);
-          return singleOff ? `*${p}${id}* _(off)_` : `*${p}${id}*`;
-        })
-        .join(' / ');
-      const argPart = row.argHint ? ` ${row.argHint}` : '';
-      const rowOffSuffix = allDisabled ? ' _(nonaktif)_' : '';
-      lines.push(`• ${cmdLabels}${argPart} — ${row.summary}${rowOffSuffix}`);
-    }
-    lines.push('');
-  }
-
-  if (lines[lines.length - 1] === '') {
-    lines.pop();
-  }
+  lines.push('');
   lines.push(MENU_DIVIDER);
-  if (footer) {
-    lines.push(footer);
-  }
+  lines.push(`💡 *Pilihan Pintasan:*`);
+  lines.push(`• Ketik *${p}allmenu* — Tampilkan seluruh perintah sekaligus`);
+  lines.push(`• Ketik *${p}menu <1-7>* — Contoh: *${p}menu 1* atau *${p}menu 2*`);
+  lines.push(MENU_DIVIDER);
+  lines.push(`_Ketik *${p}menu <1-7>* untuk melihat detail kategori._`);
+  lines.push(`_Ketik *${p}owner* untuk menghubungi pengembang._`);
 
   return lines.join('\n');
 }
