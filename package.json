@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build",
+    "build": "vite build && ./node_modules/.bin/esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=server.bundle.mjs",
     "build:termux": "vite build && ./node_modules/.bin/esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=server.bundle.mjs",
     "start": "node server.ts",
     "start:termux": "node --max-old-space-size=256 index.js",

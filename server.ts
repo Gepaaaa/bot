@@ -1197,14 +1197,50 @@ async function startServer() {
   // 1. Pre-built Ready-to-Run Termux Bundle (.tar.gz) including compiled dist/ Web Panel + server.bundle.mjs
   //    Specifically engineered so 32-bit ARMv7 phones (Xiaomi Redmi 9C 3/32) never need vite or esbuild!
   let prepareBundlePromise: Promise<void> | null = null;
+  async function isFrontendSourceNewerThanDist(
+    root: string,
+    distHtmlPath: string
+  ): Promise<boolean> {
+    try {
+      const distStat = await fs.stat(distHtmlPath);
+      const distMtime = distStat.mtimeMs;
+      const checkTargets = [
+        path.join(root, 'index.html'),
+        path.join(root, 'src'),
+      ];
+      const stack = [...checkTargets];
+      while (stack.length > 0) {
+        const current = stack.pop()!;
+        try {
+          const st = await fs.stat(current);
+          if (st.isDirectory()) {
+            const entries = await fs.readdir(current);
+            for (const entry of entries) {
+              stack.push(path.join(current, entry));
+            }
+          } else if (st.mtimeMs > distMtime + 1000) {
+            return true;
+          }
+        } catch {
+          // Ignore missing optional paths
+        }
+      }
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
   async function ensureTermuxArtifactsBuilt(): Promise<void> {
     if (!prepareBundlePromise) {
       prepareBundlePromise = (async () => {
         const root = process.cwd();
         const distHtmlPath = path.join(root, 'dist', 'index.html');
-        try {
-          await fs.access(distHtmlPath);
-        } catch {
+        const needsViteBuild = await isFrontendSourceNewerThanDist(
+          root,
+          distHtmlPath
+        );
+        if (needsViteBuild) {
           try {
             const { build: viteBuild } = await import('vite');
             await viteBuild({ logLevel: 'warn' });
@@ -1321,141 +1357,643 @@ async function startServer() {
           COMMAND_CATALOG.filter((c) => !c.suspensionRisk).map((c) => ({
             id: c.id,
             category: c.category,
+            usage: c.usage,
             desc: c.description,
           }))
         );
+        const totalCatalogCount = COMMAND_CATALOG.length;
+        const lockedCatalogCount = COMMAND_CATALOG.filter(
+          (c) => c.suspensionRisk
+        ).length;
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.send(`<!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WABot Localhost Panel (Termux Lite)</title>
+  <title>WABot — WhatsApp Multi-Feature Bot &amp; Control Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet">
+  <script>
+    (function() {
+      try {
+        if (localStorage.getItem('wabot_theme') === 'dark') {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    })();
+  </script>
   <style>
+    :root {
+      --bg: #FAF9F6;
+      --surface: #FFFFFF;
+      --surface-nav: rgba(255, 255, 255, 0.95);
+      --surface-sub: #F4F4F5;
+      --surface-input: #FAF9F6;
+      --border: rgba(228, 228, 231, 0.85);
+      --text: #18181B;
+      --muted: #52525B;
+      --subtle: #71717A;
+      --primary-bg: #18181B;
+      --primary-fg: #FFFFFF;
+      --active-line: #18181B;
+      --emerald: #047857;
+      --emerald-btn: #059669;
+      --amber: #B45309;
+      --danger: #BE123C;
+      --bubble-user: #D9FDD3;
+      --bubble-user-fg: #111B21;
+      --bubble-bot: #FFFFFF;
+    }
+    html.dark {
+      --bg: #0C0C0E;
+      --surface: #141417;
+      --surface-nav: rgba(20, 20, 23, 0.95);
+      --surface-sub: #18181B;
+      --surface-input: #09090B;
+      --border: #27272A;
+      --text: #F4F4F5;
+      --muted: #A1A1AA;
+      --subtle: #71717A;
+      --primary-bg: #F4F4F5;
+      --primary-fg: #18181B;
+      --active-line: #10B981;
+      --emerald: #34D399;
+      --emerald-btn: #059669;
+      --amber: #FBBF24;
+      --danger: #FB7185;
+      --bubble-user: #005C4B;
+      --bubble-user-fg: #E9EDEF;
+      --bubble-bot: #1F2C34;
+    }
     * { box-sizing: border-box; }
-    body { font-family: system-ui, -apple-system, sans-serif; background: #0c0c0e; color: #f4f4f5; margin: 0; padding: 16px; line-height: 1.5; }
-    .wrap { max-width: 760px; margin: 16px auto 48px; display: flex; flex-direction: column; gap: 16px; }
-    .card { background: #141417; border: 1px solid #27272a; border-radius: 16px; padding: 20px; }
-    h1 { font-size: 19px; color: #f4f4f5; margin: 0; }
-    h2 { font-size: 15px; color: #e4e4e7; margin: 0 0 12px; }
-    .meta { color: #a1a1aa; font-size: 12px; margin-top: 4px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
-    label { display: block; font-size: 12px; color: #a1a1aa; margin-bottom: 4px; font-weight: 500; }
-    input, textarea { width: 100%; background: #09090b; border: 1px solid #27272a; color: #f4f4f5; padding: 9px 12px; border-radius: 10px; font-size: 13px; font-family: inherit; }
-    textarea { min-height: 70px; resize: vertical; }
-    .btn { background: #059669; color: #fff; border: none; padding: 9px 16px; border-radius: 10px; font-weight: 600; font-size: 13px; cursor: pointer; }
-    .btn-sec { background: #27272a; color: #e4e4e7; }
-    .btn-danger { background: #9f1239; color: #fff; }
-    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
-    .codebox { background: #064e3b; border: 1px solid #059669; padding: 14px; border-radius: 12px; margin-top: 12px; text-align: center; }
-    .pair-digits { font-family: monospace; font-size: 28px; letter-spacing: 5px; font-weight: 700; color: #fff; margin: 6px 0; }
-    .cmd-list { max-height: 260px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 8px; margin-top: 8px; }
-    .cmd-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: #09090b; border: 1px solid #27272a; border-radius: 9px; font-size: 12px; font-family: monospace; }
-    .toast { font-size: 12px; color: #34d399; margin-top: 8px; min-height: 18px; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    .font-display { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+    .topbar {
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-nav);
+      backdrop-filter: blur(8px);
+    }
+    .topbar-inner {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 0 24px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .brand {
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .desktop-nav {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+    }
+    .nav-link {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 4px 0;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--muted);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .nav-link:hover { color: var(--text); }
+    .nav-link.active {
+      color: var(--text);
+      border-bottom-color: var(--active-line);
+    }
+    .cta-btn {
+      padding: 8px 16px;
+      border-radius: 12px;
+      border: none;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      background: var(--primary-bg);
+      color: var(--primary-fg);
+    }
+    .cta-btn.connected {
+      background: var(--emerald-btn);
+      color: #FFFFFF;
+    }
+    .container {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 28px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .mobile-nav {
+      display: none;
+      gap: 4px;
+      padding: 4px;
+      background: var(--surface-sub);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow-x: auto;
+    }
+    .m-nav-btn {
+      flex: 1;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .m-nav-btn.active {
+      background: var(--surface);
+      color: var(--text);
+    }
+    @media (max-width: 768px) {
+      .desktop-nav { display: none; }
+      .mobile-nav { display: flex; }
+      .topbar-inner { padding: 0 16px; }
+      .container { padding: 20px 16px; }
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 22px 24px;
+    }
+    .overview {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--subtle);
+      margin-bottom: 6px;
+    }
+    .hero-title {
+      margin: 0 0 6px;
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .hero-desc {
+      margin: 0;
+      font-size: 14px;
+      color: var(--muted);
+      max-width: 640px;
+    }
+    .kpi-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(76px, auto));
+      gap: 12px 28px;
+      padding-left: 28px;
+      border-left: 1px solid var(--border);
+    }
+    @media (max-width: 960px) {
+      .kpi-strip {
+        width: 100%;
+        padding-left: 0;
+        padding-top: 16px;
+        border-left: none;
+        border-top: 1px solid var(--border);
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    .kpi-label { font-size: 12px; color: var(--subtle); }
+    .kpi-val {
+      font-family: 'JetBrains Mono', monospace;
+      font-variant-numeric: tabular-nums;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .pane { display: none; flex-direction: column; gap: 20px; }
+    .pane.active { display: flex; }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    h2 {
+      margin: 0 0 6px;
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .subtext { font-size: 13px; color: var(--muted); margin: 0 0 16px; }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    input[type="text"], input[type="tel"], input[type="search"], textarea {
+      width: 100%;
+      background: var(--surface-input);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 13px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+    }
+    input:focus, textarea:focus { border-color: #10B981; }
+    textarea { min-height: 76px; resize: vertical; }
+    .btn {
+      padding: 9px 16px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--primary-bg);
+      color: var(--primary-fg);
+      white-space: nowrap;
+    }
+    .btn-emerald { background: var(--emerald-btn); color: #FFFFFF; }
+    .btn-outline {
+      background: var(--surface-input);
+      border-color: var(--border);
+      color: var(--text);
+    }
+    .btn-danger { background: var(--danger); color: #FFFFFF; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
+    .chat-box {
+      height: 360px;
+      overflow-y: auto;
+      background: var(--surface-input);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .msg {
+      max-width: 82%;
+      padding: 9px 13px;
+      border-radius: 14px;
+      font-size: 13px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      border: 1px solid var(--border);
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: var(--bubble-user);
+      color: var(--bubble-user-fg);
+    }
+    .msg.bot {
+      align-self: flex-start;
+      background: var(--bubble-bot);
+      color: var(--text);
+    }
+    .msg img {
+      max-width: 180px;
+      border-radius: 12px;
+      display: block;
+      margin-bottom: 6px;
+    }
+    .cmd-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .cmd-card {
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: var(--surface-input);
+      border: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .codebox {
+      background: var(--surface-input);
+      border: 1px solid #10B981;
+      padding: 16px;
+      border-radius: 14px;
+      margin-top: 14px;
+      text-align: center;
+    }
+    .pair-digits {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 28px;
+      letter-spacing: 5px;
+      font-weight: 700;
+      color: var(--emerald);
+      margin: 6px 0;
+    }
+    .toast { font-size: 12px; color: var(--emerald); min-height: 18px; margin-top: 8px; }
+    footer {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 12px;
+      color: var(--subtle);
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
-        <div>
-          <h1 id="hdr-name">WABot — Panel Kontrol Termux 24/7</h1>
-          <div class="meta">Port ${activePort} · Owner Default: +${OFFICIAL_OWNER_NUMBER} · Kontrol Penuh Menu, Template & Pairing</div>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a href="#simulator" class="brand" id="hdr-brand" onclick="switchTab('simulator');return false;">WABot</a>
+      <nav class="desktop-nav" aria-label="Navigasi Utama">
+        <button type="button" class="nav-link active" data-tab="simulator" onclick="switchTab('simulator')">Simulator</button>
+        <button type="button" class="nav-link" data-tab="catalog" onclick="switchTab('catalog')">Menu &amp; Fitur</button>
+        <button type="button" class="nav-link" data-tab="connection" onclick="switchTab('connection')">Koneksi &amp; Server</button>
+        <button type="button" class="nav-link" data-tab="security" onclick="switchTab('security')">Keamanan &amp; API</button>
+        <button type="button" class="nav-link" data-tab="settings" onclick="switchTab('settings')">Pengaturan</button>
+      </nav>
+      <button type="button" class="cta-btn" id="hdr-cta" onclick="switchTab('connection')">Hubungkan WA</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card overview">
+      <div style="min-width:0;flex:1;">
+        <div class="meta-row">
+          <span id="ov-prefix">Prefix .</span>
+          <span aria-hidden="true">·</span>
+          <span id="ov-owner">Owner +${OFFICIAL_OWNER_NUMBER}</span>
+          <span aria-hidden="true">·</span>
+          <span id="ov-rt" style="color:var(--emerald);font-weight:500;">Mesin Real-Time Aktif (Port ${activePort})</span>
         </div>
-        <div id="wa-pill" style="font-size:12px;font-family:monospace;color:#34d399;">Memuat status...</div>
+        <h1 class="hero-title">Panel Kontrol Multi-Fitur WhatsApp</h1>
+        <p class="hero-desc">Multi-downloader sosmed, studio stiker teks &amp; animasi (.qc / .s), Status WA HD tanpa kompresi (.hdsw), efek audio studio, serta proteksi anti-ban otomatis.</p>
       </div>
+      <div class="kpi-strip">
+        <div>
+          <div class="kpi-label">Fitur Aktif</div>
+          <div class="kpi-val" id="kpi-active">0/${totalCatalogCount}</div>
+        </div>
+        <div>
+          <div class="kpi-label">Eksekusi</div>
+          <div class="kpi-val" id="kpi-exec">0</div>
+        </div>
+        <div>
+          <div class="kpi-label">Stiker</div>
+          <div class="kpi-val" id="kpi-sticker">0</div>
+        </div>
+        <div>
+          <div class="kpi-label">Media</div>
+          <div class="kpi-val" id="kpi-media">0</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="mobile-nav">
+      <button type="button" class="m-nav-btn active" data-tab="simulator" onclick="switchTab('simulator')">Simulator</button>
+      <button type="button" class="m-nav-btn" data-tab="catalog" onclick="switchTab('catalog')">Menu &amp; Fitur</button>
+      <button type="button" class="m-nav-btn" data-tab="connection" onclick="switchTab('connection')">Koneksi &amp; Server</button>
+      <button type="button" class="m-nav-btn" data-tab="security" onclick="switchTab('security')">Keamanan &amp; API</button>
+      <button type="button" class="m-nav-btn" data-tab="settings" onclick="switchTab('settings')">Pengaturan</button>
     </div>
 
-    <div class="card">
-      <h2>1. Tautkan Nomor WhatsApp (Pairing Code 8 Digit)</h2>
-      <div class="grid">
-        <div>
+    <!-- TAB 1: SIMULATOR -->
+    <section class="pane active" id="pane-simulator">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+          <div>
+            <h2>Simulator Chat &amp; Pengujian Perintah</h2>
+            <p class="subtext" style="margin:0;">Uji langsung perintah seperti <code class="font-mono">.menu</code>, <code class="font-mono">.ping</code>, <code class="font-mono">.qc halo</code>, atau <code class="font-mono">.brat santai</code>.</p>
+          </div>
+          <button type="button" class="btn btn-outline" onclick="clearSim()">Bersihkan Chat</button>
+        </div>
+        <div class="chat-box" id="sim-messages"></div>
+        <form onsubmit="sendSim(event)" style="display:flex;gap:8px;margin-top:12px;">
+          <input type="text" id="sim-input" placeholder="Ketik perintah (mis. .menu atau .qc halo bro)..." />
+          <button type="submit" class="btn btn-emerald">Kirim</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- TAB 2: CATALOG -->
+    <section class="pane" id="pane-catalog">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div>
+            <h2>Katalog Menu &amp; Kontrol Fitur Bot</h2>
+            <p class="subtext" style="margin:0;">Aktifkan atau matikan perintah WhatsApp kapan saja secara instan.</p>
+          </div>
+          <input type="search" id="cmd-search" placeholder="Cari perintah (.qc, .tt, .s)..." style="max-width:260px;" oninput="renderCommands()" />
+        </div>
+        <div class="cmd-grid" id="cmd-grid"></div>
+      </div>
+    </section>
+
+    <!-- TAB 3: CONNECTION & TERMUX -->
+    <section class="pane" id="pane-connection">
+      <div class="grid-2">
+        <div class="card">
+          <h2>Tautkan Perangkat WhatsApp</h2>
+          <p class="subtext">Hubungkan nomor WhatsApp bot menggunakan 8-digit Pairing Code atau QR Code.</p>
           <label>Nomor WhatsApp Bot (awalan 628...)</label>
           <input type="tel" id="phone-input" placeholder="6281234567890" />
+          <div class="row">
+            <button type="button" class="btn btn-emerald" onclick="requestPairing()">Minta Pairing Code</button>
+            <button type="button" class="btn btn-outline" onclick="requestQr()">Tampilkan QR</button>
+            <button type="button" class="btn btn-danger" onclick="disconnectWa()">Putuskan Sesi</button>
+          </div>
+          <div id="pair-box"></div>
         </div>
-      </div>
-      <div class="row">
-        <button class="btn" onclick="requestPairing()">Dapatkan Pairing Code</button>
-        <button class="btn btn-danger" onclick="disconnectWa()">Putuskan / Ganti Nomor</button>
-      </div>
-      <div id="pair-box"></div>
-    </div>
 
-    <div class="card">
-      <h2>2. Identitas Bot, Prefix, Owner & Self-Mode</h2>
-      <div class="grid">
-        <div>
-          <label>Nama Bot</label>
-          <input type="text" id="cfg-botname" />
-        </div>
-        <div>
-          <label>Prefix Perintah (. / ! / #)</label>
-          <input type="text" id="cfg-prefix" maxlength="3" />
-        </div>
-        <div>
-          <label>Nomor Owner (Tanpa +)</label>
-          <input type="text" id="cfg-owner" placeholder="${OFFICIAL_OWNER_NUMBER}" />
-        </div>
-        <div>
-          <label>Nama Pack Stiker</label>
-          <input type="text" id="cfg-pack" />
+        <div class="card">
+          <h2>Akses Panel HP Kedua &amp; Server Termux 24/7</h2>
+          <p class="subtext">Buka dashboard ini dari HP utamamu lewat Wi-Fi rumah atau jaringan 4G/5G luar rumah.</p>
+          <div id="remote-box" style="font-size:13px;color:var(--muted);line-height:1.6;">Memuat info jaringan...</div>
+          <div class="row">
+            <button type="button" class="btn btn-emerald" onclick="startRemote()">Aktifkan Link Luar Rumah (4G/5G)</button>
+            <button type="button" class="btn btn-outline" onclick="stopRemote()">Matikan Link Luar</button>
+          </div>
         </div>
       </div>
-      <div class="row" style="margin-top:12px;">
-        <label style="display:flex;align-items:center;gap:8px;margin:0;color:#e4e4e7;cursor:pointer;">
-          <input type="checkbox" id="cfg-selfmode" style="width:auto;" />
-          Aktifkan Self-Mode (Bisa tes perintah dari nomor bot sendiri)
-        </label>
-      </div>
-      <div class="row">
-        <button class="btn" onclick="saveIdentity()">Simpan Pengaturan Utama</button>
-      </div>
-      <div class="toast" id="toast-identity"></div>
-    </div>
+    </section>
 
-    <div class="card">
-      <h2>3. Template Balasan Chat & Sambutan Grup</h2>
-      <div style="display:flex;flex-direction:column;gap:10px;">
-        <div>
-          <label>Header Menu ({botName}, {senderName}, {prefix})</label>
-          <textarea id="tpl-menuheader"></textarea>
+    <!-- TAB 4: SECURITY & API -->
+    <section class="pane" id="pane-security">
+      <div class="grid-2">
+        <div class="card">
+          <h2>Perisai Anti-Ban &amp; Paced Queue</h2>
+          <p class="subtext">Jeda mengetik natural dan cooldown otomatis menjaga nomor bot tetap aman 24/7.</p>
+          <div class="grid-2">
+            <div>
+              <label>Jeda Minimum Balasan (ms)</label>
+              <input type="text" id="ab-min" class="font-mono" />
+            </div>
+            <div>
+              <label>Jeda Maksimum Balasan (ms)</label>
+              <input type="text" id="ab-max" class="font-mono" />
+            </div>
+            <div>
+              <label>Cooldown Per User (detik)</label>
+              <input type="text" id="ab-cool" class="font-mono" />
+            </div>
+            <div>
+              <label>Batas Pesan / Menit</label>
+              <input type="text" id="ab-burst" class="font-mono" />
+            </div>
+          </div>
+          <div class="row">
+            <button type="button" class="btn" onclick="saveAntiBan()">Simpan Proteksi Anti-Ban</button>
+          </div>
+          <div class="toast" id="toast-ab"></div>
         </div>
-        <div>
-          <label>Pesan Sambutan Member Masuk (Welcome — @user, @group)</label>
-          <textarea id="tpl-welcome"></textarea>
-        </div>
-        <div>
-          <label>Pesan Member Keluar (Out/Goodbye — @user, @group)</label>
-          <textarea id="tpl-goodbye"></textarea>
-        </div>
-      </div>
-      <div class="row">
-        <button class="btn" onclick="saveTemplates()">Simpan Template Balasan</button>
-      </div>
-      <div class="toast" id="toast-tpl"></div>
-    </div>
 
-    <div class="card">
-      <h2>4. Aktif / Nonaktifkan Fitur Menu Bot</h2>
-      <div class="meta">Centang fitur yang ingin diaktifkan di WhatsApp:</div>
-      <div class="cmd-list" id="cmd-grid"></div>
-    </div>
-
-    <div class="card">
-      <h2>5. Akses Panel dari HP Kedua (Dalam &amp; Luar Rumah)</h2>
-      <div class="meta">Buka panel ini dari HP utamamu tanpa harus membawa HP Redmi 9C ke mana-mana:</div>
-      <div id="remote-box" style="margin-top:10px;font-size:12px;color:#d4d4d8;">Memuat info tautan jarak jauh...</div>
-      <div class="row">
-        <button class="btn" onclick="startRemote()">Aktifkan Link Luar Rumah (4G/5G)</button>
-        <button class="btn btn-sec" onclick="stopRemote()">Matikan Link Luar</button>
+        <div class="card">
+          <h2>REST API Gateway &amp; Webhook</h2>
+          <p class="subtext">Endpoint integrasi eksternal siap digunakan pada <code class="font-mono">/api/gateway/*</code>.</p>
+          <div style="font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:8px;">
+            <div>Antrean Terkirim: <strong class="font-mono" style="color:var(--text);" id="gw-sent">0</strong></div>
+            <div>Pesan Diblokir Anti-Spam: <strong class="font-mono" style="color:var(--text);" id="gw-blocked">0</strong></div>
+            <div>Endpoint Kirim Teks: <code class="font-mono">POST /api/gateway/send-text</code></div>
+            <div>Endpoint Cek Nomor: <code class="font-mono">POST /api/gateway/check-number</code></div>
+          </div>
+        </div>
       </div>
-    </div>
-  </div>
+    </section>
+
+    <!-- TAB 5: SETTINGS & TEMPLATES -->
+    <section class="pane" id="pane-settings">
+      <div class="grid-2">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;">
+            <h2 style="margin:0;">Identitas, Owner &amp; Tampilan</h2>
+            <button type="button" class="btn btn-outline" onclick="toggleTheme()">Mode Terang / Gelap</button>
+          </div>
+          <p class="subtext">Atur nama bot, prefix perintah, nomor Owner, serta paket stiker.</p>
+          <div class="grid-2">
+            <div>
+              <label>Nama Bot</label>
+              <input type="text" id="cfg-botname" />
+            </div>
+            <div>
+              <label>Prefix Perintah (. / ! / #)</label>
+              <input type="text" id="cfg-prefix" maxlength="3" class="font-mono" />
+            </div>
+            <div>
+              <label>Nomor Owner (Tanpa +)</label>
+              <input type="text" id="cfg-owner" class="font-mono" placeholder="${OFFICIAL_OWNER_NUMBER}" />
+            </div>
+            <div>
+              <label>Nama Pack Stiker</label>
+              <input type="text" id="cfg-pack" />
+            </div>
+          </div>
+          <div class="row">
+            <label style="display:flex;align-items:center;gap:8px;margin:0;color:var(--text);cursor:pointer;">
+              <input type="checkbox" id="cfg-selfmode" style="width:auto;" />
+              Aktifkan Self-Mode (Uji perintah dari nomor bot sendiri)
+            </label>
+          </div>
+          <div class="row">
+            <button type="button" class="btn" onclick="saveIdentity()">Simpan Pengaturan Utama</button>
+          </div>
+          <div class="toast" id="toast-identity"></div>
+        </div>
+
+        <div class="card">
+          <h2>Template Balasan Chat &amp; Grup</h2>
+          <p class="subtext">Kustomisasi header <code class="font-mono">.menu</code> dan sambutan member grup.</p>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div>
+              <label>Header Menu ({botName}, {senderName}, {prefix})</label>
+              <textarea id="tpl-menuheader"></textarea>
+            </div>
+            <div>
+              <label>Sambutan Member Masuk (@user, @group)</label>
+              <textarea id="tpl-welcome"></textarea>
+            </div>
+            <div>
+              <label>Pesan Member Keluar (@user, @group)</label>
+              <textarea id="tpl-goodbye"></textarea>
+            </div>
+          </div>
+          <div class="row">
+            <button type="button" class="btn" onclick="saveTemplates()">Simpan Template Balasan</button>
+          </div>
+          <div class="toast" id="toast-tpl"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div id="ftr-left">WABot · Owner +${OFFICIAL_OWNER_NUMBER}</div>
+    <div>Dashboard Web Panel Sinkron Real-Time</div>
+  </footer>
 
   <script>
     const CATALOG = ${catalogJson};
+    const TOTAL_COMMANDS = ${totalCatalogCount};
+    const LOCKED_COMMANDS = ${lockedCatalogCount};
     let currentCfg = null;
     let initializedForm = false;
+
+    function esc(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.pane').forEach((el) => {
+        el.classList.toggle('active', el.id === 'pane-' + tabId);
+      });
+      document.querySelectorAll('[data-tab]').forEach((btn) => {
+        btn.classList.toggle('active', btn.getAttribute('data-tab') === tabId);
+      });
+    }
+
+    function toggleTheme() {
+      const isDark = document.documentElement.classList.toggle('dark');
+      try { localStorage.setItem('wabot_theme', isDark ? 'dark' : 'light'); } catch (e) {}
+    }
 
     async function loadState() {
       try {
@@ -1463,47 +2001,127 @@ async function startServer() {
         const snap = await res.json();
         const wa = snap.waState || {};
         const cfg = snap.config || {};
+        const stats = snap.stats || {};
+        const gwStats = snap.gatewayStats || {};
         currentCfg = cfg;
 
-        document.getElementById('hdr-name').innerText = (cfg.botName || 'WABot') + ' — Panel Kontrol Termux 24/7';
-        const userPhone = wa.connectedUser?.phone ? ('+' + wa.connectedUser.phone) : 'Belum tertaut';
-        document.getElementById('wa-pill').innerText = 'WA: ' + (wa.status || 'disconnected').toUpperCase() + ' · ' + userPhone;
+        const botName = cfg.botName || 'WABot';
+        const ownerNum = (cfg.antiBan && cfg.antiBan.ownerNumber) ? cfg.antiBan.ownerNumber : '${OFFICIAL_OWNER_NUMBER}';
+        document.getElementById('hdr-brand').innerText = botName;
+        document.title = botName + ' — WhatsApp Multi-Feature Bot & Control Panel';
+        document.getElementById('ov-prefix').innerText = 'Prefix ' + (cfg.prefix || '.');
+        document.getElementById('ov-owner').innerText = 'Owner +' + ownerNum;
+        document.getElementById('ftr-left').innerText = botName + ' · Owner: +' + ownerNum;
 
-        if (wa.pairingCode) {
-          document.getElementById('pair-box').innerHTML =
-            '<div class="codebox"><div style="font-size:12px;color:#a7f3d0;">KODE PAIRING WHATSAPP (+' + (wa.pairingPhone || '') + '):</div>' +
-            '<div class="pair-digits">' + wa.pairingCode + '</div>' +
-            '<div style="font-size:12px;color:#d1fae5;">Buka WhatsApp > Perangkat Tertaut > Tautkan dengan nomor telepon saja</div></div>';
-        } else if (wa.status === 'connected') {
-          document.getElementById('pair-box').innerHTML = '';
+        const cta = document.getElementById('hdr-cta');
+        if (wa.status === 'connected') {
+          cta.className = 'cta-btn connected';
+          cta.innerText = 'Terhubung (+' + ((wa.connectedUser && wa.connectedUser.phone) || 'WA') + ')';
+        } else {
+          cta.className = 'cta-btn';
+          cta.innerText = 'Hubungkan WA';
         }
+
+        const disabledList = cfg.disabledCommands || [];
+        const activeCount = Math.max(0, TOTAL_COMMANDS - LOCKED_COMMANDS - disabledList.length);
+        document.getElementById('kpi-active').innerText = activeCount + '/' + TOTAL_COMMANDS;
+        document.getElementById('kpi-exec').innerText = String(stats.totalCommands || 0);
+        document.getElementById('kpi-sticker').innerText = String(stats.stickersCreated || 0);
+        document.getElementById('kpi-media').innerText = String(stats.mediaDownloaded || 0);
+
+        document.getElementById('gw-sent').innerText = String(gwStats.totalSent || 0);
+        document.getElementById('gw-blocked').innerText = String(stats.antiBanBlocked || 0);
+
+        const pairBox = document.getElementById('pair-box');
+        if (wa.pairingCode) {
+          pairBox.innerHTML =
+            '<div class="codebox"><div style="font-size:12px;color:var(--muted);">KODE PAIRING WHATSAPP (+' + esc(wa.pairingPhone || '') + ')</div>' +
+            '<div class="pair-digits">' + esc(wa.pairingCode) + '</div>' +
+            '<div style="font-size:12px;color:var(--muted);">Buka WhatsApp &gt; Perangkat Tertaut &gt; Tautkan dengan nomor telepon saja</div></div>';
+        } else if (wa.qrDataUrl) {
+          pairBox.innerHTML =
+            '<div class="codebox"><img src="' + wa.qrDataUrl + '" alt="QR WhatsApp" style="width:210px;height:210px;margin:0 auto 8px;border-radius:12px;display:block;" />' +
+            '<div style="font-size:12px;color:var(--muted);">Scan QR ini dari menu Perangkat Tertaut di WhatsApp</div></div>';
+        } else if (wa.status === 'connected') {
+          pairBox.innerHTML =
+            '<div class="toast">Terhubung aktif dengan nomor +' + esc((wa.connectedUser && wa.connectedUser.phone) || '') + '</div>';
+        }
+
+        renderSimulator(snap.messages || []);
 
         if (!initializedForm && cfg.prefix) {
           initializedForm = true;
           document.getElementById('cfg-botname').value = cfg.botName || 'WABot';
           document.getElementById('cfg-prefix').value = cfg.prefix || '.';
-          document.getElementById('cfg-owner').value = cfg.antiBan?.ownerNumber || '${OFFICIAL_OWNER_NUMBER}';
+          document.getElementById('cfg-owner').value = ownerNum;
           document.getElementById('cfg-pack').value = cfg.stickerPackName || 'WABot Sticker';
           document.getElementById('cfg-selfmode').checked = Boolean(cfg.selfMode);
-          document.getElementById('tpl-menuheader').value = cfg.templates?.menuHeader || '';
-          document.getElementById('tpl-welcome').value = cfg.templates?.welcomeMsg || '';
-          document.getElementById('tpl-goodbye').value = cfg.templates?.goodbyeMsg || '';
+          document.getElementById('tpl-menuheader').value = (cfg.templates && cfg.templates.menuHeader) || '';
+          document.getElementById('tpl-welcome').value = (cfg.templates && cfg.templates.welcomeMsg) || '';
+          document.getElementById('tpl-goodbye').value = (cfg.templates && cfg.templates.goodbyeMsg) || '';
+          document.getElementById('ab-min').value = String((cfg.antiBan && cfg.antiBan.minDelayMs) || 1200);
+          document.getElementById('ab-max').value = String((cfg.antiBan && cfg.antiBan.maxDelayMs) || 2800);
+          document.getElementById('ab-cool').value = String(Math.round(((cfg.antiBan && cfg.antiBan.userCooldownMs) || 3000) / 1000));
+          document.getElementById('ab-burst').value = String((cfg.antiBan && cfg.antiBan.maxMsgsPerMinute) || 18);
         }
-        renderCommands(cfg.disabledCommands || [], cfg.prefix || '.');
+        renderCommands();
       } catch (err) {
-        document.getElementById('wa-pill').innerText = 'Menyambungkan ulang...';
+        document.getElementById('ov-rt').innerText = 'Menyambungkan ulang...';
       }
     }
 
-    function renderCommands(disabledList, prefix) {
+    function renderSimulator(msgs) {
+      const box = document.getElementById('sim-messages');
+      if (!msgs.length) {
+        box.innerHTML = '<div style="margin:auto;text-align:center;font-size:13px;color:var(--subtle);">Belum ada pesan simulasi. Ketik <b>.menu</b> atau <b>.qc halo</b> di bawah.</div>';
+        return;
+      }
+      box.innerHTML = msgs.slice(-30).map((m) => {
+        const role = m.sender === 'user' ? 'user' : 'bot';
+        const mediaHtml = (m.mediaUrl && (m.mediaType === 'sticker' || m.mediaType === 'image'))
+          ? '<img src="' + m.mediaUrl + '" alt="media" />'
+          : '';
+        return '<div class="msg ' + role + '">' + mediaHtml + esc(m.text || '') + '</div>';
+      }).join('');
+      box.scrollTop = box.scrollHeight;
+    }
+
+    async function sendSim(e) {
+      e.preventDefault();
+      const input = document.getElementById('sim-input');
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      await fetch('/api/simulator/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      await loadState();
+    }
+
+    async function clearSim() {
+      await fetch('/api/simulator/clear', { method: 'POST' });
+      await loadState();
+    }
+
+    function renderCommands() {
+      if (!currentCfg) return;
+      const disabledList = currentCfg.disabledCommands || [];
+      const prefix = currentCfg.prefix || '.';
+      const q = (document.getElementById('cmd-search').value || '').trim().toLowerCase();
+      const filtered = CATALOG.filter((c) => !q || c.id.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q));
       const grid = document.getElementById('cmd-grid');
-      grid.innerHTML = CATALOG.map((c) => {
+      grid.innerHTML = filtered.map((c) => {
         const enabled = !disabledList.includes(c.id);
-        return '<label class="cmd-item" style="margin:0;cursor:pointer;color:#e4e4e7;">' +
-          '<span>' + prefix + c.id + '</span>' +
-          '<input type="checkbox" style="width:auto;" ' + (enabled ? 'checked' : '') +
-          ' onchange="toggleCmd(\\'' + c.id + '\\', this.checked)" />' +
-          '</label>';
+        return '<div class="cmd-card">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+            '<span class="font-mono" style="font-size:13px;font-weight:600;color:var(--text);">' + esc(prefix + c.id) + '</span>' +
+            '<input type="checkbox" style="width:auto;cursor:pointer;" ' + (enabled ? 'checked' : '') +
+            ' onchange="toggleCmd(\\'' + c.id + '\\', this.checked)" />' +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--muted);">' + esc(c.desc) + '</div>' +
+        '</div>';
       }).join('');
     }
 
@@ -1513,7 +2131,7 @@ async function startServer() {
       const next = enabled ? prev.filter((x) => x !== cmdId) : Array.from(new Set([...prev, cmdId]));
       await fetch('/api/config', {
         method: 'PATCH',
-        headers: {'Content-Type': 'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ disabledCommands: next })
       });
       await loadState();
@@ -1522,27 +2140,56 @@ async function startServer() {
     async function requestPairing() {
       const phoneNumber = document.getElementById('phone-input').value.trim();
       if (!phoneNumber) return;
-      document.getElementById('pair-box').innerHTML = '<div class="toast" style="color:#fbbf24;">Meminta 8-digit Pairing Code ke server WhatsApp...</div>';
+      document.getElementById('pair-box').innerHTML = '<div class="toast" style="color:var(--amber);">Meminta 8-digit Pairing Code ke server WhatsApp...</div>';
       try {
         const res = await fetch('/api/wa/connect-pairing', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ phoneNumber })
         });
         const data = await res.json();
         if (!data.ok) {
-          document.getElementById('pair-box').innerHTML = '<div class="toast" style="color:#fda4af;">' + (data.error || 'Gagal meminta kode') + '</div>';
+          document.getElementById('pair-box').innerHTML = '<div class="toast" style="color:var(--danger);">' + esc(data.error || 'Gagal meminta kode') + '</div>';
           return;
         }
         await loadState();
       } catch (e) {
-        document.getElementById('pair-box').innerHTML = '<div class="toast" style="color:#fda4af;">Gagal menghubungi server lokal.</div>';
+        document.getElementById('pair-box').innerHTML = '<div class="toast" style="color:var(--danger);">Gagal menghubungi server lokal.</div>';
       }
+    }
+
+    async function requestQr() {
+      document.getElementById('pair-box').innerHTML = '<div class="toast" style="color:var(--amber);">Menyiapkan QR Code WhatsApp...</div>';
+      await fetch('/api/wa/connect-qr', { method: 'POST' });
+      await loadState();
     }
 
     async function disconnectWa() {
       await fetch('/api/wa/disconnect', { method: 'POST' });
       document.getElementById('pair-box').innerHTML = '';
+      await loadState();
+    }
+
+    async function saveAntiBan() {
+      const minDelayMs = Number(document.getElementById('ab-min').value) || 1200;
+      const maxDelayMs = Number(document.getElementById('ab-max').value) || 2800;
+      const userCooldownMs = (Number(document.getElementById('ab-cool').value) || 3) * 1000;
+      const maxMsgsPerMinute = Number(document.getElementById('ab-burst').value) || 18;
+      await fetch('/api/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          antiBan: {
+            ...(currentCfg && currentCfg.antiBan ? currentCfg.antiBan : {}),
+            minDelayMs,
+            maxDelayMs,
+            userCooldownMs,
+            maxMsgsPerMinute
+          }
+        })
+      });
+      document.getElementById('toast-ab').innerText = 'Pengaturan Anti-Ban berhasil disimpan.';
+      setTimeout(() => { document.getElementById('toast-ab').innerText = ''; }, 2500);
       await loadState();
     }
 
@@ -1555,13 +2202,13 @@ async function startServer() {
 
       await fetch('/api/config', {
         method: 'PATCH',
-        headers: {'Content-Type': 'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           botName,
           prefix,
           stickerPackName,
           selfMode,
-          antiBan: { ...(currentCfg?.antiBan || {}), ownerNumber }
+          antiBan: { ...(currentCfg && currentCfg.antiBan ? currentCfg.antiBan : {}), ownerNumber }
         })
       });
       document.getElementById('toast-identity').innerText = 'Pengaturan utama tersimpan.';
@@ -1575,10 +2222,10 @@ async function startServer() {
       const goodbyeMsg = document.getElementById('tpl-goodbye').value;
       await fetch('/api/config', {
         method: 'PATCH',
-        headers: {'Content-Type': 'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           templates: {
-            ...(currentCfg?.templates || {}),
+            ...(currentCfg && currentCfg.templates ? currentCfg.templates : {}),
             menuHeader,
             welcomeMsg,
             goodbyeMsg
@@ -1594,17 +2241,17 @@ async function startServer() {
       try {
         const res = await fetch('/api/remote-tunnel');
         const rt = await res.json();
-        const lan = (rt.lanUrls && rt.lanUrls.length) ? rt.lanUrls.join(' , ') : 'Hubungkan Wi-Fi Redmi 9C';
+        const lan = (rt.lanUrls && rt.lanUrls.length) ? rt.lanUrls.join(' , ') : 'Hubungkan Wi-Fi lokal';
         const pub = rt.magicUrl
-          ? ('<div style="margin-top:6px;color:#34d399;word-break:break-all;">Link Luar Rumah (Klik di HP ke-2):<br><b>' + rt.magicUrl + '</b></div>')
-          : ('<div style="margin-top:6px;color:#a1a1aa;">Status Luar Rumah: ' + (rt.lastError || rt.status || 'nonaktif') + ' (Bisa juga ketik <b>.panel</b> dari WA Owner ke bot)</div>');
+          ? ('<div style="margin-top:8px;color:var(--emerald);word-break:break-all;">Link Luar Rumah (4G/5G):<br><strong class="font-mono">' + esc(rt.magicUrl) + '</strong></div>')
+          : ('<div style="margin-top:8px;color:var(--muted);">Status Luar Rumah: ' + esc(rt.lastError || rt.status || 'nonaktif') + ' (Kirim <code class="font-mono">.panel</code> dari WA Owner ke bot)</div>');
         document.getElementById('remote-box').innerHTML =
-          '<div>Satu Wi-Fi di Rumah: <b style="color:#f4f4f5;">' + lan + '</b></div>' + pub;
-      } catch {}
+          '<div>Satu Wi-Fi di Rumah: <strong class="font-mono" style="color:var(--text);">' + esc(lan) + '</strong></div>' + pub;
+      } catch (e) {}
     }
 
     async function startRemote() {
-      document.getElementById('remote-box').innerHTML = '<div style="color:#fbbf24;">Menghubungkan Cloudflare Tunnel...</div>';
+      document.getElementById('remote-box').innerHTML = '<div style="color:var(--amber);">Menghubungkan Cloudflare Tunnel...</div>';
       await fetch('/api/remote-tunnel/start', { method: 'POST' });
       await loadRemote();
     }

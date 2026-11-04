@@ -170,7 +170,7 @@ export function TermuxManagerView({
     gitRepoUrl.trim() || 'https://github.com/USERNAME_KAMU/NAMA_REPO_BOT.git';
   const gitCloneRunCmd = `pkg update -y && pkg install -y git && rm -rf ~/wabot && git clone ${cleanRepoUrl} ~/wabot && cd ~/wabot && bash termux.sh`;
   const gitUpdateCmd =
-    'cd ~/wabot && git pull && rm -f server.bundle.mjs && pm2 restart wabot';
+    'cd ~/wabot && git pull && pm2 restart wabot';
 
   const lanExampleUrl =
     netInfo?.lanUrls && netInfo.lanUrls.length > 0
@@ -612,7 +612,7 @@ export function TermuxManagerView({
             </p>
           </div>
 
-          <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 shrink-0 self-start">
+          <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 w-fit max-w-full overflow-x-auto shrink-0 self-start">
             <button
               type="button"
               onClick={() => setInstallMode('bundle')}
@@ -731,7 +731,7 @@ export function TermuxManagerView({
                 className="w-full px-4 py-2.5 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 font-mono text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
               />
               <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Pada metode Git Clone, Node.js 22 LTS di Termux menjalankan <code className="font-mono">server.ts</code> secara langsung beserta Localhost Lite Panel di <code className="font-mono">http://localhost:3000</code> untuk mengatur Pairing, Menu, Prefix, dan Template Balasan.
+                Pada metode Git Clone maupun <code className="font-mono">bot update</code>, bundel antarmuka <code className="font-mono">dist/</code> dan mesin <code className="font-mono">server.bundle.mjs</code> sudah disertakan siap pakai — sehingga saat kamu membuka <code className="font-mono">http://localhost:3000</code> atau tautan <code className="font-mono">{config.prefix}panel</code>, tampilannya <strong>100% identik dengan Preview Dashboard ini</strong> tanpa membebani RAM Redmi 9C.
               </p>
             </div>
 

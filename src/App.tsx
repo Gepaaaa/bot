@@ -319,7 +319,7 @@ export default function App() {
 
         {activeTab === 'connection' && (
           <div className="space-y-5">
-            <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 max-w-fit">
+            <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 w-fit max-w-full overflow-x-auto">
               <button
                 type="button"
                 onClick={() => setConnectionSubTab('wa')}
@@ -380,7 +380,7 @@ export default function App() {
 
         {activeTab === 'security' && (
           <div className="space-y-5">
-            <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 max-w-fit">
+            <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 w-fit max-w-full overflow-x-auto">
               <button
                 type="button"
                 onClick={() => setSecuritySubTab('antiban')}
@@ -426,7 +426,7 @@ export default function App() {
 
         {activeTab === 'settings' && (
           <div className="space-y-5">
-            <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 max-w-fit">
+            <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800 w-fit max-w-full overflow-x-auto">
               <button
                 type="button"
                 onClick={() => setSettingsSubTab('general')}

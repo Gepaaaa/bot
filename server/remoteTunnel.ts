@@ -563,36 +563,196 @@ class RemoteTunnelManager {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Kunci Akses Owner — WABot Panel</title>
+  <title>Kunci Akses Owner — WABot Control Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet" />
+  <script>
+    (function() {
+      try {
+        if (localStorage.getItem('wabot_theme') === 'dark') {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    })();
+  </script>
   <style>
+    :root {
+      --bg: #FAF9F6;
+      --surface: #FFFFFF;
+      --surface-sub: #F4F4F5;
+      --border: rgba(228, 228, 231, 0.85);
+      --text: #18181B;
+      --muted: #52525B;
+      --subtle: #71717A;
+      --btn-bg: #18181B;
+      --btn-fg: #FFFFFF;
+      --accent: #059669;
+      --danger: #E11D48;
+    }
+    html.dark {
+      --bg: #0C0C0E;
+      --surface: #141417;
+      --surface-sub: #09090B;
+      --border: #27272A;
+      --text: #F4F4F5;
+      --muted: #A1A1AA;
+      --subtle: #71717A;
+      --btn-bg: #059669;
+      --btn-fg: #FFFFFF;
+      --accent: #34D399;
+      --danger: #FB7185;
+    }
     * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; background: #0c0c0e; color: #f4f4f5; font-family: system-ui, -apple-system, sans-serif; }
-    .box { width: 100%; max-width: 400px; background: #141417; border: 1px solid #27272a; border-radius: 18px; padding: 24px; }
-    h1 { margin: 0 0 6px; font-size: 18px; font-weight: 700; }
-    p { margin: 0 0 18px; font-size: 13px; color: #a1a1aa; line-height: 1.5; }
-    label { display: block; font-size: 12px; color: #d4d4d8; margin-bottom: 6px; font-weight: 500; }
-    input { width: 100%; padding: 11px 13px; border-radius: 10px; border: 1px solid #27272a; background: #09090b; color: #fff; font-family: monospace; font-size: 14px; margin-bottom: 12px; }
-    button { width: 100%; padding: 11px 16px; border-radius: 10px; border: none; background: #059669; color: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
-    .err { color: #fb7185; font-size: 12px; margin-top: 10px; min-height: 16px; }
-    .hint { margin-top: 14px; padding-top: 14px; border-top: 1px solid #27272a; font-size: 12px; color: #71717a; line-height: 1.5; }
-    code { color: #34d399; font-family: monospace; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    header {
+      height: 64px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+    }
+    .brand {
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+    .theme-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 7px 12px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    main {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+    .box {
+      width: 100%;
+      max-width: 420px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+    }
+    .meta {
+      font-size: 12px;
+      color: var(--subtle);
+      margin-bottom: 6px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    p {
+      margin: 0 0 20px;
+      font-size: 13.5px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      color: var(--text);
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    input {
+      width: 100%;
+      padding: 11px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--surface-sub);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      margin-bottom: 12px;
+      outline: none;
+    }
+    input:focus { border-color: #10B981; }
+    button.primary {
+      width: 100%;
+      padding: 11px 16px;
+      border-radius: 12px;
+      border: none;
+      background: var(--btn-bg);
+      color: var(--btn-fg);
+      font-weight: 600;
+      font-size: 13px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    button.primary:hover { opacity: 0.92; }
+    .err {
+      color: var(--danger);
+      font-size: 12px;
+      margin-top: 10px;
+      min-height: 16px;
+    }
+    .hint {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+    code {
+      color: var(--accent);
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 500;
+    }
   </style>
 </head>
 <body>
-  <div class="box">
-    <h1>Panel Kontrol Jarak Jauh Terkunci</h1>
-    <p>Panel ini dilindungi agar orang lain tidak dapat mengubah pengaturan bot atau memutus tautan WhatsApp kamu.</p>
-    <form id="f">
-      <label for="k">Kunci Akses Owner</label>
-      <input id="k" type="password" placeholder="Masukkan kunci akses..." autocomplete="off" required />
-      <button type="submit">Buka Web Panel</button>
-      <div id="err" class="err"></div>
-    </form>
-    <div class="hint">
-      Lupa kunci akses? Kirim chat pribadi <code>.panel</code> dari nomor WhatsApp Owner ke nomor bot untuk mendapatkan tautan masuk otomatis.
+  <header>
+    <div class="brand">WABot</div>
+    <button type="button" class="theme-btn" id="tbtn">Tema Gelap / Terang</button>
+  </header>
+  <main>
+    <div class="box">
+      <div class="meta">Keamanan Akses Jarak Jauh · Termux 24/7</div>
+      <h1>Verifikasi Kunci Akses Owner</h1>
+      <p>Masukkan kunci akses untuk membuka penuh Web Control Panel, Simulator, dan Pengaturan WhatsApp Bot kamu.</p>
+      <form id="f">
+        <label for="k">Kunci Akses Owner</label>
+        <input id="k" type="password" placeholder="Masukkan kunci akses..." autocomplete="off" required />
+        <button type="submit" class="primary">Buka Dashboard Panel</button>
+        <div id="err" class="err"></div>
+      </form>
+      <div class="hint">
+        Lupa kunci akses? Kirim chat pribadi <code>.panel</code> dari nomor WhatsApp Owner ke nomor bot untuk menerima tautan masuk otomatis.
+      </div>
     </div>
-  </div>
+  </main>
   <script>
+    document.getElementById('tbtn').addEventListener('click', function () {
+      const isDark = document.documentElement.classList.toggle('dark');
+      try { localStorage.setItem('wabot_theme', isDark ? 'dark' : 'light'); } catch (e) {}
+    });
     document.getElementById('f').addEventListener('submit', async (e) => {
       e.preventDefault();
       const err = document.getElementById('err');
