@@ -237,8 +237,8 @@ var COMMAND_CATALOG = [
     id: "smeme",
     aliases: ["memesticker", "stikermeme", "smemer"],
     category: "sticker",
-    usage: "smeme <teks atas> | <teks bawah>",
-    description: "Tambahkan teks meme tebal besar atas & bawah pada foto lalu jadikan stiker WebP (bisa reply foto).",
+    usage: "smeme <teks atas> | <teks bawah> (reply foto/stiker)",
+    description: "Tambahkan teks meme tebal besar atas & bawah pada foto maupun stiker yang di-reply.",
     example: "smeme niatnya tidur cepat | malah scroll tiktok jam 3 pagi",
     requiresMedia: true,
     mediaKindHint: "image"
@@ -263,9 +263,9 @@ var COMMAND_CATALOG = [
     id: "wm",
     aliases: ["take", "colong", "swm", "exif"],
     category: "sticker",
-    usage: "wm <pack> | <author> (reply stiker)",
-    description: "Ganti nama Pack & Author (EXIF) pada stiker statis maupun stiker bergerak yang di-reply.",
-    example: "wm Koleksi Stiker | 6289673533963",
+    usage: "wm <nama> atau <pack|author> (reply stiker)",
+    description: "Ganti watermark stiker. Bisa hanya nama saja (contoh: .wm yodi) tanpa embel-embel, maupun format pack|author.",
+    example: "wm yodi",
     requiresMedia: true,
     mediaKindHint: "sticker"
   },
@@ -728,10 +728,10 @@ var COMPACT_COMMAND_META = {
   bratvid: { shortUsage: "bratvid <teks>", shortDesc: "Stiker Brat animasi bergerak" },
   ttp: { shortUsage: "ttp <teks>", shortDesc: "Stiker teks tebal transparan" },
   attp: { shortUsage: "attp <teks>", shortDesc: "Stiker animasi teks pelangi RGB" },
-  smeme: { shortUsage: "smeme <atas|bawah>", shortDesc: "Stiker foto teks meme tebal besar" },
+  smeme: { shortUsage: "smeme <atas|bawah>", shortDesc: "Stiker meme dari foto & stiker" },
   meme: { shortUsage: "meme [topik]", shortDesc: "Ambil foto meme lucu dari referensi web" },
   emojimix: { shortUsage: "emojimix \u{1F600}+\u{1F60E}", shortDesc: "Gabung 2 emoji jadi stiker" },
-  wm: { shortUsage: "wm <pack|author>", shortDesc: "Ganti nama pack/author stiker" },
+  wm: { shortUsage: "wm <nama>", shortDesc: "Ganti nama watermark stiker" },
   toimg: { shortUsage: "toimg", shortDesc: "Ubah stiker kembali jadi foto" },
   tovid: { shortUsage: "tovid", shortDesc: "Ubah stiker gerak jadi video MP4" },
   hdsw: { shortUsage: "hdsw", shortDesc: "Dokumen asli ke Status HD (Grup/PC)" },
@@ -1826,7 +1826,7 @@ var DEFAULT_CONFIG = {
   },
   groupOverrides: {},
   antiBan: { ...DEFAULT_ANTIBAN_CONFIG },
-  lockSettingsManualOnly: true,
+  lockSettingsManualOnly: false,
   webhook: { ...DEFAULT_WEBHOOK_CONFIG },
   autoResponder: [...DEFAULT_AUTORESPONDER_RULES]
 };
@@ -5263,8 +5263,8 @@ async function injectWhatsAppExif(webpBuffer, packName, author) {
     await img.load(webpBuffer);
     const jsonPayload = JSON.stringify({
       "sticker-pack-id": "com.wabot.sticker.pack",
-      "sticker-pack-name": packName || "WA Sticker",
-      "sticker-pack-publisher": author || "6289673533963",
+      "sticker-pack-name": packName ?? "",
+      "sticker-pack-publisher": author ?? "",
       emojis: ["\u2728", "\u{1F525}"]
     });
     const exifAttr = Buffer.from([
@@ -5708,7 +5708,13 @@ async function getFallbackMemeBackground() {
   }
 }
 async function createMemeSticker(topText, bottomText, baseImageBuffer, packName, author) {
-  const sourceBuffer = baseImageBuffer ?? await getFallbackMemeBackground();
+  let sourceBuffer = baseImageBuffer ?? await getFallbackMemeBackground();
+  if (sourceBuffer && sourceBuffer.length >= 12 && sourceBuffer.subarray(0, 4).toString("ascii") === "RIFF" && sourceBuffer.subarray(8, 12).toString("ascii") === "WEBP") {
+    try {
+      sourceBuffer = await stickerWebpToPng(sourceBuffer);
+    } catch {
+    }
+  }
   const cleanTop = topText.trim().toUpperCase();
   const cleanBottom = bottomText.trim().toUpperCase();
   const topLines = cleanTop ? wrapTextLines(cleanTop, 15, 2) : [];
@@ -6243,10 +6249,6 @@ async function processBotMessage(ctx) {
     return null;
   };
   const handleGroupTemplateSetter = (templateKey, titleLabel, sampleHint) => {
-    if (argsText) {
-      const manualGuard = checkManualOnlySettingsGuard();
-      if (manualGuard) return manualGuard;
-    }
     const guard = ensureSenderGroupAdmin();
     if (guard) return guard;
     const gid = effectiveGroupId || "simulator-group";
@@ -7252,18 +7254,26 @@ Contoh: *${config.prefix}${matchedCmd.example}*`
         break;
       }
       case "smeme": {
-        if (!argsText && !ctx.imageBuffer) {
+        if (!argsText && !ctx.imageBuffer && !ctx.stickerBuffer) {
           return failReply(
-            `Gunakan format *${config.prefix}smeme teks atas | teks bawah* (bisa sambil melampirkan atau me-reply foto untuk dijadikan stiker meme).`
+            `Gunakan format *${config.prefix}smeme teks atas | teks bawah* (bisa sambil melampirkan atau me-reply foto maupun stiker untuk dijadikan stiker meme).`
           );
         }
         const parts = argsText.split("|");
         const topText = (parts[0] || "").trim();
         const bottomText = (parts.slice(1).join(" ") || "").trim();
+        let baseImg = ctx.imageBuffer ?? null;
+        if (!baseImg && ctx.stickerBuffer) {
+          try {
+            baseImg = await stickerWebpToPng(ctx.stickerBuffer);
+          } catch {
+            baseImg = null;
+          }
+        }
         const stickerBuf = await createMemeSticker(
           topText || (bottomText ? "" : "SANTAI DULU"),
           bottomText,
-          ctx.imageBuffer ?? null,
+          baseImg,
           config.stickerPackName,
           config.stickerAuthor
         );
@@ -7300,28 +7310,48 @@ Contoh: *${config.prefix}emojimix \u{1F600}+\u{1F60E}*`
         break;
       }
       case "wm": {
-        if (!ctx.stickerBuffer) {
-          return failReply(
-            `Balas (reply) sebuah stiker dengan format *${config.prefix}wm Nama Pack | Nama Author* untuk mengganti hak cipta stiker.`
+        let targetSticker = ctx.stickerBuffer;
+        if (!targetSticker && ctx.imageBuffer) {
+          targetSticker = await imageToStickerWebp(
+            ctx.imageBuffer,
+            config.stickerPackName,
+            config.stickerAuthor
           );
         }
-        const parts = argsText.split("|");
-        const newPack = (parts[0] || "").trim() || config.stickerPackName || "WA Sticker";
-        const newAuthor = (parts.slice(1).join("|") || "").trim() || ctx.senderName || config.stickerAuthor;
+        if (!targetSticker) {
+          return failReply(
+            `Balas (reply) sebuah stiker (atau foto) dengan format *${config.prefix}wm <nama>* atau *${config.prefix}wm <pack> | <author>* untuk mengubah hak cipta stiker.`
+          );
+        }
+        let newPack;
+        let newAuthor;
+        if (argsText.includes("|")) {
+          const parts = argsText.split("|");
+          newPack = (parts[0] || "").trim() || config.stickerPackName || "WA Sticker";
+          newAuthor = (parts.slice(1).join("|") || "").trim();
+        } else if (argsText.trim()) {
+          const singleName = argsText.trim();
+          newPack = singleName;
+          newAuthor = "";
+        } else {
+          newPack = config.stickerPackName || "WA Sticker";
+          newAuthor = "";
+        }
         const rebranded = await rewriteStickerExif(
-          ctx.stickerBuffer,
+          targetSticker,
           newPack,
           newAuthor
         );
         const webUrl = botStore.storeSticker(rebranded);
         botStore.incrementStat("stickersCreated");
+        const labelConfirmed = newAuthor ? `*${newPack}* \xB7 *${newAuthor}*` : `*${newPack}*`;
         result = {
           handled: true,
           reactionStatus: "success",
           stickerBuffer: rebranded,
           stickerWebUrl: webUrl,
-          stickerPackOverride: { pack: newPack, author: newAuthor },
-          replyText: `Watermark stiker diperbarui: *${newPack}* \xB7 *${newAuthor}*`
+          stickerPackOverride: { pack: newPack, author: newAuthor || newPack },
+          replyText: `Watermark stiker diperbarui: ${labelConfirmed}`
         };
         break;
       }
@@ -7753,10 +7783,6 @@ Tautan baru: https://chat.whatsapp.com/${newCode || "diperbarui"}`
       }
       case "antilink": {
         const mode = argsText.toLowerCase();
-        if (mode === "on" || mode === "off") {
-          const manualGuard = checkManualOnlySettingsGuard();
-          if (manualGuard) return manualGuard;
-        }
         const guard = ensureSenderGroupAdmin();
         if (guard) return guard;
         if (mode !== "on" && mode !== "off") {
@@ -7764,7 +7790,8 @@ Tautan baru: https://chat.whatsapp.com/${newCode || "diperbarui"}`
             handled: true,
             reactionStatus: "success",
             replyText: `Status Antilink grup ini: *${effectiveGroupSettings.antilink ? "AKTIF" : "NONAKTIF"}*.
-Catatan: Pengubahan setelan antilink dikelola secara manual melalui Dashboard Web Panel demi menjaga keamanan grup.`
+
+Ketik *${config.prefix}antilink on* atau *${config.prefix}antilink off* untuk menyetel.`
           };
         }
         const nextVal = mode === "on";
@@ -7790,18 +7817,22 @@ Catatan: Pengubahan setelan antilink dikelola secara manual melalui Dashboard We
       }
       case "welcome": {
         const mode = argsText.toLowerCase();
-        if (mode === "on" || mode === "off") {
-          const manualGuard = checkManualOnlySettingsGuard();
-          if (manualGuard) return manualGuard;
-        }
         const guard = ensureSenderGroupAdmin();
         if (guard) return guard;
         if (mode !== "on" && mode !== "off") {
+          const currentTpl = botStore.getEffectiveTemplate("welcomeMsg", effectiveGroupId);
           return {
             handled: true,
             reactionStatus: "success",
-            replyText: `Sambutan member baru di grup ini: *${effectiveGroupSettings.welcome ? "AKTIF" : "NONAKTIF"}*.
-Catatan: Pengubahan setelan sambutan dikelola secara manual melalui Dashboard Web Panel demi ketertiban grup.`
+            replyText: [
+              `Sambutan member baru di grup ini: *${effectiveGroupSettings.welcome ? "AKTIF" : "NONAKTIF"}*`,
+              "",
+              `\u2022 Ketik *${config.prefix}welcome on* atau *${config.prefix}welcome off* untuk sakelar.`,
+              `\u2022 Ketik *${config.prefix}setwelcome <teks>* untuk mengubah teks sambutan.`,
+              "",
+              `*Teks Sambutan Saat Ini:*`,
+              currentTpl
+            ].join("\n")
           };
         }
         const nextVal = mode === "on";
@@ -7827,18 +7858,22 @@ Catatan: Pengubahan setelan sambutan dikelola secara manual melalui Dashboard We
       }
       case "out": {
         const mode = argsText.toLowerCase();
-        if (mode === "on" || mode === "off") {
-          const manualGuard = checkManualOnlySettingsGuard();
-          if (manualGuard) return manualGuard;
-        }
         const guard = ensureSenderGroupAdmin();
         if (guard) return guard;
         if (mode !== "on" && mode !== "off") {
+          const currentTpl = botStore.getEffectiveTemplate("goodbyeMsg", effectiveGroupId);
           return {
             handled: true,
             reactionStatus: "success",
-            replyText: `Pesan keluar grup (*out/leave*) saat ini: *${effectiveGroupSettings.goodbye ? "AKTIF" : "NONAKTIF"}*.
-Catatan: Pengubahan setelan pesan keluar dikelola secara manual melalui Dashboard Web Panel.`
+            replyText: [
+              `Pesan keluar grup (*out/leave*) saat ini: *${effectiveGroupSettings.goodbye ? "AKTIF" : "NONAKTIF"}*`,
+              "",
+              `\u2022 Ketik *${config.prefix}out on* atau *${config.prefix}out off* untuk sakelar.`,
+              `\u2022 Ketik *${config.prefix}setout <teks>* untuk mengubah teks perpisahan.`,
+              "",
+              `*Teks Perpisahan Saat Ini:*`,
+              currentTpl
+            ].join("\n")
           };
         }
         const nextVal = mode === "on";
@@ -7863,6 +7898,30 @@ Catatan: Pengubahan setelan pesan keluar dikelola secara manual melalui Dashboar
         break;
       }
       case "setwelcome": {
+        const lowerArg = argsText.toLowerCase();
+        if (lowerArg === "on" || lowerArg === "off") {
+          const nextVal = lowerArg === "on";
+          const guard = ensureSenderGroupAdmin();
+          if (guard) return guard;
+          if (effectiveGroupId) {
+            botStore.updateGroupCustomConfig(effectiveGroupId, {
+              welcome: nextVal
+            });
+          }
+          if (ctx.source === "simulator") {
+            botStore.updateConfig({
+              groupSettings: {
+                ...config.groupSettings,
+                welcome: nextVal
+              }
+            });
+          }
+          return {
+            handled: true,
+            reactionStatus: "success",
+            replyText: `Pesan sambutan anggota baru berhasil diatur ke *${nextVal ? "AKTIF" : "NONAKTIF"}*.`
+          };
+        }
         result = handleGroupTemplateSetter(
           "welcomeMsg",
           "Sambutan Masuk (Welcome)",
@@ -7871,6 +7930,30 @@ Catatan: Pengubahan setelan pesan keluar dikelola secara manual melalui Dashboar
         break;
       }
       case "setout": {
+        const lowerArg = argsText.toLowerCase();
+        if (lowerArg === "on" || lowerArg === "off") {
+          const nextVal = lowerArg === "on";
+          const guard = ensureSenderGroupAdmin();
+          if (guard) return guard;
+          if (effectiveGroupId) {
+            botStore.updateGroupCustomConfig(effectiveGroupId, {
+              goodbye: nextVal
+            });
+          }
+          if (ctx.source === "simulator") {
+            botStore.updateConfig({
+              groupSettings: {
+                ...config.groupSettings,
+                goodbye: nextVal
+              }
+            });
+          }
+          return {
+            handled: true,
+            reactionStatus: "success",
+            replyText: `Pesan otomatis saat anggota keluar grup diatur ke *${nextVal ? "AKTIF" : "NONAKTIF"}*.`
+          };
+        }
         result = handleGroupTemplateSetter(
           "goodbyeMsg",
           "Pesan Keluar Grup (Out/Leave)",
@@ -9895,8 +9978,10 @@ Batas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam Whats
           };
         });
         isBotGroupAdmin = detectedBotAdmin;
+        const cleanSenderDigits = normalizeWaPhone(senderPhone);
+        const baseSenderJid = senderJid.split(":")[0]?.split("@")[0] || "";
         const foundSender = groupMembers.find(
-          (p) => p.jid === senderJid || p.lid && p.lid === senderJid || senderAltJid && (p.jid === senderAltJid || p.lid === senderAltJid) || p.phone === senderPhone
+          (p) => p.jid === senderJid || p.jid.split(":")[0]?.split("@")[0] === baseSenderJid || p.lid && (p.lid === senderJid || p.lid.split(":")[0]?.split("@")[0] === baseSenderJid) || senderAltJid && (p.jid === senderAltJid || p.lid === senderAltJid) || p.phone === senderPhone || cleanSenderDigits && normalizeWaPhone(p.phone) === cleanSenderDigits
         );
         if (foundSender) {
           if (/^[0-9]{8,16}$/.test(foundSender.phone)) {
@@ -9926,6 +10011,10 @@ Batas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam Whats
       "smeme",
       "memesticker",
       "stikermeme",
+      "wm",
+      "take",
+      "colong",
+      "swm",
       "hd",
       "remini",
       "upscale",
@@ -10027,7 +10116,10 @@ Batas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam Whats
       "tourl",
       "upload",
       "catbox",
-      "linkmedia"
+      "linkmedia",
+      "smeme",
+      "memesticker",
+      "stikermeme"
     ].includes(firstToken);
     const needsViewOnce = [
       "rvo",

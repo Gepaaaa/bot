@@ -978,13 +978,27 @@ export function ChatSimulatorView({
                                 setReplyTarget(msg);
                                 void executeSend({
                                   replyToId: msg.id,
-                                  text: `${config.prefix}wm Ryo Yamada | 6289673533963`,
+                                  text: `${config.prefix}wm yodi`,
                                 });
                               }}
                               className="px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 hover:text-emerald-700 dark:hover:text-emerald-400 border border-zinc-200/60 dark:border-zinc-700/60 transition-colors"
-                              title="Ganti Pack Name & Author (EXIF) stiker ini"
+                              title="Ganti watermark stiker hanya dengan nama saja (misal: .wm yodi)"
                             >
-                              {config.prefix}wm
+                              {config.prefix}wm yodi
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReplyTarget(msg);
+                                void executeSend({
+                                  replyToId: msg.id,
+                                  text: `${config.prefix}smeme santai dulu | jangan panik`,
+                                });
+                              }}
+                              className="px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 hover:text-emerald-700 dark:hover:text-emerald-400 border border-zinc-200/60 dark:border-zinc-700/60 transition-colors"
+                              title="Buat stiker meme langsung dari stiker ini"
+                            >
+                              {config.prefix}smeme
                             </button>
                             <button
                               type="button"

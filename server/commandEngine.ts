@@ -597,11 +597,6 @@ export async function processBotMessage(
     titleLabel: string,
     sampleHint: string
   ): BotCommandResult => {
-    if (argsText) {
-      const manualGuard = checkManualOnlySettingsGuard();
-      if (manualGuard) return manualGuard;
-    }
-
     const guard = ensureSenderGroupAdmin();
     if (guard) return guard;
 
@@ -1778,19 +1773,28 @@ export async function processBotMessage(
       }
 
       case 'smeme': {
-        if (!argsText && !ctx.imageBuffer) {
+        if (!argsText && !ctx.imageBuffer && !ctx.stickerBuffer) {
           return failReply(
-            `Gunakan format *${config.prefix}smeme teks atas | teks bawah* (bisa sambil melampirkan atau me-reply foto untuk dijadikan stiker meme).`
+            `Gunakan format *${config.prefix}smeme teks atas | teks bawah* (bisa sambil melampirkan atau me-reply foto maupun stiker untuk dijadikan stiker meme).`
           );
         }
         const parts = argsText.split('|');
         const topText = (parts[0] || '').trim();
         const bottomText = (parts.slice(1).join(' ') || '').trim();
 
+        let baseImg: Buffer | null = ctx.imageBuffer ?? null;
+        if (!baseImg && ctx.stickerBuffer) {
+          try {
+            baseImg = await stickerWebpToPng(ctx.stickerBuffer);
+          } catch {
+            baseImg = null;
+          }
+        }
+
         const stickerBuf = await createMemeSticker(
           topText || (bottomText ? '' : 'SANTAI DULU'),
           bottomText,
-          ctx.imageBuffer ?? null,
+          baseImg,
           config.stickerPackName,
           config.stickerAuthor
         );
@@ -1830,34 +1834,55 @@ export async function processBotMessage(
       }
 
       case 'wm': {
-        if (!ctx.stickerBuffer) {
-          return failReply(
-            `Balas (reply) sebuah stiker dengan format *${config.prefix}wm Nama Pack | Nama Author* untuk mengganti hak cipta stiker.`
+        let targetSticker = ctx.stickerBuffer;
+        if (!targetSticker && ctx.imageBuffer) {
+          targetSticker = await imageToStickerWebp(
+            ctx.imageBuffer,
+            config.stickerPackName,
+            config.stickerAuthor
           );
         }
-        const parts = argsText.split('|');
-        const newPack =
-          (parts[0] || '').trim() || config.stickerPackName || 'WA Sticker';
-        const newAuthor =
-          (parts.slice(1).join('|') || '').trim() ||
-          ctx.senderName ||
-          config.stickerAuthor;
+
+        if (!targetSticker) {
+          return failReply(
+            `Balas (reply) sebuah stiker (atau foto) dengan format *${config.prefix}wm <nama>* atau *${config.prefix}wm <pack> | <author>* untuk mengubah hak cipta stiker.`
+          );
+        }
+
+        let newPack: string;
+        let newAuthor: string;
+
+        if (argsText.includes('|')) {
+          const parts = argsText.split('|');
+          newPack = (parts[0] || '').trim() || config.stickerPackName || 'WA Sticker';
+          newAuthor = (parts.slice(1).join('|') || '').trim();
+        } else if (argsText.trim()) {
+          // Hanya nama saja tanpa tambahan apa pun (tidak memaksakan nick WA atau '•')
+          const singleName = argsText.trim();
+          newPack = singleName;
+          newAuthor = '';
+        } else {
+          newPack = config.stickerPackName || 'WA Sticker';
+          newAuthor = '';
+        }
 
         const rebranded = await rewriteStickerExif(
-          ctx.stickerBuffer,
+          targetSticker,
           newPack,
           newAuthor
         );
         const webUrl = botStore.storeSticker(rebranded);
         botStore.incrementStat('stickersCreated');
 
+        const labelConfirmed = newAuthor ? `*${newPack}* · *${newAuthor}*` : `*${newPack}*`;
+
         result = {
           handled: true,
           reactionStatus: 'success',
           stickerBuffer: rebranded,
           stickerWebUrl: webUrl,
-          stickerPackOverride: { pack: newPack, author: newAuthor },
-          replyText: `Watermark stiker diperbarui: *${newPack}* · *${newAuthor}*`,
+          stickerPackOverride: { pack: newPack, author: newAuthor || newPack },
+          replyText: `Watermark stiker diperbarui: ${labelConfirmed}`,
         };
         break;
       }
@@ -2355,11 +2380,6 @@ export async function processBotMessage(
 
       case 'antilink': {
         const mode = argsText.toLowerCase();
-        if (mode === 'on' || mode === 'off') {
-          const manualGuard = checkManualOnlySettingsGuard();
-          if (manualGuard) return manualGuard;
-        }
-
         const guard = ensureSenderGroupAdmin();
         if (guard) return guard;
 
@@ -2369,7 +2389,7 @@ export async function processBotMessage(
             reactionStatus: 'success',
             replyText: `Status Antilink grup ini: *${
               effectiveGroupSettings.antilink ? 'AKTIF' : 'NONAKTIF'
-            }*.\nCatatan: Pengubahan setelan antilink dikelola secara manual melalui Dashboard Web Panel demi menjaga keamanan grup.`,
+            }*.\n\nKetik *${config.prefix}antilink on* atau *${config.prefix}antilink off* untuk menyetel.`,
           };
         }
 
@@ -2399,21 +2419,25 @@ export async function processBotMessage(
 
       case 'welcome': {
         const mode = argsText.toLowerCase();
-        if (mode === 'on' || mode === 'off') {
-          const manualGuard = checkManualOnlySettingsGuard();
-          if (manualGuard) return manualGuard;
-        }
-
         const guard = ensureSenderGroupAdmin();
         if (guard) return guard;
 
         if (mode !== 'on' && mode !== 'off') {
+          const currentTpl = botStore.getEffectiveTemplate('welcomeMsg', effectiveGroupId);
           return {
             handled: true,
             reactionStatus: 'success',
-            replyText: `Sambutan member baru di grup ini: *${
-              effectiveGroupSettings.welcome ? 'AKTIF' : 'NONAKTIF'
-            }*.\nCatatan: Pengubahan setelan sambutan dikelola secara manual melalui Dashboard Web Panel demi ketertiban grup.`,
+            replyText: [
+              `Sambutan member baru di grup ini: *${
+                effectiveGroupSettings.welcome ? 'AKTIF' : 'NONAKTIF'
+              }*`,
+              '',
+              `• Ketik *${config.prefix}welcome on* atau *${config.prefix}welcome off* untuk sakelar.`,
+              `• Ketik *${config.prefix}setwelcome <teks>* untuk mengubah teks sambutan.`,
+              '',
+              `*Teks Sambutan Saat Ini:*`,
+              currentTpl,
+            ].join('\n'),
           };
         }
 
@@ -2443,21 +2467,25 @@ export async function processBotMessage(
 
       case 'out': {
         const mode = argsText.toLowerCase();
-        if (mode === 'on' || mode === 'off') {
-          const manualGuard = checkManualOnlySettingsGuard();
-          if (manualGuard) return manualGuard;
-        }
-
         const guard = ensureSenderGroupAdmin();
         if (guard) return guard;
 
         if (mode !== 'on' && mode !== 'off') {
+          const currentTpl = botStore.getEffectiveTemplate('goodbyeMsg', effectiveGroupId);
           return {
             handled: true,
             reactionStatus: 'success',
-            replyText: `Pesan keluar grup (*out/leave*) saat ini: *${
-              effectiveGroupSettings.goodbye ? 'AKTIF' : 'NONAKTIF'
-            }*.\nCatatan: Pengubahan setelan pesan keluar dikelola secara manual melalui Dashboard Web Panel.`,
+            replyText: [
+              `Pesan keluar grup (*out/leave*) saat ini: *${
+                effectiveGroupSettings.goodbye ? 'AKTIF' : 'NONAKTIF'
+              }*`,
+              '',
+              `• Ketik *${config.prefix}out on* atau *${config.prefix}out off* untuk sakelar.`,
+              `• Ketik *${config.prefix}setout <teks>* untuk mengubah teks perpisahan.`,
+              '',
+              `*Teks Perpisahan Saat Ini:*`,
+              currentTpl,
+            ].join('\n'),
           };
         }
 
@@ -2486,6 +2514,32 @@ export async function processBotMessage(
       }
 
       case 'setwelcome': {
+        const lowerArg = argsText.toLowerCase();
+        if (lowerArg === 'on' || lowerArg === 'off') {
+          const nextVal = lowerArg === 'on';
+          const guard = ensureSenderGroupAdmin();
+          if (guard) return guard;
+          if (effectiveGroupId) {
+            botStore.updateGroupCustomConfig(effectiveGroupId, {
+              welcome: nextVal,
+            });
+          }
+          if (ctx.source === 'simulator') {
+            botStore.updateConfig({
+              groupSettings: {
+                ...config.groupSettings,
+                welcome: nextVal,
+              },
+            });
+          }
+          return {
+            handled: true,
+            reactionStatus: 'success',
+            replyText: `Pesan sambutan anggota baru berhasil diatur ke *${
+              nextVal ? 'AKTIF' : 'NONAKTIF'
+            }*.`,
+          };
+        }
         result = handleGroupTemplateSetter(
           'welcomeMsg',
           'Sambutan Masuk (Welcome)',
@@ -2495,6 +2549,32 @@ export async function processBotMessage(
       }
 
       case 'setout': {
+        const lowerArg = argsText.toLowerCase();
+        if (lowerArg === 'on' || lowerArg === 'off') {
+          const nextVal = lowerArg === 'on';
+          const guard = ensureSenderGroupAdmin();
+          if (guard) return guard;
+          if (effectiveGroupId) {
+            botStore.updateGroupCustomConfig(effectiveGroupId, {
+              goodbye: nextVal,
+            });
+          }
+          if (ctx.source === 'simulator') {
+            botStore.updateConfig({
+              groupSettings: {
+                ...config.groupSettings,
+                goodbye: nextVal,
+              },
+            });
+          }
+          return {
+            handled: true,
+            reactionStatus: 'success',
+            replyText: `Pesan otomatis saat anggota keluar grup diatur ke *${
+              nextVal ? 'AKTIF' : 'NONAKTIF'
+            }*.`,
+          };
+        }
         result = handleGroupTemplateSetter(
           'goodbyeMsg',
           'Pesan Keluar Grup (Out/Leave)',

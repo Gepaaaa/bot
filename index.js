@@ -72,18 +72,33 @@ const bundleExists = fs.existsSync(prebuiltServerBundle);
 
 try {
   if (isArm32) {
-    // 32-bit ARM (Redmi 9C) cannot run native esbuild.
-    // Always use prebuilt server.bundle.mjs and NEVER delete it!
+    // 32-bit ARM (Redmi 9C)
     if (bundleExists) {
       console.log('[WABot Bootstrap] Menjalankan server.bundle.mjs (Mode ARMv7 32-bit)...');
       await import(pathToFileURL(prebuiltServerBundle).href);
     } else {
-      console.error(
-        '\n[!] Error Kritis: server.bundle.mjs tidak ditemukan di perangkat 32-bit (Redmi 9C).\n' +
-        '    Lakukan pembaruan Git dengan perintah:\n' +
-        '    cd ~/wabot && git pull && pm2 restart wabot\n'
+      console.warn(
+        '[WABot Bootstrap] server.bundle.mjs tidak ditemukan di perangkat 32-bit. Mencoba fallback ke server.ts...'
       );
-      process.exit(1);
+      let started = false;
+      if (fs.existsSync(path.join(rootDir, 'server.ts'))) {
+        try {
+          await import(pathToFileURL(path.join(rootDir, 'server.ts')).href);
+          started = true;
+        } catch (stripErr) {
+          console.warn('[WABot Bootstrap] Import server.ts langsung gagal:', stripErr?.message || stripErr);
+        }
+      }
+
+      if (!started) {
+        console.error(
+          '\n[!] Error Kritis: server.bundle.mjs tidak ditemukan di perangkat 32-bit (Redmi 9C).\n' +
+          '    Solusi Cepat:\n' +
+          '    1) Jalankan: cd ~/wabot && git pull\n' +
+          '    2) Lalu ketik: bot restart\n'
+        );
+        process.exit(1);
+      }
     }
   } else {
     // 64-bit hosts (x86_64 or aarch64)

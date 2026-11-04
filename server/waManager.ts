@@ -2029,13 +2029,17 @@ class WhatsAppSessionManager {
 
         isBotGroupAdmin = detectedBotAdmin;
 
+        const cleanSenderDigits = normalizeWaPhone(senderPhone);
+        const baseSenderJid = senderJid.split(':')[0]?.split('@')[0] || '';
         const foundSender = groupMembers.find(
           (p) =>
             p.jid === senderJid ||
-            (p.lid && p.lid === senderJid) ||
+            p.jid.split(':')[0]?.split('@')[0] === baseSenderJid ||
+            (p.lid && (p.lid === senderJid || p.lid.split(':')[0]?.split('@')[0] === baseSenderJid)) ||
             (senderAltJid &&
               (p.jid === senderAltJid || p.lid === senderAltJid)) ||
-            p.phone === senderPhone
+            p.phone === senderPhone ||
+            (cleanSenderDigits && normalizeWaPhone(p.phone) === cleanSenderDigits)
         );
         if (foundSender) {
           if (/^[0-9]{8,16}$/.test(foundSender.phone)) {
@@ -2084,6 +2088,10 @@ class WhatsAppSessionManager {
       'smeme',
       'memesticker',
       'stikermeme',
+      'wm',
+      'take',
+      'colong',
+      'swm',
       'hd',
       'remini',
       'upscale',
@@ -2189,6 +2197,9 @@ class WhatsAppSessionManager {
       'upload',
       'catbox',
       'linkmedia',
+      'smeme',
+      'memesticker',
+      'stikermeme',
     ].includes(firstToken);
 
     const needsViewOnce = [

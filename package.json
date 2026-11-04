@@ -10,7 +10,7 @@
     "start": "node server.ts",
     "start:termux": "node --max-old-space-size=256 index.js",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.mjs server.bundle.mjs",
+    "clean": "rm -rf dist server.mjs",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

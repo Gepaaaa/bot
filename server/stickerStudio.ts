@@ -47,8 +47,8 @@ export async function injectWhatsAppExif(
 
     const jsonPayload = JSON.stringify({
       'sticker-pack-id': 'com.wabot.sticker.pack',
-      'sticker-pack-name': packName || 'WA Sticker',
-      'sticker-pack-publisher': author || '6289673533963',
+      'sticker-pack-name': packName ?? '',
+      'sticker-pack-publisher': author ?? '',
       emojis: ['✨', '🔥'],
     });
 
@@ -628,7 +628,21 @@ export async function createMemeSticker(
   packName: string,
   author: string
 ): Promise<Buffer> {
-  const sourceBuffer = baseImageBuffer ?? (await getFallbackMemeBackground());
+  let sourceBuffer = baseImageBuffer ?? (await getFallbackMemeBackground());
+
+  // Dukung stiker WebP secara langsung sebagai bahan dasar meme
+  if (
+    sourceBuffer &&
+    sourceBuffer.length >= 12 &&
+    sourceBuffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    sourceBuffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) {
+    try {
+      sourceBuffer = await stickerWebpToPng(sourceBuffer);
+    } catch {
+      // Fallback tetap gunakan sourceBuffer
+    }
+  }
 
   const cleanTop = topText.trim().toUpperCase();
   const cleanBottom = bottomText.trim().toUpperCase();

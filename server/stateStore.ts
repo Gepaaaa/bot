@@ -100,7 +100,7 @@ const DEFAULT_CONFIG: BotConfig = {
   },
   groupOverrides: {},
   antiBan: { ...DEFAULT_ANTIBAN_CONFIG },
-  lockSettingsManualOnly: true,
+  lockSettingsManualOnly: false,
   webhook: { ...DEFAULT_WEBHOOK_CONFIG },
   autoResponder: [...DEFAULT_AUTORESPONDER_RULES],
 };
