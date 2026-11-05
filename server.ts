@@ -13,6 +13,10 @@ import {
   processBotMessage,
   shouldSendPendingReaction,
 } from './server/commandEngine.ts';
+import {
+  checkAiServiceHealth,
+  pushRuntimeConfigToAiService,
+} from './server/aiEnhancer.ts';
 import { cloudSync } from './server/cloudSync.ts';
 import { gatewayRouter } from './server/gatewayRouter.ts';
 import { getActiveImageBackend } from './server/imageAdapter.ts';
@@ -341,7 +345,15 @@ async function startServer() {
   app.patch('/api/config', (req, res) => {
     const patch = (req.body || {}) as Partial<BotConfig>;
     const updated = botStore.updateConfig(patch);
+    if (patch.aiEnhance) {
+      void pushRuntimeConfigToAiService(updated.aiEnhance);
+    }
     res.json({ ok: true, config: updated });
+  });
+
+  app.get('/api/ai-enhance/status', async (_req, res) => {
+    const status = await checkAiServiceHealth(botStore.config.aiEnhance);
+    res.json(status);
   });
 
   app.get('/api/sample-cat.jpg', async (_req, res) => {
@@ -975,6 +987,11 @@ async function startServer() {
         isBotGroupAdmin: true,
         text,
         imageBuffer,
+        imageMimeType: attachedPreviewMedia?.type === 'image'
+          ? attachedPreviewMedia.mimeType
+          : replySnapshot?.hasImage
+          ? 'image/jpeg'
+          : undefined,
         videoBuffer,
         audioBuffer,
         stickerBuffer,
@@ -989,6 +1006,26 @@ async function startServer() {
         quotedParticipantPhone,
         quotedParticipantJid,
         groupMembers: botStore.groupMembers,
+        onProgressStatus: async (statusText: string) => {
+          const progressMsg: SimulatorMessage = {
+            id: `sim-prog-${Date.now()}-${Math.random()
+              .toString(36)
+              .slice(2, 6)}`,
+            chatMode,
+            sender: 'bot',
+            senderName: botStore.config.botName,
+            senderPhone: 'Bot Engine',
+            text: statusText,
+            timestamp: Date.now(),
+            replyTo: {
+              id: userMsg.id,
+              senderName: userMsg.senderName,
+              senderPhone: userMsg.senderPhone,
+              text: userMsg.text || '[Lampiran Foto]',
+            },
+          };
+          botStore.addSimulatorMessage(progressMsg);
+        },
       });
 
       if (pendingReaction) {
@@ -1307,6 +1344,9 @@ async function startServer() {
         '--exclude=.env',
         '--exclude=server.mjs',
         '--exclude=public/assets/aistudio',
+        '--exclude=ai_service/weights',
+        '--exclude=ai_service/__pycache__',
+        '--exclude=ai_service/.venv',
         '-czf',
         '-',
         '.',
@@ -1330,6 +1370,17 @@ async function startServer() {
       }
     }
   );
+
+  app.get('/setup-reno5.sh', async (_req, res) => {
+    try {
+      const scriptPath = path.join(process.cwd(), 'ai_service', 'setup_reno5.sh');
+      const content = await fs.readFile(scriptPath, 'utf-8');
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.send(content);
+    } catch {
+      res.status(404).send('# setup_reno5.sh not found');
+    }
+  });
 
   // --- VITE MIDDLEWARE (DEV) OR STATIC ASSETS (PROD) ---
   if (process.env.NODE_ENV !== 'production') {

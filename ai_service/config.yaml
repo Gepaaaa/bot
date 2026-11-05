@@ -1,0 +1,63 @@
+# Externalized Configuration for WABot AI Photo Enhancement Service (FastAPI + GPU)
+# All parameters below can be adjusted without modifying application code,
+# and can also be overridden via environment variables or PATCH /v1/config.
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  max_concurrent_jobs: 2
+  max_queue_size: 16
+  job_timeout_seconds: 90
+  max_file_size_mb: 15
+  max_input_megapixels: 16.0
+  max_output_edge: 4096
+  default_output_format: "jpeg"
+  jpeg_quality: 95
+
+models:
+  weights_dir: "./weights"
+  device: "auto" # auto (cuda -> mps -> cpu), cuda, cpu
+  use_fp16_on_cuda: true
+  tile_size: 400
+  tile_pad: 10
+  pre_pad: 0
+
+  # General Super-Resolution & Restoration (Real-ESRGAN)
+  realesrgan_x2_weights: "RealESRGAN_x2plus.pth"
+  realesrgan_x4_weights: "RealESRGAN_x4plus.pth"
+
+  # Face Restoration (GFPGAN v1.4 & CodeFormer)
+  default_face_model: "codeformer" # "codeformer" | "gfpgan"
+  codeformer_weights: "codeformer.pth"
+  gfpgan_weights: "GFPGANv1.4.pth"
+
+  # Fidelity w in [0.0, 1.0]:
+  # 0.0 = stronger AI hallucination/reconstruction
+  # 0.72 = balanced natural sharpness while strictly preserving original facial identity
+  # 1.0 = maximum original identity preservation
+  default_fidelity: 0.72
+
+  # Natural skin texture preservation (prevents waxy / plastic skin)
+  skin_texture_preserve: 0.18
+  face_identity_max_luma_delta: 24.0
+
+  # Conditional Blind Denoising & Deblurring (SCUNet / NAFNet)
+  enable_denoiser: true
+  denoiser_arch: "scunet" # "scunet" | "nafnet"
+  scunet_weights: "scunet_color_real_psnr.pth"
+  nafnet_denoise_weights: "NAFNet-SIDD-width64.pth"
+
+  enable_deblurrer: true
+  nafnet_deblur_weights: "NAFNet-GoPro-width64.pth"
+
+adaptive_thresholds:
+  # SCUNet / NAFNet denoising runs ONLY when high-frequency MAD noise sigma >= trigger
+  noise_sigma_trigger: 11.5
+  # NAFNet deblurring runs ONLY when Laplacian sharpness variance < trigger
+  blur_laplacian_trigger: 62.0
+  # Minimum confidence for RetinaFace / YuNet face detection
+  face_confidence_threshold: 0.65
+  # Auto-scale cutoff: inputs with max edge >= 1280 default to 2x in .hd auto mode, smaller get 4x
+  auto_4x_max_input_edge: 1280
+  # CIE LAB chrominance anchor limit so GANs never shift colors unnaturally
+  max_lab_chroma_drift: 4.0

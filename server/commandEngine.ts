@@ -7,9 +7,12 @@ import {
   SUSPENSION_RISK_DISABLED_REPLY,
 } from '../src/shared/commands.ts';
 import type {
+  AiEnhanceMode,
+  AiFaceModel,
   GroupEditableTemplateKey,
   SimulatorMember,
 } from '../src/shared/types.ts';
+import { aiEnhancer } from './aiEnhancer.ts';
 import { evaluateAutoResponder } from './autoResponder.ts';
 import { prepareHdStatusImage } from './imageAdapter.ts';
 import {
@@ -25,7 +28,6 @@ import {
   applyImageFilter,
   type AudioEffectMode,
   convertVideoToPtv,
-  enhanceImageHd,
   extractOrConvertAudio,
   generateQrImage,
   type ImageFilterMode,
@@ -103,6 +105,7 @@ export interface IncomingBotContext {
   isBotGroupAdmin?: boolean;
   text: string;
   imageBuffer?: Buffer | null;
+  imageMimeType?: string | null;
   videoBuffer?: Buffer | null;
   audioBuffer?: Buffer | null;
   stickerBuffer?: Buffer | null;
@@ -119,6 +122,7 @@ export interface IncomingBotContext {
   quotedParticipantPhone?: string;
   groupMembers?: SimulatorMember[];
   waGroupOps?: WAGroupOperations;
+  onProgressStatus?: (statusText: string) => Promise<void>;
 }
 
 export interface BotCommandResult {
@@ -1137,33 +1141,133 @@ export async function processBotMessage(
         break;
       }
 
-      case 'hd': {
+      case 'hd':
+      case 'remini':
+      case 'upscale':
+      case 'hd2':
+      case 'hd4': {
         const imgBuf =
           ctx.imageBuffer ||
           (ctx.documentMedia?.kind === 'image'
             ? ctx.documentMedia.buffer
             : null);
+        const inputMime =
+          ctx.imageMimeType ||
+          (ctx.documentMedia?.kind === 'image'
+            ? ctx.documentMedia.mimeType
+            : undefined);
+
         if (!imgBuf) {
           return failReply(
-            `Kirim atau balas (reply) sebuah foto dengan *${config.prefix}hd* untuk dipertajam resolusinya 2× lipat.`
+            `Kirim sebuah foto dengan caption *${config.prefix}${matchedCmd.id}* atau balas (reply) foto seseorang dengan perintah *${config.prefix}${matchedCmd.id}*.`
           );
         }
-        const enhanced = await enhanceImageHd(imgBuf);
-        const webUrl = botStore.storeHdMedia(
-          enhanced.buffer,
-          'image/jpeg',
-          'wabot-hd-upscale.jpg'
-        );
+
+        const modeMap: Record<string, AiEnhanceMode> = {
+          hd: 'auto',
+          remini: 'face',
+          upscale: 'upscale',
+          hd2: '2x',
+          hd4: '4x',
+        };
+        const enhanceMode: AiEnhanceMode = modeMap[matchedCmd.id] || 'auto';
+        const scaleOverride: 2 | 4 | undefined =
+          matchedCmd.id === 'hd2' ? 2 : matchedCmd.id === 'hd4' ? 4 : undefined;
+
+        let faceModelOverride: AiFaceModel | undefined;
+        let fidelityOverride: number | undefined;
+        if (argsText) {
+          const tokens = argsText
+            .toLowerCase()
+            .split(/\s+/)
+            .filter(Boolean);
+          for (const tok of tokens) {
+            if (tok === 'codeformer' || tok === 'cf') {
+              faceModelOverride = 'codeformer';
+            } else if (tok === 'gfpgan' || tok === 'gfp') {
+              faceModelOverride = 'gfpgan';
+            } else {
+              const maybeNum = Number(tok.replace(',', '.'));
+              if (
+                Number.isFinite(maybeNum) &&
+                maybeNum >= 0.05 &&
+                maybeNum <= 0.98
+              ) {
+                fidelityOverride = maybeNum;
+              }
+            }
+          }
+        }
+
+        const enhanced = await aiEnhancer.enhancePhoto({
+          imageBuffer: imgBuf,
+          mimeType: inputMime,
+          mode: enhanceMode,
+          scaleOverride,
+          faceModelOverride,
+          fidelityOverride,
+          config: config.aiEnhance,
+          onStatus: ctx.onProgressStatus,
+        });
+
+        // Zero permanent storage: WhatsApp photos never enter RAM preview cache;
+        // Simulator test images auto-expire after 5 minutes.
+        const ephemeralWebUrl =
+          ctx.source === 'simulator'
+            ? botStore.storeHdMedia(
+                enhanced.buffer,
+                enhanced.mimeType,
+                `wabot-${matchedCmd.id}.${
+                  enhanced.mimeType === 'image/png' ? 'png' : 'jpg'
+                }`,
+                5 * 60 * 1000
+              )
+            : undefined;
+
         botStore.incrementStat('mediaDownloaded');
+
+        const headerTitle =
+          enhanceMode === 'face'
+            ? '*AI Face Restoration Selesai*'
+            : enhanceMode === '2x'
+            ? '*AI Super-Resolution 2× Selesai*'
+            : enhanceMode === '4x'
+            ? '*AI Super-Resolution 4× Selesai*'
+            : enhanceMode === 'upscale'
+            ? '*AI Super-Resolution Selesai*'
+            : '*AI Photo Enhance Selesai*';
+
+        const { meta } = enhanced;
+        const captionLines: string[] = [
+          headerTitle,
+          `• Resolusi: *${meta.inputWidth}×${meta.inputHeight} px* → *${meta.outputWidth}×${meta.outputHeight} px* (*${meta.effectiveScale}×*)`,
+          `• Pipeline Model: *${meta.modelsUsed.join(' + ')}*`,
+        ];
+
+        if (meta.facesDetected > 0 && meta.faceModelUsed) {
+          captionLines.push(
+            `• Restorasi Wajah: *${meta.facesDetected} wajah* (Fidelity: *${meta.fidelityUsed.toFixed(
+              2
+            )}*)`
+          );
+        }
+
+        const elapsedSec =
+          meta.durationMs > 0 ? `${(meta.durationMs / 1000).toFixed(1)} dtk · ` : '';
+        captionLines.push(
+          `• Berkas: *${elapsedSec}${formatByteSize(enhanced.buffer.length)}*`
+        );
+        captionLines.push(
+          '_Catatan: Detail mikro direkonstruksi oleh model AI pretrained sebagai estimasi restorasi visual, bukan rekaman optik asli yang hilang._'
+        );
+
         result = {
           handled: true,
           reactionStatus: 'success',
           imageBuffer: enhanced.buffer,
-          imageMimeType: 'image/jpeg',
-          imageWebUrl: webUrl,
-          replyText: `*Foto HD Berhasil Dipertajam*\nResolusi akhir: *${enhanced.width}×${enhanced.height} px* (${formatByteSize(
-            enhanced.buffer.length
-          )})`,
+          imageMimeType: enhanced.mimeType,
+          imageWebUrl: ephemeralWebUrl,
+          replyText: captionLines.join('\n'),
         };
         break;
       }

@@ -90,6 +90,24 @@ export interface AntiBanConfig {
   browserProfile: BrowserProfileType;
 }
 
+export type AiFaceModel = 'codeformer' | 'gfpgan';
+
+export type AiEnhanceMode = 'auto' | 'face' | 'upscale' | '2x' | '4x';
+
+export interface AiEnhanceConfig {
+  serviceUrl: string;
+  preferredFaceModel: AiFaceModel;
+  faceFidelity: number;
+  defaultScale: 2 | 4;
+  autoDenoise: boolean;
+  autoDeblur: boolean;
+  sendProgressNotice: boolean;
+  maxConcurrentJobs: number;
+  maxQueueSize: number;
+  timeoutMs: number;
+  maxFileSizeMb: number;
+}
+
 export interface BotConfig {
   prefix: string;
   botName: string;
@@ -109,6 +127,7 @@ export interface BotConfig {
   };
   groupOverrides?: Record<string, GroupCustomConfig>;
   antiBan: AntiBanConfig;
+  aiEnhance: AiEnhanceConfig;
   lockSettingsManualOnly: boolean;
   webhook: WebhookConfig;
   autoResponder: AutoResponderRule[];

@@ -1,10 +1,37 @@
 import React, { useEffect, useState } from 'react';
-import { Check, ExternalLink, Moon, Save, ShieldCheck, Sun } from 'lucide-react';
 import {
+  Activity,
+  Check,
+  ExternalLink,
+  Moon,
+  RefreshCw,
+  Save,
+  ShieldCheck,
+  Sun,
+} from 'lucide-react';
+import { buildApiUrl } from '../lib/apiBase.ts';
+import {
+  DEFAULT_AI_ENHANCE_CONFIG,
   formatPhoneDisplay,
   OFFICIAL_OWNER_NUMBER,
 } from '../shared/commands.ts';
-import type { BotConfig } from '../shared/types.ts';
+import type { AiFaceModel, BotConfig } from '../shared/types.ts';
+
+interface AiGpuProbeState {
+  checking: boolean;
+  checked: boolean;
+  ok: boolean;
+  reachable: boolean;
+  device?: string;
+  gpuName?: string | null;
+  vramTotalGb?: number | null;
+  fp16?: boolean;
+  latencyMs?: number;
+  botActiveJobs?: number;
+  botQueuedJobs?: number;
+  apiKeyConfigured?: boolean;
+  error?: string;
+}
 
 interface SettingsViewProps {
   config: BotConfig;
@@ -31,6 +58,31 @@ export function SettingsView({
   const [stickerAuthor, setStickerAuthor] = useState(config.stickerAuthor);
   const [savedNotice, setSavedNotice] = useState(false);
 
+  const aiCfg = config.aiEnhance || DEFAULT_AI_ENHANCE_CONFIG;
+  const [aiServiceUrl, setAiServiceUrl] = useState(aiCfg.serviceUrl);
+  const [aiFaceModel, setAiFaceModel] = useState<AiFaceModel>(
+    aiCfg.preferredFaceModel
+  );
+  const [aiFidelity, setAiFidelity] = useState(aiCfg.faceFidelity);
+  const [aiDefaultScale, setAiDefaultScale] = useState<2 | 4>(
+    aiCfg.defaultScale
+  );
+  const [aiMaxConcurrent, setAiMaxConcurrent] = useState(
+    aiCfg.maxConcurrentJobs
+  );
+  const [aiMaxQueue, setAiMaxQueue] = useState(aiCfg.maxQueueSize);
+  const [aiTimeoutSec, setAiTimeoutSec] = useState(
+    Math.round((aiCfg.timeoutMs || 90000) / 1000)
+  );
+  const [aiMaxFileMb, setAiMaxFileMb] = useState(aiCfg.maxFileSizeMb);
+  const [aiSavedNotice, setAiSavedNotice] = useState(false);
+  const [gpuProbe, setGpuProbe] = useState<AiGpuProbeState>({
+    checking: false,
+    checked: false,
+    ok: false,
+    reachable: false,
+  });
+
   useEffect(() => {
     setPrefix(config.prefix);
     setBotName(config.botName);
@@ -38,7 +90,79 @@ export function SettingsView({
     setOwnerNumber(config.antiBan?.ownerNumber || OFFICIAL_OWNER_NUMBER);
     setStickerPackName(config.stickerPackName);
     setStickerAuthor(config.stickerAuthor);
+
+    const nextAi = config.aiEnhance || DEFAULT_AI_ENHANCE_CONFIG;
+    setAiServiceUrl(nextAi.serviceUrl);
+    setAiFaceModel(nextAi.preferredFaceModel);
+    setAiFidelity(nextAi.faceFidelity);
+    setAiDefaultScale(nextAi.defaultScale);
+    setAiMaxConcurrent(nextAi.maxConcurrentJobs);
+    setAiMaxQueue(nextAi.maxQueueSize);
+    setAiTimeoutSec(Math.round((nextAi.timeoutMs || 90000) / 1000));
+    setAiMaxFileMb(nextAi.maxFileSizeMb);
   }, [config]);
+
+  const handleSaveAiConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const currentAi = config.aiEnhance || DEFAULT_AI_ENHANCE_CONFIG;
+    await onUpdateConfig({
+      aiEnhance: {
+        ...currentAi,
+        serviceUrl: aiServiceUrl.trim().replace(/\/+$/, ''),
+        preferredFaceModel: aiFaceModel,
+        faceFidelity: Math.min(0.98, Math.max(0.05, Number(aiFidelity) || 0.72)),
+        defaultScale: aiDefaultScale,
+        maxConcurrentJobs: Math.min(
+          8,
+          Math.max(1, Math.round(Number(aiMaxConcurrent) || 2))
+        ),
+        maxQueueSize: Math.min(
+          60,
+          Math.max(1, Math.round(Number(aiMaxQueue) || 15))
+        ),
+        timeoutMs:
+          Math.min(300, Math.max(10, Math.round(Number(aiTimeoutSec) || 90))) *
+          1000,
+        maxFileSizeMb: Math.min(
+          30,
+          Math.max(1, Math.round(Number(aiMaxFileMb) || 15))
+        ),
+      },
+    });
+    setAiSavedNotice(true);
+    setTimeout(() => setAiSavedNotice(false), 2200);
+  };
+
+  const handleProbeAiGpu = async () => {
+    setGpuProbe((prev) => ({ ...prev, checking: true }));
+    try {
+      const res = await fetch(buildApiUrl('/api/ai-enhance/status'));
+      const data = (await res.json()) as Partial<AiGpuProbeState>;
+      setGpuProbe({
+        checking: false,
+        checked: true,
+        ok: Boolean(data.ok),
+        reachable: Boolean(data.reachable),
+        device: data.device,
+        gpuName: data.gpuName,
+        vramTotalGb: data.vramTotalGb,
+        fp16: data.fp16,
+        latencyMs: data.latencyMs,
+        botActiveJobs: data.botActiveJobs,
+        botQueuedJobs: data.botQueuedJobs,
+        apiKeyConfigured: data.apiKeyConfigured,
+        error: data.error,
+      });
+    } catch {
+      setGpuProbe({
+        checking: false,
+        checked: true,
+        ok: false,
+        reachable: false,
+        error: 'Gagal menghubungi endpoint pengecekan server bot.',
+      });
+    }
+  };
 
   const handleSaveIdentity = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -428,6 +552,377 @@ export function SettingsView({
           </a>
         </div>
       </div>
+
+      {/* Full-Width 12 Columns: AI Photo Enhancement Pipeline (Python FastAPI GPU Service) */}
+      <form
+        onSubmit={handleSaveAiConfig}
+        className="lg:col-span-12 bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-6 space-y-6"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 border-b border-zinc-200/70 dark:border-zinc-800 pb-4">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+              Pipeline AI Photo Enhancement (FastAPI GPU)
+            </h2>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              Pengaturan model pretrained Real-ESRGAN, CodeFormer, GFPGAN, dan SCUNet/NAFNet untuk perintah{' '}
+              <code className="font-mono">{prefix}hd</code>,{' '}
+              <code className="font-mono">{prefix}remini</code>,{' '}
+              <code className="font-mono">{prefix}upscale</code>,{' '}
+              <code className="font-mono">{prefix}hd2</code>, dan{' '}
+              <code className="font-mono">{prefix}hd4</code> tanpa mengedit kode sumber.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleProbeAiGpu()}
+            disabled={gpuProbe.checking}
+            className="px-4 py-2 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-medium text-zinc-900 dark:text-zinc-100 hover:border-zinc-400 dark:hover:border-zinc-700 transition-colors inline-flex items-center gap-2 whitespace-nowrap shrink-0 disabled:opacity-60"
+          >
+            {gpuProbe.checking ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Activity className="w-3.5 h-3.5" />
+            )}
+            Cek Status Server GPU
+          </button>
+        </div>
+
+        {gpuProbe.checked && (
+          <div className="text-xs text-zinc-600 dark:text-zinc-400 flex flex-wrap items-center gap-x-2 gap-y-1 pb-2 border-b border-zinc-200/70 dark:border-zinc-800">
+            <span
+              className={
+                gpuProbe.ok
+                  ? 'font-semibold text-emerald-700 dark:text-emerald-400'
+                  : 'font-semibold text-amber-700 dark:text-amber-400'
+              }
+            >
+              {gpuProbe.ok ? 'Terhubung ke FastAPI GPU' : 'Layanan GPU Belum Aktif'}
+            </span>
+            <span aria-hidden="true">·</span>
+            {gpuProbe.ok ? (
+              <>
+                <span className="font-mono">
+                  {gpuProbe.gpuName || gpuProbe.device || 'CPU/GPU'}
+                </span>
+                {typeof gpuProbe.vramTotalGb === 'number' && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="font-mono tabular-nums">
+                      VRAM {gpuProbe.vramTotalGb.toFixed(1)} GB
+                    </span>
+                  </>
+                )}
+                <span aria-hidden="true">·</span>
+                <span className="font-mono">
+                  {gpuProbe.fp16 ? 'FP16 Aktif' : 'FP32'}
+                </span>
+                {typeof gpuProbe.latencyMs === 'number' && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="font-mono tabular-nums">
+                      Respons {gpuProbe.latencyMs} ms
+                    </span>
+                  </>
+                )}
+              </>
+            ) : (
+              <span>{gpuProbe.error || 'Endpoint belum terjangkau.'}</span>
+            )}
+            <span aria-hidden="true">·</span>
+            <span className="font-mono tabular-nums">
+              Antrean Bot: {gpuProbe.botActiveJobs ?? 0} proses /{' '}
+              {gpuProbe.botQueuedJobs ?? 0} tunggu
+            </span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+          {/* Left 7 cols: Endpoint, Model Selectors & Fidelity Slider */}
+          <div className="md:col-span-7 space-y-5">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                Endpoint HTTP Layanan Python FastAPI GPU
+              </label>
+              <input
+                type="url"
+                value={aiServiceUrl}
+                onChange={(e) => setAiServiceUrl(e.target.value)}
+                placeholder="http://127.0.0.1:8001"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-mono text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
+              />
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Autentikasi antar-server dibaca otomatis di sisi backend melalui variabel lingkungan{' '}
+                <code className="font-mono">AI_ENHANCE_API_KEY</code> tanpa pernah dicatat ke log.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Model Restorasi Wajah Utama
+                </label>
+                <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => setAiFaceModel('codeformer')}
+                    className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+                      aiFaceModel === 'codeformer'
+                        ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                        : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    CodeFormer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAiFaceModel('gfpgan')}
+                    className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+                      aiFaceModel === 'gfpgan'
+                        ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                        : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    GFPGAN v1.4
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Skala Upscale Bawaan ({prefix}hd &amp; {prefix}upscale)
+                </label>
+                <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => setAiDefaultScale(2)}
+                    className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium font-mono tabular-nums transition-colors whitespace-nowrap ${
+                      aiDefaultScale === 2
+                        ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                        : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    Real-ESRGAN 2×
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAiDefaultScale(4)}
+                    className={`flex-1 px-3 py-1.5 rounded-lg text-xs font-medium font-mono tabular-nums transition-colors whitespace-nowrap ${
+                      aiDefaultScale === 4
+                        ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
+                        : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                    }`}
+                  >
+                    Real-ESRGAN 4×
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-4">
+                <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Kontrol Fidelity Identitas Wajah (w)
+                </label>
+                <span className="text-xs font-mono tabular-nums font-semibold text-zinc-900 dark:text-zinc-100">
+                  {Number(aiFidelity).toFixed(2)}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0.1}
+                max={0.95}
+                step={0.02}
+                value={aiFidelity}
+                onChange={(e) => setAiFidelity(Number(e.target.value))}
+                className="w-full accent-emerald-600 cursor-pointer"
+              />
+              <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+                <span>0.10 (Restorasi Kuat)</span>
+                <span>0.72 (Natural &amp; Identitas Terjaga)</span>
+                <span>0.95 (Mirip Asli Maksimal)</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Proses Paralel
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={aiMaxConcurrent}
+                  onChange={(e) => setAiMaxConcurrent(Number(e.target.value))}
+                  className="w-full px-3 py-2 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-mono tabular-nums text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Batas Antrean
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={aiMaxQueue}
+                  onChange={(e) => setAiMaxQueue(Number(e.target.value))}
+                  className="w-full px-3 py-2 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-mono tabular-nums text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Timeout (Detik)
+                </label>
+                <input
+                  type="number"
+                  min={10}
+                  max={300}
+                  value={aiTimeoutSec}
+                  onChange={(e) => setAiTimeoutSec(Number(e.target.value))}
+                  className="w-full px-3 py-2 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-mono tabular-nums text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Maks File (MB)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={aiMaxFileMb}
+                  onChange={(e) => setAiMaxFileMb(Number(e.target.value))}
+                  className="w-full px-3 py-2 rounded-xl bg-[#FAF9F6] dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-sm font-mono tabular-nums text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Right 5 cols: Adaptive Stage Switches */}
+          <div className="md:col-span-5 divide-y divide-zinc-200/70 dark:divide-zinc-800 md:border-l md:border-zinc-200/70 md:dark:border-zinc-800 md:pl-6">
+            <div className="py-3 first:pt-0 flex items-center justify-between gap-4">
+              <div>
+                <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100">
+                  Denoising Adaptif (SCUNet / NAFNet)
+                </div>
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Aktif hanya ketika detektor mendapati tingkat noise atau artefak JPEG tinggi
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  void onUpdateConfig({
+                    aiEnhance: {
+                      ...aiCfg,
+                      autoDenoise: !aiCfg.autoDenoise,
+                    },
+                  })
+                }
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap shrink-0 ${
+                  aiCfg.autoDenoise
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
+                }`}
+              >
+                {aiCfg.autoDenoise ? 'Adaptif' : 'Nonaktif'}
+              </button>
+            </div>
+
+            <div className="py-3 flex items-center justify-between gap-4">
+              <div>
+                <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100">
+                  Deblurring Adaptif (NAFNet)
+                </div>
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Pulihkan ketajaman tepi hanya bila skor ketajaman Laplacian di bawah ambang blur
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  void onUpdateConfig({
+                    aiEnhance: {
+                      ...aiCfg,
+                      autoDeblur: !aiCfg.autoDeblur,
+                    },
+                  })
+                }
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap shrink-0 ${
+                  aiCfg.autoDeblur
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
+                }`}
+              >
+                {aiCfg.autoDeblur ? 'Adaptif' : 'Nonaktif'}
+              </button>
+            </div>
+
+            <div className="py-3 flex items-center justify-between gap-4">
+              <div>
+                <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100">
+                  Notifikasi Status Pemrosesan WhatsApp
+                </div>
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Kirim pesan status saat foto masuk antrean atau sedang diproses GPU
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  void onUpdateConfig({
+                    aiEnhance: {
+                      ...aiCfg,
+                      sendProgressNotice: !aiCfg.sendProgressNotice,
+                    },
+                  })
+                }
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap shrink-0 ${
+                  aiCfg.sendProgressNotice
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-zinc-100 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
+                }`}
+              >
+                {aiCfg.sendProgressNotice ? 'Aktif' : 'Nonaktif'}
+              </button>
+            </div>
+
+            <div className="pt-4 space-y-1.5">
+              <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100">
+                Privasi &amp; Keamanan Penyimpanan Sementara
+              </div>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                Seluruh foto pengguna diproses di direktori sementara terisolasi dan langsung dihapus otomatis setelah hasil dikirim ke WhatsApp tanpa penyimpanan permanen.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between gap-4 pt-2 border-t border-zinc-200/70 dark:border-zinc-800">
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+            Pengguna juga dapat menyertakan override fidelity langsung di chat, misalnya{' '}
+            <code className="font-mono">{prefix}remini 0.80</code> atau{' '}
+            <code className="font-mono">{prefix}hd gfpgan</code>.
+          </span>
+          <button
+            type="submit"
+            className="px-4 py-2.5 rounded-xl bg-zinc-900 dark:bg-emerald-600 text-white text-xs font-medium hover:opacity-90 transition-opacity inline-flex items-center gap-1.5 whitespace-nowrap shrink-0"
+          >
+            {aiSavedNotice ? (
+              <>
+                <Check className="w-3.5 h-3.5" />
+                Tersimpan
+              </>
+            ) : (
+              <>
+                <Save className="w-3.5 h-3.5" />
+                Simpan Pengaturan AI
+              </>
+            )}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

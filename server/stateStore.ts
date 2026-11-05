@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { WebSocket } from 'ws';
 import {
+  DEFAULT_AI_ENHANCE_CONFIG,
   DEFAULT_REACTIONS,
   DEFAULT_TEMPLATES,
   OFFICIAL_OWNER_NUMBER,
@@ -9,6 +10,7 @@ import {
   sanitizeLogs,
 } from '../src/shared/commands.ts';
 import type {
+  AiEnhanceConfig,
   AntiBanConfig,
   AutoResponderRule,
   BotConfig,
@@ -81,6 +83,47 @@ export const DEFAULT_ANTIBAN_CONFIG: AntiBanConfig = {
   browserProfile: 'windows_chrome',
 };
 
+function buildInitialAiEnhanceConfig(): AiEnhanceConfig {
+  const envUrl = (process.env.AI_ENHANCE_SERVICE_URL || '').trim();
+  const envFace = (process.env.AI_ENHANCE_FACE_MODEL || '')
+    .trim()
+    .toLowerCase();
+  const envFidelity = Number(process.env.AI_ENHANCE_FIDELITY);
+  const envConc = Number(process.env.AI_ENHANCE_CONCURRENCY);
+  const envTimeout = Number(process.env.AI_ENHANCE_TIMEOUT_MS);
+  const envMaxMb = Number(process.env.AI_ENHANCE_MAX_FILE_MB);
+
+  return {
+    ...DEFAULT_AI_ENHANCE_CONFIG,
+    serviceUrl: (envUrl || DEFAULT_AI_ENHANCE_CONFIG.serviceUrl).replace(
+      /\/+$/,
+      ''
+    ),
+    preferredFaceModel:
+      envFace === 'gfpgan'
+        ? 'gfpgan'
+        : DEFAULT_AI_ENHANCE_CONFIG.preferredFaceModel,
+    faceFidelity:
+      Number.isFinite(envFidelity) && envFidelity >= 0.05 && envFidelity <= 0.98
+        ? envFidelity
+        : DEFAULT_AI_ENHANCE_CONFIG.faceFidelity,
+    maxConcurrentJobs:
+      Number.isFinite(envConc) && envConc >= 1 && envConc <= 8
+        ? Math.round(envConc)
+        : DEFAULT_AI_ENHANCE_CONFIG.maxConcurrentJobs,
+    timeoutMs:
+      Number.isFinite(envTimeout) && envTimeout >= 10000
+        ? Math.round(envTimeout)
+        : DEFAULT_AI_ENHANCE_CONFIG.timeoutMs,
+    maxFileSizeMb:
+      Number.isFinite(envMaxMb) && envMaxMb >= 1 && envMaxMb <= 30
+        ? Math.round(envMaxMb)
+        : DEFAULT_AI_ENHANCE_CONFIG.maxFileSizeMb,
+  };
+}
+
+const INITIAL_AI_ENHANCE_CONFIG: AiEnhanceConfig = buildInitialAiEnhanceConfig();
+
 const DEFAULT_CONFIG: BotConfig = {
   prefix: '.',
   botName: 'WABot',
@@ -100,6 +143,7 @@ const DEFAULT_CONFIG: BotConfig = {
   },
   groupOverrides: {},
   antiBan: { ...DEFAULT_ANTIBAN_CONFIG },
+  aiEnhance: { ...INITIAL_AI_ENHANCE_CONFIG },
   lockSettingsManualOnly: false,
   webhook: { ...DEFAULT_WEBHOOK_CONFIG },
   autoResponder: [...DEFAULT_AUTORESPONDER_RULES],
@@ -187,6 +231,7 @@ class BotStateStore {
     groupSettings: { ...DEFAULT_CONFIG.groupSettings },
     groupOverrides: {},
     antiBan: { ...DEFAULT_ANTIBAN_CONFIG },
+    aiEnhance: { ...INITIAL_AI_ENHANCE_CONFIG },
     lockSettingsManualOnly: true,
     webhook: { ...DEFAULT_WEBHOOK_CONFIG },
     autoResponder: [...DEFAULT_AUTORESPONDER_RULES],
@@ -249,6 +294,18 @@ class BotStateStore {
             antiBan: {
               ...DEFAULT_ANTIBAN_CONFIG,
               ...(raw.config.antiBan || {}),
+            },
+            aiEnhance: {
+              ...INITIAL_AI_ENHANCE_CONFIG,
+              ...(raw.config.aiEnhance || {}),
+              ...(process.env.AI_ENHANCE_SERVICE_URL?.trim()
+                ? {
+                    serviceUrl: process.env.AI_ENHANCE_SERVICE_URL.trim().replace(
+                      /\/+$/,
+                      ''
+                    ),
+                  }
+                : {}),
             },
             lockSettingsManualOnly:
               raw.config.lockSettingsManualOnly !== undefined
@@ -396,6 +453,10 @@ class BotStateStore {
       antiBan: {
         ...this.config.antiBan,
         ...(patch.antiBan || {}),
+      },
+      aiEnhance: {
+        ...this.config.aiEnhance,
+        ...(patch.aiEnhance || {}),
       },
       lockSettingsManualOnly:
         patch.lockSettingsManualOnly !== undefined
@@ -628,10 +689,18 @@ class BotStateStore {
   public storeHdMedia(
     buffer: Buffer,
     mimeType: string,
-    fileName: string
+    fileName: string,
+    ttlMs?: number
   ): string {
     const id = `hd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     this.hdMediaCache.set(id, { buffer, mimeType, fileName });
+
+    if (ttlMs && ttlMs > 0) {
+      const timer = setTimeout(() => {
+        this.hdMediaCache.delete(id);
+      }, ttlMs);
+      timer.unref?.();
+    }
 
     // Strict memory budget (max 8 items or 36 MB total) so 3GB RAM phones stay cool 24/7
     const maxItems = 8;

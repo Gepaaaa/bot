@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  DEFAULT_AI_ENHANCE_CONFIG,
   DEFAULT_REACTIONS,
   DEFAULT_TEMPLATES,
   hasLegacyIdentity,
@@ -78,6 +79,7 @@ const INITIAL_CONFIG: BotConfig = {
     ownerNumber: OFFICIAL_OWNER_NUMBER,
     browserProfile: 'windows_chrome',
   },
+  aiEnhance: { ...DEFAULT_AI_ENHANCE_CONFIG },
   lockSettingsManualOnly: true,
   webhook: {
     enabled: false,

@@ -2255,10 +2255,21 @@ class WhatsAppSessionManager {
       'colong',
       'swm',
       'hd',
-      'remini',
-      'upscale',
+      'enhance',
       'jernih',
       'hdr',
+      'remini',
+      'facehd',
+      'restoreface',
+      'upscale',
+      'sr',
+      'superres',
+      'hd2',
+      'upscale2x',
+      '2x',
+      'hd4',
+      'upscale4x',
+      '4x',
       'hitamkan',
       'grayscale',
       'bw',
@@ -2382,8 +2393,21 @@ class WhatsAppSessionManager {
       'sticker',
       'sgif',
       'hd',
+      'enhance',
+      'jernih',
+      'hdr',
       'remini',
+      'facehd',
+      'restoreface',
       'upscale',
+      'sr',
+      'superres',
+      'hd2',
+      'upscale2x',
+      '2x',
+      'hd4',
+      'upscale4x',
+      '4x',
       'toptv',
       'ptv',
       'tourl',
@@ -2484,6 +2508,12 @@ class WhatsAppSessionManager {
       }
     }
 
+    const unwrappedIncoming = this.unwrapWaMessage(msg.message);
+    const detectedImageMime =
+      unwrappedIncoming?.imageMessage?.mimetype ||
+      unwrappedQuoted?.imageMessage?.mimetype ||
+      null;
+
     const result = await processBotMessage({
       source: 'whatsapp',
       isGroup,
@@ -2496,6 +2526,7 @@ class WhatsAppSessionManager {
       isBotGroupAdmin,
       text,
       imageBuffer,
+      imageMimeType: detectedImageMime,
       videoBuffer,
       audioBuffer,
       stickerBuffer,
@@ -2511,6 +2542,19 @@ class WhatsAppSessionManager {
       quotedParticipantJid,
       groupMembers,
       waGroupOps,
+      onProgressStatus: async (statusText: string) => {
+        await this.enqueueOutboundSend(async () => {
+          await this.simulateHumanTyping(sock, remoteJid, isGroup);
+          await sock.sendMessage(
+            remoteJid,
+            {
+              text: statusText,
+              linkPreview: null,
+            },
+            { quoted: msg }
+          );
+        }).catch(() => {});
+      },
     });
 
     if (!result.handled) {

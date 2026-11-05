@@ -1,4 +1,5 @@
 import type {
+  AiEnhanceConfig,
   AutoResponderRule,
   BotConfig,
   BotReactionConfig,
@@ -34,6 +35,20 @@ export const DEFAULT_REACTIONS: BotReactionConfig = {
   pending: '⏳',
   success: '✔️',
   error: '❌',
+};
+
+export const DEFAULT_AI_ENHANCE_CONFIG: AiEnhanceConfig = {
+  serviceUrl: 'http://127.0.0.1:8001',
+  preferredFaceModel: 'codeformer',
+  faceFidelity: 0.72,
+  defaultScale: 2,
+  autoDenoise: true,
+  autoDeblur: true,
+  sendProgressNotice: true,
+  maxConcurrentJobs: 2,
+  maxQueueSize: 15,
+  timeoutMs: 90000,
+  maxFileSizeMb: 15,
 };
 
 export const SUSPENSION_RISK_DISABLED_REPLY =
@@ -360,12 +375,56 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
   },
   {
     id: 'hd',
-    aliases: ['remini', 'upscale', 'jernih', 'hdr'],
+    aliases: ['enhance', 'jernih', 'hdr'],
     category: 'media',
-    usage: 'hd (kirim/reply foto)',
+    usage: 'hd [fidelity 0.1-0.95] (kirim/reply foto)',
     description:
-      'Pertajam detail dan tingkatkan resolusi foto 2× lipat dengan pemrosesan Lanczos3 + Unsharp Mask.',
+      'Peningkatan kualitas foto otomatis adaptif berbasis AI (Real-ESRGAN + CodeFormer/GFPGAN + SCUNet/NAFNet sesuai kondisi noise, blur, dan wajah).',
     example: 'hd',
+    requiresMedia: true,
+    mediaKindHint: 'image',
+  },
+  {
+    id: 'remini',
+    aliases: ['facehd', 'restoreface'],
+    category: 'media',
+    usage: 'remini [fidelity 0.1-0.95] (kirim/reply foto)',
+    description:
+      'Fokus restorasi detail wajah natural menggunakan CodeFormer / GFPGAN dengan kontrol fidelity agar identitas wajah asli tetap terjaga dan tidak tampak plastik.',
+    example: 'remini',
+    requiresMedia: true,
+    mediaKindHint: 'image',
+  },
+  {
+    id: 'upscale',
+    aliases: ['sr', 'superres'],
+    category: 'media',
+    usage: 'upscale (kirim/reply foto)',
+    description:
+      'Tingkatkan resolusi dan ketajaman tekstur umum foto menggunakan pretrained super-resolution Real-ESRGAN.',
+    example: 'upscale',
+    requiresMedia: true,
+    mediaKindHint: 'image',
+  },
+  {
+    id: 'hd2',
+    aliases: ['upscale2x', '2x'],
+    category: 'media',
+    usage: 'hd2 (kirim/reply foto)',
+    description:
+      'Super-resolution AI 2× lipat dengan Real-ESRGAN x2plus serta penjagaan warna natural.',
+    example: 'hd2',
+    requiresMedia: true,
+    mediaKindHint: 'image',
+  },
+  {
+    id: 'hd4',
+    aliases: ['upscale4x', '4x'],
+    category: 'media',
+    usage: 'hd4 (kirim/reply foto)',
+    description:
+      'Super-resolution AI 4× lipat resolusi tinggi dengan Real-ESRGAN x4plus dan pipeline restorasi adaptif.',
+    example: 'hd4',
     requiresMedia: true,
     mediaKindHint: 'image',
   },
@@ -918,7 +977,11 @@ const COMPACT_COMMAND_META: Record<string, CompactCommandMeta> = {
   toimg: { shortUsage: 'toimg', shortDesc: 'Ubah stiker kembali jadi foto' },
   tovid: { shortUsage: 'tovid', shortDesc: 'Ubah stiker gerak jadi video MP4' },
   hdsw: { shortUsage: 'hdsw', shortDesc: 'Dokumen asli ke Status HD (Grup/PC)' },
-  hd: { shortUsage: 'hd', shortDesc: 'Pertajam & upscale resolusi foto 2×' },
+  hd: { shortUsage: 'hd', shortDesc: 'AI Enhance foto adaptif otomatis' },
+  remini: { shortUsage: 'remini', shortDesc: 'AI restorasi wajah natural' },
+  upscale: { shortUsage: 'upscale', shortDesc: 'AI super-resolution Real-ESRGAN' },
+  hd2: { shortUsage: 'hd2', shortDesc: 'AI upscale resolusi foto 2×' },
+  hd4: { shortUsage: 'hd4', shortDesc: 'AI upscale resolusi foto 4×' },
   rvo: { shortUsage: 'rvo', shortDesc: 'Buka media View Once sekali lihat' },
   toptv: { shortUsage: 'toptv', shortDesc: 'Ubah video jadi Video Note bulat' },
   hitamkan: { shortUsage: 'hitamkan', shortDesc: 'Filter foto monokrom hitam-putih' },
@@ -1069,6 +1132,10 @@ export const MENU_SECTIONS: MenuSectionSpec[] = [
       'media',
       'tools',
       'hd',
+      'remini',
+      'upscale',
+      'hd2',
+      'hd4',
       'sw',
       'hdsw',
       'foto',
@@ -1076,11 +1143,26 @@ export const MENU_SECTIONS: MenuSectionSpec[] = [
       'menumedia',
       'menutools',
     ],
-    ids: ['hdsw', 'hd', 'meme', 'rvo', 'toptv', 'hitamkan', 'imgedit', 'tourl', 'qrcode'],
+    ids: [
+      'hdsw',
+      'hd',
+      'remini',
+      'upscale',
+      'hd2',
+      'hd4',
+      'meme',
+      'rvo',
+      'toptv',
+      'hitamkan',
+      'imgedit',
+      'tourl',
+      'qrcode',
+    ],
     compactRows: [
       { ids: ['hdsw'], summary: 'Dokumen ke Status HD (Grup & PC)' },
-      { ids: ['hd', 'hitamkan'], summary: 'Upscale foto 2× & hitam-putih' },
-      { ids: ['imgedit'], summary: 'Filter blur, invert, mirror, sepia' },
+      { ids: ['hd', 'remini', 'upscale'], summary: 'AI Enhance adaptif, wajah & SR' },
+      { ids: ['hd2', 'hd4'], summary: 'AI Super-Resolution 2× & 4×' },
+      { ids: ['hitamkan', 'imgedit'], summary: 'Hitam-putih, blur, invert, mirror' },
       { ids: ['meme', 'rvo', 'toptv'], summary: 'Meme web lucu, ViewOnce & video PTV' },
       { ids: ['tourl', 'qrcode'], summary: 'Link media publik & kode QR' },
     ],
@@ -1447,6 +1529,23 @@ export function sanitizeBotConfig(raw: BotConfig): {
   changed: boolean;
 } {
   let changed = false;
+  const rawAi = raw.aiEnhance || DEFAULT_AI_ENHANCE_CONFIG;
+  const clampedFidelity = Number.isFinite(Number(rawAi.faceFidelity))
+    ? Math.min(0.98, Math.max(0.05, Number(rawAi.faceFidelity)))
+    : DEFAULT_AI_ENHANCE_CONFIG.faceFidelity;
+  const clampedConcurrency = Number.isFinite(Number(rawAi.maxConcurrentJobs))
+    ? Math.min(8, Math.max(1, Math.round(Number(rawAi.maxConcurrentJobs))))
+    : DEFAULT_AI_ENHANCE_CONFIG.maxConcurrentJobs;
+  const clampedQueue = Number.isFinite(Number(rawAi.maxQueueSize))
+    ? Math.min(60, Math.max(1, Math.round(Number(rawAi.maxQueueSize))))
+    : DEFAULT_AI_ENHANCE_CONFIG.maxQueueSize;
+  const clampedTimeout = Number.isFinite(Number(rawAi.timeoutMs))
+    ? Math.min(300000, Math.max(10000, Math.round(Number(rawAi.timeoutMs))))
+    : DEFAULT_AI_ENHANCE_CONFIG.timeoutMs;
+  const clampedMaxMb = Number.isFinite(Number(rawAi.maxFileSizeMb))
+    ? Math.min(30, Math.max(1, Math.round(Number(rawAi.maxFileSizeMb))))
+    : DEFAULT_AI_ENHANCE_CONFIG.maxFileSizeMb;
+
   const next: BotConfig = {
     ...raw,
     reactions: { ...DEFAULT_REACTIONS, ...(raw.reactions || {}) },
@@ -1458,6 +1557,24 @@ export function sanitizeBotConfig(raw: BotConfig): {
     },
     groupOverrides: raw.groupOverrides ? { ...raw.groupOverrides } : {},
     antiBan: { ...raw.antiBan },
+    aiEnhance: {
+      serviceUrl: String(
+        rawAi.serviceUrl ?? DEFAULT_AI_ENHANCE_CONFIG.serviceUrl
+      )
+        .trim()
+        .replace(/\/+$/, ''),
+      preferredFaceModel:
+        rawAi.preferredFaceModel === 'gfpgan' ? 'gfpgan' : 'codeformer',
+      faceFidelity: Math.round(clampedFidelity * 100) / 100,
+      defaultScale: rawAi.defaultScale === 4 ? 4 : 2,
+      autoDenoise: rawAi.autoDenoise ?? true,
+      autoDeblur: rawAi.autoDeblur ?? true,
+      sendProgressNotice: rawAi.sendProgressNotice ?? true,
+      maxConcurrentJobs: clampedConcurrency,
+      maxQueueSize: clampedQueue,
+      timeoutMs: clampedTimeout,
+      maxFileSizeMb: clampedMaxMb,
+    },
     autoResponder: Array.isArray(raw.autoResponder)
       ? [...raw.autoResponder]
       : [...CLEAN_DEFAULT_RULES],
