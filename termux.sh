@@ -328,7 +328,7 @@ case "${1:-menu}" in
     pm2 stop wabot
     ;;
   start)
-    pm2 start wabot || (cd "$HOME/wabot" && pm2 start index.js --name "wabot" --node-args="--max-old-space-size=256" --max-memory-restart 320M)
+    pm2 start wabot || (cd "$HOME/wabot" && DEVICE_PROFILE=redmi9c pm2 start index.js --name "wabot" --node-args="--max-old-space-size=256" --max-memory-restart 320M --env DEVICE_PROFILE=redmi9c)
     ;;
   *)
     print_status
@@ -364,7 +364,7 @@ fi
 
 echo "[6/6] Menyalakan mesin WABot di background via PM2 ($PROFILE_DESC)..."
 pm2 delete wabot 2>/dev/null || true
-pm2 start index.js --name "wabot" --node-args="--max-old-space-size=$MAX_OLD_SPACE" --max-memory-restart "$MAX_RESTART_MEM"
+DEVICE_PROFILE="$DEVICE_CODE" pm2 start index.js --name "wabot" --node-args="--max-old-space-size=$MAX_OLD_SPACE" --max-memory-restart "$MAX_RESTART_MEM" --env DEVICE_PROFILE="$DEVICE_CODE"
 pm2 save 2>/dev/null || true
 
 # Tunggu 3 detik hingga server port 3000 siap lalu tampilkan info IP & kontrol lengkap

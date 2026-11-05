@@ -15,7 +15,7 @@ import {
   formatPhoneDisplay,
   OFFICIAL_OWNER_NUMBER,
 } from '../shared/commands.ts';
-import type { AiFaceModel, BotConfig } from '../shared/types.ts';
+import type { AiFaceModel, AiSrModel, BotConfig } from '../shared/types.ts';
 
 interface AiGpuProbeState {
   checking: boolean;
@@ -60,6 +60,9 @@ export function SettingsView({
 
   const aiCfg = config.aiEnhance || DEFAULT_AI_ENHANCE_CONFIG;
   const [aiServiceUrl, setAiServiceUrl] = useState(aiCfg.serviceUrl);
+  const [aiSrModel, setAiSrModel] = useState<AiSrModel>(
+    aiCfg.preferredSrModel || 'ultrasharp'
+  );
   const [aiFaceModel, setAiFaceModel] = useState<AiFaceModel>(
     aiCfg.preferredFaceModel
   );
@@ -93,6 +96,7 @@ export function SettingsView({
 
     const nextAi = config.aiEnhance || DEFAULT_AI_ENHANCE_CONFIG;
     setAiServiceUrl(nextAi.serviceUrl);
+    setAiSrModel(nextAi.preferredSrModel || 'ultrasharp');
     setAiFaceModel(nextAi.preferredFaceModel);
     setAiFidelity(nextAi.faceFidelity);
     setAiDefaultScale(nextAi.defaultScale);
@@ -109,6 +113,7 @@ export function SettingsView({
       aiEnhance: {
         ...currentAi,
         serviceUrl: aiServiceUrl.trim().replace(/\/+$/, ''),
+        preferredSrModel: aiSrModel,
         preferredFaceModel: aiFaceModel,
         faceFidelity: Math.min(0.98, Math.max(0.05, Number(aiFidelity) || 0.72)),
         defaultScale: aiDefaultScale,
@@ -654,6 +659,54 @@ export function SettingsView({
                 Autentikasi antar-server dibaca otomatis di sisi backend melalui variabel lingkungan{' '}
                 <code className="font-mono">AI_ENHANCE_API_KEY</code> tanpa pernah dicatat ke log.
               </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Mesin Super-Resolution (Upscaler AI)
+                </label>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200/50 dark:border-emerald-800/40">
+                  {aiSrModel === 'ultrasharp' ? 'Super Ajib' : 'Standar'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl border border-zinc-200/70 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setAiSrModel('ultrasharp')}
+                  className={`px-3 py-2 rounded-lg text-xs font-medium transition-all text-left flex flex-col gap-0.5 ${
+                    aiSrModel === 'ultrasharp'
+                      ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm border border-emerald-500/40'
+                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  <span className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                    4x-UltraSharp
+                    <span className="text-[10px] font-normal px-1 py-0.2 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
+                      Rekomendasi
+                    </span>
+                  </span>
+                  <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                    Detail mikro tajam, anti-blur &amp; tekstur super ajib
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAiSrModel('realesrgan')}
+                  className={`px-3 py-2 rounded-lg text-xs font-medium transition-all text-left flex flex-col gap-0.5 ${
+                    aiSrModel === 'realesrgan'
+                      ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm border border-zinc-400/40 dark:border-zinc-700'
+                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  <span className="font-semibold text-zinc-800 dark:text-zinc-200">
+                    Real-ESRGAN x4plus
+                  </span>
+                  <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                    Mesin standar Xinntao untuk perbesaran umum
+                  </span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

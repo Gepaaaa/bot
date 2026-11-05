@@ -40,6 +40,7 @@ export const DEFAULT_REACTIONS: BotReactionConfig = {
 export const DEFAULT_AI_ENHANCE_CONFIG: AiEnhanceConfig = {
   serviceUrl: 'http://127.0.0.1:8001',
   preferredFaceModel: 'codeformer',
+  preferredSrModel: 'ultrasharp',
   faceFidelity: 0.72,
   defaultScale: 2,
   autoDenoise: true,
@@ -375,12 +376,12 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
   },
   {
     id: 'hd',
-    aliases: ['enhance', 'jernih', 'hdr'],
+    aliases: ['enhance', 'jernih', 'hdr', 'ultra'],
     category: 'media',
-    usage: 'hd [fidelity 0.1-0.95] (kirim/reply foto)',
+    usage: 'hd [ultra/esrgan] [0.1-0.95] (kirim/reply foto)',
     description:
-      'Peningkatan kualitas foto otomatis adaptif berbasis AI (Real-ESRGAN + CodeFormer/GFPGAN + SCUNet/NAFNet sesuai kondisi noise, blur, dan wajah).',
-    example: 'hd',
+      'Peningkatan kualitas foto otomatis adaptif berbasis AI super ajib (4x-UltraSharp / Real-ESRGAN + CodeFormer/GFPGAN + SCUNet/NAFNet). Menghasilkan detail mikrotekstur ultra-tajam tanpa efek watercolor atau kulit plastik.',
+    example: 'hd ultra',
     requiresMedia: true,
     mediaKindHint: 'image',
   },
@@ -397,12 +398,12 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
   },
   {
     id: 'upscale',
-    aliases: ['sr', 'superres'],
+    aliases: ['sr', 'superres', 'ultrasharp'],
     category: 'media',
-    usage: 'upscale (kirim/reply foto)',
+    usage: 'upscale [ultra/esrgan] (kirim/reply foto)',
     description:
-      'Tingkatkan resolusi dan ketajaman tekstur umum foto menggunakan pretrained super-resolution Real-ESRGAN.',
-    example: 'upscale',
+      'Tingkatkan resolusi dan ketajaman tekstur umum foto menggunakan model premier 4x-UltraSharp (Super Ajib) atau Real-ESRGAN.',
+    example: 'upscale ultra',
     requiresMedia: true,
     mediaKindHint: 'image',
   },
@@ -419,11 +420,11 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
   },
   {
     id: 'hd4',
-    aliases: ['upscale4x', '4x'],
+    aliases: ['upscale4x', '4x', 'hdultra'],
     category: 'media',
     usage: 'hd4 (kirim/reply foto)',
     description:
-      'Super-resolution AI 4× lipat resolusi tinggi dengan Real-ESRGAN x4plus dan pipeline restorasi adaptif.',
+      'Super-resolution AI 4× lipat resolusi tinggi dengan model premier 4x-UltraSharp (Super Ajib) atau Real-ESRGAN x4plus dan pipeline restorasi adaptif.',
     example: 'hd4',
     requiresMedia: true,
     mediaKindHint: 'image',
@@ -1565,6 +1566,8 @@ export function sanitizeBotConfig(raw: BotConfig): {
         .replace(/\/+$/, ''),
       preferredFaceModel:
         rawAi.preferredFaceModel === 'gfpgan' ? 'gfpgan' : 'codeformer',
+      preferredSrModel:
+        rawAi.preferredSrModel === 'realesrgan' ? 'realesrgan' : 'ultrasharp',
       faceFidelity: Math.round(clampedFidelity * 100) / 100,
       defaultScale: rawAi.defaultScale === 4 ? 4 : 2,
       autoDenoise: rawAi.autoDenoise ?? true,

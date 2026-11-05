@@ -9,11 +9,16 @@ import {
 import type {
   AiEnhanceMode,
   AiFaceModel,
+  AiSrModel,
   GroupEditableTemplateKey,
   SimulatorMember,
 } from '../src/shared/types.ts';
 import { aiEnhancer } from './aiEnhancer.ts';
 import { evaluateAutoResponder } from './autoResponder.ts';
+import {
+  isAiHdSupportedOnDevice,
+  REDMI9C_AI_HD_NOTICE,
+} from './deviceProfile.ts';
 import { prepareHdStatusImage } from './imageAdapter.ts';
 import {
   downloadTikTokMedia,
@@ -1146,6 +1151,10 @@ export async function processBotMessage(
       case 'upscale':
       case 'hd2':
       case 'hd4': {
+        if (!isAiHdSupportedOnDevice()) {
+          return failReply(REDMI9C_AI_HD_NOTICE);
+        }
+
         const imgBuf =
           ctx.imageBuffer ||
           (ctx.documentMedia?.kind === 'image'
@@ -1175,6 +1184,7 @@ export async function processBotMessage(
           matchedCmd.id === 'hd2' ? 2 : matchedCmd.id === 'hd4' ? 4 : undefined;
 
         let faceModelOverride: AiFaceModel | undefined;
+        let srModelOverride: AiSrModel | undefined;
         let fidelityOverride: number | undefined;
         if (argsText) {
           const tokens = argsText
@@ -1186,6 +1196,19 @@ export async function processBotMessage(
               faceModelOverride = 'codeformer';
             } else if (tok === 'gfpgan' || tok === 'gfp') {
               faceModelOverride = 'gfpgan';
+            } else if (
+              tok === 'ultra' ||
+              tok === 'ultrasharp' ||
+              tok === '4x-ultrasharp' ||
+              tok === 'ajib'
+            ) {
+              srModelOverride = 'ultrasharp';
+            } else if (
+              tok === 'esrgan' ||
+              tok === 'realesrgan' ||
+              tok === 'real-esrgan'
+            ) {
+              srModelOverride = 'realesrgan';
             } else {
               const maybeNum = Number(tok.replace(',', '.'));
               if (
@@ -1205,6 +1228,7 @@ export async function processBotMessage(
           mode: enhanceMode,
           scaleOverride,
           faceModelOverride,
+          srModelOverride,
           fidelityOverride,
           config: config.aiEnhance,
           onStatus: ctx.onProgressStatus,
@@ -1226,9 +1250,16 @@ export async function processBotMessage(
 
         botStore.incrementStat('mediaDownloaded');
 
+        const { meta } = enhanced;
+        const isUltraSharpUsed = meta.modelsUsed.some((m) =>
+          m.toLowerCase().includes('ultrasharp')
+        );
+
         const headerTitle =
           enhanceMode === 'face'
             ? '*AI Face Restoration Selesai*'
+            : isUltraSharpUsed
+            ? '*AI Super-Resolution 4x-UltraSharp Selesai (Super Ajib)*'
             : enhanceMode === '2x'
             ? '*AI Super-Resolution 2× Selesai*'
             : enhanceMode === '4x'
@@ -1236,8 +1267,6 @@ export async function processBotMessage(
             : enhanceMode === 'upscale'
             ? '*AI Super-Resolution Selesai*'
             : '*AI Photo Enhance Selesai*';
-
-        const { meta } = enhanced;
         const captionLines: string[] = [
           headerTitle,
           `• Resolusi: *${meta.inputWidth}×${meta.inputHeight} px* → *${meta.outputWidth}×${meta.outputHeight} px* (*${meta.effectiveScale}×*)`,

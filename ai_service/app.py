@@ -163,12 +163,13 @@ class StandaloneAIHandler(BaseHTTPRequestHandler):
                 fidelity_raw = fields.get("fidelity")
                 fidelity = float(fidelity_raw) if fidelity_raw else None
                 enable_denoise = fields.get("enable_denoise", "false").lower() == "true"
-                enable_deblur = fields.get("enable_deblur", "false").lower() == "true"
+                sr_model = fields.get("sr_model") or ("ultrasharp" if mode == "ultra" else None)
 
                 options = EnhanceOptions(
                     mode=mode,  # type: ignore
                     scale=scale,
                     face_model=face_model,  # type: ignore
+                    sr_model=sr_model,  # type: ignore
                     fidelity=fidelity,
                     enable_denoise=enable_denoise,
                     enable_deblur=enable_deblur,
@@ -286,9 +287,10 @@ if HAS_FASTAPI:
     @app.post("/v1/enhance")
     async def enhance_endpoint(
         image: UploadFile = File(...),
-        mode: Literal["auto", "face", "upscale", "2x", "4x"] = Form(default="auto"),
+        mode: Literal["auto", "face", "upscale", "2x", "4x", "ultra"] = Form(default="auto"),
         scale: Optional[int] = Form(default=None),
         face_model: Optional[Literal["codeformer", "gfpgan"]] = Form(default=None),
+        sr_model: Optional[str] = Form(default=None),
         fidelity: Optional[float] = Form(default=None),
         enable_denoise: Optional[bool] = Form(default=None),
         enable_deblur: Optional[bool] = Form(default=None),
@@ -301,10 +303,13 @@ if HAS_FASTAPI:
         if len(raw_bytes) == 0:
             raise HTTPException(status_code=400, detail="Berkas gambar kosong.")
 
+        resolved_sr_model = sr_model or ("ultrasharp" if mode == "ultra" else None)
+
         options = EnhanceOptions(
             mode=mode,
             scale=scale if scale in (2, 4) else None,
             face_model=face_model,
+            sr_model=resolved_sr_model,  # type: ignore
             fidelity=fidelity,
             enable_denoise=enable_denoise,
             enable_deblur=enable_deblur,

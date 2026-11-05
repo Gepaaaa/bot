@@ -42,8 +42,9 @@ from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 # Prevent decompression-bomb attacks while allowing high-res smartphone photos
 Image.MAX_IMAGE_PIXELS = 48_000_000
 
-EnhanceMode = Literal["auto", "face", "upscale", "2x", "4x"]
+EnhanceMode = Literal["auto", "face", "upscale", "2x", "4x", "ultra"]
 FaceModelChoice = Literal["codeformer", "gfpgan"]
+SrModelChoice = Literal["ultrasharp", "realesrgan", "auto"]
 
 
 @dataclass
@@ -64,6 +65,7 @@ class EnhanceOptions:
     mode: EnhanceMode = "auto"
     scale: Optional[int] = None
     face_model: Optional[FaceModelChoice] = None
+    sr_model: Optional[SrModelChoice] = None
     fidelity: Optional[float] = None
     enable_denoise: Optional[bool] = None
     enable_deblur: Optional[bool] = None
@@ -106,6 +108,172 @@ def sniff_magic_format(raw: bytes) -> Optional[str]:
     return None
 
 
+# =========================================================================
+# STANDALONE RRDB ARCHITECTURE & NATIVE INFERENCE RUNNER
+# Enables 4x-UltraSharp & Real-ESRGAN with 100% pure PyTorch without basicsr
+# =========================================================================
+if HAS_TORCH:
+    import torch.nn as nn
+    import torch.nn.functional as F
+
+    class ResidualDenseBlock_5C(nn.Module):
+        def __init__(self, nf: int = 64, gc: int = 32, bias: bool = True) -> None:
+            super().__init__()
+            self.conv1 = nn.Conv2d(nf, gc, 3, 1, 1, bias=bias)
+            self.conv2 = nn.Conv2d(nf + gc, gc, 3, 1, 1, bias=bias)
+            self.conv3 = nn.Conv2d(nf + 2 * gc, gc, 3, 1, 1, bias=bias)
+            self.conv4 = nn.Conv2d(nf + 3 * gc, gc, 3, 1, 1, bias=bias)
+            self.conv5 = nn.Conv2d(nf + 4 * gc, nf, 3, 1, 1, bias=bias)
+            self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            x1 = self.lrelu(self.conv1(x))
+            x2 = self.lrelu(self.conv2(torch.cat((x, x1), 1)))
+            x3 = self.lrelu(self.conv3(torch.cat((x, x1, x2), 1)))
+            x4 = self.lrelu(self.conv4(torch.cat((x, x1, x2, x3), 1)))
+            x5 = self.conv5(torch.cat((x, x1, x2, x3, x4), 1))
+            return x5 * 0.2 + x
+
+    class RRDB(nn.Module):
+        def __init__(self, nf: int = 64, gc: int = 32) -> None:
+            super().__init__()
+            self.rdb1 = ResidualDenseBlock_5C(nf, gc)
+            self.rdb2 = ResidualDenseBlock_5C(nf, gc)
+            self.rdb3 = ResidualDenseBlock_5C(nf, gc)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            out = self.rdb1(x)
+            out = self.rdb2(out)
+            out = self.rdb3(out)
+            return out * 0.2 + x
+
+    class NativeRRDBNet(nn.Module):
+        def __init__(
+            self,
+            num_in_ch: int = 3,
+            num_out_ch: int = 3,
+            num_feat: int = 64,
+            num_block: int = 23,
+            num_grow_ch: int = 32,
+            scale: int = 4,
+        ) -> None:
+            super().__init__()
+            self.scale = scale
+            self.conv_first = nn.Conv2d(num_in_ch, num_feat, 3, 1, 1)
+            self.body = nn.Sequential(*[RRDB(num_feat, num_grow_ch) for _ in range(num_block)])
+            self.conv_body = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+            self.conv_up1 = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+            if self.scale == 4:
+                self.conv_up2 = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+            self.conv_hr = nn.Conv2d(num_feat, num_feat, 3, 1, 1)
+            self.conv_last = nn.Conv2d(num_feat, num_out_ch, 3, 1, 1)
+            self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            feat = self.conv_first(x)
+            body_feat = self.conv_body(self.body(feat))
+            feat = feat + body_feat
+            feat = self.lrelu(self.conv_up1(F.interpolate(feat, scale_factor=2, mode="nearest")))
+            if self.scale == 4:
+                feat = self.lrelu(self.conv_up2(F.interpolate(feat, scale_factor=2, mode="nearest")))
+            out = self.conv_last(self.lrelu(self.conv_hr(feat)))
+            return out
+
+    class NativeRRDBUpsampler:
+        def __init__(
+            self,
+            scale: int,
+            model_path: str,
+            device: Any,
+            tile_size: int = 400,
+            tile_pad: int = 10,
+            half: bool = False,
+        ) -> None:
+            self.scale = scale
+            self.device = device
+            self.tile_size = tile_size
+            self.tile_pad = tile_pad
+            self.half = half and getattr(device, "type", None) == "cuda"
+
+            self.model = NativeRRDBNet(scale=scale).to(device)
+            ckpt = torch.load(model_path, map_location=device)
+            state_dict = ckpt.get("params_ema") or ckpt.get("params") or ckpt
+            self.model.load_state_dict(state_dict, strict=True)
+            self.model.eval()
+            if self.half:
+                self.model = self.model.half()
+
+        def enhance(self, img_bgr: np.ndarray, outscale: Optional[int] = None) -> Tuple[np.ndarray, None]:
+            h, w = img_bgr.shape[:2]
+            scale = self.scale
+
+            img_rgb = img_bgr[:, :, [2, 1, 0]].astype(np.float32) / 255.0
+            img_t = torch.from_numpy(np.transpose(img_rgb, (2, 0, 1))).unsqueeze(0).to(self.device)
+            if self.half:
+                img_t = img_t.half()
+
+            if self.tile_size <= 0 or (w <= self.tile_size and h <= self.tile_size):
+                with torch.no_grad():
+                    out_t = self.model(img_t).clamp(0.0, 1.0)
+                out_np = out_t.squeeze(0).float().cpu().numpy()
+                out_rgb = np.transpose(out_np, (1, 2, 0))
+                out_bgr = (out_rgb[:, :, [2, 1, 0]] * 255.0).round().astype(np.uint8)
+            else:
+                out_bgr = self._tile_enhance(img_t, h, w)
+
+            if outscale is not None and outscale != scale:
+                target_w = int(round(w * outscale))
+                target_h = int(round(h * outscale))
+                if cv2 is not None:
+                    out_bgr = cv2.resize(out_bgr, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
+                else:
+                    pil = Image.fromarray(out_bgr[:, :, ::-1])
+                    pil = pil.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                    out_bgr = np.array(pil)[:, :, ::-1]
+
+            return out_bgr, None
+
+        def _tile_enhance(self, img_t: torch.Tensor, h: int, w: int) -> np.ndarray:
+            scale = self.scale
+            tile = self.tile_size
+            pad = self.tile_pad
+            out_h, out_w = h * scale, w * scale
+
+            out_tensor = torch.zeros((1, 3, out_h, out_w), dtype=torch.float32, device="cpu")
+            tiles_x = math.ceil(w / tile)
+            tiles_y = math.ceil(h / tile)
+
+            with torch.no_grad():
+                for yi in range(tiles_y):
+                    for xi in range(tiles_x):
+                        x1 = xi * tile
+                        y1 = yi * tile
+                        x2 = min(x1 + tile, w)
+                        y2 = min(y1 + tile, h)
+
+                        x1_pad = max(0, x1 - pad)
+                        y1_pad = max(0, y1 - pad)
+                        x2_pad = min(w, x2 + pad)
+                        y2_pad = min(h, y2 + pad)
+
+                        tile_in = img_t[:, :, y1_pad:y2_pad, x1_pad:x2_pad]
+                        tile_out = self.model(tile_in).float().cpu()
+
+                        crop_x1 = (x1 - x1_pad) * scale
+                        crop_y1 = (y1 - y1_pad) * scale
+                        crop_x2 = crop_x1 + (x2 - x1) * scale
+                        crop_y2 = crop_y1 + (y2 - y1) * scale
+
+                        out_tensor[:, :, y1 * scale : y2 * scale, x1 * scale : x2 * scale] = tile_out[:, :, crop_y1:crop_y2, crop_x1:crop_x2]
+
+            out_np = out_tensor.clamp(0.0, 1.0).squeeze(0).numpy()
+            out_rgb = np.transpose(out_np, (1, 2, 0))
+            return (out_rgb[:, :, [2, 1, 0]] * 255.0).round().astype(np.uint8)
+else:
+    class NativeRRDBUpsampler:  # type: ignore
+        pass
+
+
 class AdaptiveEnhancementPipeline:
     """
     Thread-safe GPU inference coordinator with lazy checkpoint loading,
@@ -124,6 +292,7 @@ class AdaptiveEnhancementPipeline:
         )
 
         # Lazy model instances cached in VRAM once loaded
+        self._ultrasharp_x4: Any = None
         self._realesrgan_x2: Any = None
         self._realesrgan_x4: Any = None
         self._gfpgan_x2: Any = None
@@ -155,6 +324,8 @@ class AdaptiveEnhancementPipeline:
                 "tile_size": 400,
                 "tile_pad": 10,
                 "pre_pad": 0,
+                "preferred_sr_model": "ultrasharp",
+                "ultrasharp_weights": "4x-UltraSharp.pth",
                 "realesrgan_x2_weights": "RealESRGAN_x2plus.pth",
                 "realesrgan_x4_weights": "RealESRGAN_x4plus.pth",
                 "default_face_model": "codeformer",
@@ -431,57 +602,115 @@ class AdaptiveEnhancementPipeline:
         )
 
     # =========================================================================
-    # MODEL LOADERS (REAL-ESRGAN, GFPGAN, CODEFORMER, SCUNET/NAFNET)
+    # MODEL LOADERS (4X-ULTRASHARP, REAL-ESRGAN, GFPGAN, CODEFORMER)
     # =========================================================================
-    def _get_realesrgan(self, scale: int) -> Any:
-        from basicsr.archs.rrdbnet_arch import RRDBNet
-        from realesrgan import RealESRGANer
+    def _ensure_weight(self, filename: str) -> Path:
+        dest = self._weights_path(filename)
+        if dest.exists() and dest.stat().st_size > 10 * 1024 * 1024:
+            return dest
+        try:
+            from download_weights import WEIGHT_MANIFEST, download_file_with_mirrors
+            if filename in WEIGHT_MANIFEST:
+                download_file_with_mirrors(WEIGHT_MANIFEST[filename], dest, int(WEIGHT_MANIFEST[filename]["min_mb"]))
+        except Exception:
+            pass
+        return dest
 
+    def _build_rrdb_upsampler(self, scale: int, weight_path: Path, tag: str) -> Any:
+        models_cfg = self.config.get("models", {})
+        tile_size = int(models_cfg.get("tile_size", 400))
+        tile_pad = int(models_cfg.get("tile_pad", 10))
+        pre_pad = int(models_cfg.get("pre_pad", 0))
+
+        upsampler = None
+        # 1. Try official RealESRGANer if installed
+        try:
+            from basicsr.archs.rrdbnet_arch import RRDBNet
+            from realesrgan import RealESRGANer
+
+            rrdb = RRDBNet(
+                num_in_ch=3,
+                num_out_ch=3,
+                num_feat=64,
+                num_block=23,
+                num_grow_ch=32,
+                scale=scale,
+            )
+            upsampler = RealESRGANer(
+                scale=scale,
+                model_path=str(weight_path),
+                model=rrdb,
+                tile=tile_size,
+                tile_pad=tile_pad,
+                pre_pad=pre_pad,
+                half=self.fp16,
+                device=self.device,
+            )
+        except Exception:
+            # 2. Native RRDBNet pure PyTorch runner (zero external pip packages needed)
+            upsampler = NativeRRDBUpsampler(
+                scale=scale,
+                model_path=str(weight_path),
+                device=self.device,
+                tile_size=tile_size,
+                tile_pad=tile_pad,
+                half=self.fp16,
+            )
+
+        if tag not in self._loaded_model_names:
+            self._loaded_model_names.append(tag)
+        return upsampler
+
+    def _get_sr_upsampler(
+        self, scale: int, prefer_model: Optional[str] = None
+    ) -> Tuple[Any, str]:
         target_scale = 2 if scale <= 2 else 4
-        if target_scale == 2 and self._realesrgan_x2 is not None:
-            return self._realesrgan_x2
-        if target_scale == 4 and self._realesrgan_x4 is not None:
-            return self._realesrgan_x4
+        models_cfg = self.config.get("models", {})
+        preferred = (prefer_model or models_cfg.get("preferred_sr_model", "ultrasharp")).lower()
 
-        models_cfg = self.config["models"]
+        # Check for 4x-UltraSharp (Super Ajib) when scale == 4 and not explicitly set to realesrgan
+        if target_scale == 4 and preferred != "realesrgan":
+            if self._ultrasharp_x4 is not None:
+                return self._ultrasharp_x4, "4x-UltraSharp (Super Ajib)"
+            ultra_file = models_cfg.get("ultrasharp_weights", "4x-UltraSharp.pth")
+            ultra_path = self._ensure_weight(ultra_file)
+            if ultra_path.exists():
+                upsampler = self._build_rrdb_upsampler(
+                    scale=4, weight_path=ultra_path, tag="4x-UltraSharp (Super Ajib)"
+                )
+                self._ultrasharp_x4 = upsampler
+                return upsampler, "4x-UltraSharp (Super Ajib)"
+
+        # Check for Real-ESRGAN (x2 or x4)
+        if target_scale == 2 and self._realesrgan_x2 is not None:
+            return self._realesrgan_x2, "Real-ESRGAN-x2plus"
+        if target_scale == 4 and self._realesrgan_x4 is not None:
+            return self._realesrgan_x4, "Real-ESRGAN-x4plus"
+
         weight_file = (
-            models_cfg["realesrgan_x2_weights"]
+            models_cfg.get("realesrgan_x2_weights", "RealESRGAN_x2plus.pth")
             if target_scale == 2
-            else models_cfg["realesrgan_x4_weights"]
+            else models_cfg.get("realesrgan_x4_weights", "RealESRGAN_x4plus.pth")
         )
-        weight_path = self._weights_path(weight_file)
+        weight_path = self._ensure_weight(weight_file)
         if not weight_path.exists():
             raise FileNotFoundError(
-                f"Pretrained checkpoint {weight_file} tidak ditemukan di {weight_path}. "
+                f"Model checkpoint {weight_file} tidak ditemukan di {weight_path}. "
                 "Jalankan `python download_weights.py` terlebih dahulu."
             )
 
-        rrdb = RRDBNet(
-            num_in_ch=3,
-            num_out_ch=3,
-            num_feat=64,
-            num_block=23,
-            num_grow_ch=32,
-            scale=target_scale,
-        )
-        upsampler = RealESRGANer(
-            scale=target_scale,
-            model_path=str(weight_path),
-            model=rrdb,
-            tile=int(models_cfg.get("tile_size", 400)),
-            tile_pad=int(models_cfg.get("tile_pad", 10)),
-            pre_pad=int(models_cfg.get("pre_pad", 0)),
-            half=self.fp16,
-            device=self.device,
-        )
         tag = f"Real-ESRGAN-x{target_scale}plus"
-        if tag not in self._loaded_model_names:
-            self._loaded_model_names.append(tag)
-
+        upsampler = self._build_rrdb_upsampler(
+            scale=target_scale, weight_path=weight_path, tag=tag
+        )
         if target_scale == 2:
             self._realesrgan_x2 = upsampler
         else:
             self._realesrgan_x4 = upsampler
+        return upsampler, tag
+
+    def _get_realesrgan(self, scale: int) -> Any:
+        upsampler, _ = self._get_sr_upsampler(scale)
         return upsampler
 
     def _get_gfpgan(self, upscale: int, bg_upsampler: Any) -> Any:
@@ -894,8 +1123,9 @@ class AdaptiveEnhancementPipeline:
         )
 
         with self._lock, torch.no_grad():
-            bg_upsampler = self._get_realesrgan(target_scale)
-            realesrgan_label = f"Real-ESRGAN-x{2 if target_scale <= 2 else 4}plus"
+            bg_upsampler, sr_label = self._get_sr_upsampler(
+                target_scale, prefer_model=options.sr_model
+            )
 
             enhanced_bgr: Optional[np.ndarray] = None
             if should_restore_faces and metrics.faces_detected > 0:
@@ -908,7 +1138,7 @@ class AdaptiveEnhancementPipeline:
                     )
                     if enhanced_bgr is not None:
                         face_model_used = f"CodeFormer(w={effective_fidelity:.2f})"
-                        models_used.extend([face_model_used, realesrgan_label])
+                        models_used.extend([face_model_used, sr_label])
                         stages.append("face_restoration_codeformer")
 
                 if enhanced_bgr is None:
@@ -922,7 +1152,7 @@ class AdaptiveEnhancementPipeline:
                     )
                     enhanced_bgr = gfp_out
                     face_model_used = f"GFPGAN-v1.4(fidelity={effective_fidelity:.2f})"
-                    models_used.extend([face_model_used, realesrgan_label])
+                    models_used.extend([face_model_used, sr_label])
                     stages.append("face_restoration_gfpgan")
 
                 stages.append(f"super_resolution_{target_scale}x")
@@ -930,7 +1160,7 @@ class AdaptiveEnhancementPipeline:
                 enhanced_bgr, _ = bg_upsampler.enhance(
                     working_bgr, outscale=target_scale
                 )
-                models_used.append(realesrgan_label)
+                models_used.append(sr_label)
                 stages.append(f"super_resolution_{target_scale}x")
 
             if self.device.type == "cuda":

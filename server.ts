@@ -19,6 +19,10 @@ import {
 } from './server/aiEnhancer.ts';
 import { cloudSync } from './server/cloudSync.ts';
 import { gatewayRouter } from './server/gatewayRouter.ts';
+import {
+  getDeviceProfile,
+  isAiHdSupportedOnDevice,
+} from './server/deviceProfile.ts';
 import { getActiveImageBackend } from './server/imageAdapter.ts';
 import { buildCdnRequestHeaders } from './server/mediaDownloader.ts';
 import {
@@ -269,6 +273,8 @@ async function startServer() {
       arch: process.arch,
       platform: process.platform,
       nodeVersion: process.version,
+      deviceProfile: getDeviceProfile(),
+      aiHdSupported: isAiHdSupportedOnDevice(),
       imageBackend: getActiveImageBackend(),
       memoryRssMb: Math.round(process.memoryUsage().rss / (1024 * 1024)),
     });

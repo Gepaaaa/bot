@@ -22,7 +22,9 @@ models:
   tile_pad: 10
   pre_pad: 0
 
-  # General Super-Resolution & Restoration (Real-ESRGAN)
+  # Premier Super-Resolution & Restoration (4x-UltraSharp / Real-ESRGAN)
+  preferred_sr_model: "ultrasharp" # "ultrasharp" (Super Ajib, Detail Alami) | "realesrgan"
+  ultrasharp_weights: "4x-UltraSharp.pth"
   realesrgan_x2_weights: "RealESRGAN_x2plus.pth"
   realesrgan_x4_weights: "RealESRGAN_x4plus.pth"
 

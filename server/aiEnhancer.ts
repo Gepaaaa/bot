@@ -5,6 +5,7 @@ import type {
   AiEnhanceConfig,
   AiEnhanceMode,
   AiFaceModel,
+  AiSrModel,
 } from '../src/shared/types.ts';
 import { sniffImageMetadata } from './imageAdapter.ts';
 
@@ -47,6 +48,7 @@ export interface AiEnhanceJobRequest {
   mode: AiEnhanceMode;
   scaleOverride?: 2 | 4;
   faceModelOverride?: AiFaceModel;
+  srModelOverride?: AiSrModel;
   fidelityOverride?: number;
   config: AiEnhanceConfig;
   onStatus?: (message: string) => Promise<void>;
@@ -148,6 +150,8 @@ function describeModeLabel(
   switch (mode) {
     case 'face':
       return 'Restorasi Wajah Natural (CodeFormer / GFPGAN)';
+    case 'ultra':
+      return 'Super-Resolution 4x-UltraSharp (Super Ajib)';
     case 'upscale':
       return `Super-Resolution Real-ESRGAN ${defaultScale}×`;
     case '2x':
@@ -339,12 +343,19 @@ class AiEnhanceOrchestrator {
         Math.max(0.05, Number.isFinite(rawFidelity) ? rawFidelity : 0.72)
       );
 
+      const effectiveSrModel =
+        req.srModelOverride ??
+        (req.mode === 'ultra'
+          ? 'ultrasharp'
+          : config.preferredSrModel ?? 'ultrasharp');
+
       const form = new FormData();
       const fileBlob = new Blob([new Uint8Array(stagedBytes)], {
         type: inputInfo.mimeType,
       });
       form.append('image', fileBlob, `input.${ext}`);
       form.append('mode', req.mode);
+      form.append('sr_model', effectiveSrModel);
       form.append('scale', String(effectiveScale));
       form.append('face_model', effectiveFaceModel);
       form.append('fidelity', effectiveFidelity.toFixed(2));

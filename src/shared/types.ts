@@ -92,11 +92,14 @@ export interface AntiBanConfig {
 
 export type AiFaceModel = 'codeformer' | 'gfpgan';
 
-export type AiEnhanceMode = 'auto' | 'face' | 'upscale' | '2x' | '4x';
+export type AiSrModel = 'ultrasharp' | 'realesrgan';
+
+export type AiEnhanceMode = 'auto' | 'face' | 'upscale' | '2x' | '4x' | 'ultra';
 
 export interface AiEnhanceConfig {
   serviceUrl: string;
   preferredFaceModel: AiFaceModel;
+  preferredSrModel?: AiSrModel;
   faceFidelity: number;
   defaultScale: 2 | 4;
   autoDenoise: boolean;
