@@ -60,7 +60,8 @@ export function TermuxManagerView({
   onNavigateToTemplates,
   onNavigateToSettings,
 }: TermuxManagerViewProps) {
-  const [installMode, setInstallMode] = useState<'bundle' | 'git'>('bundle');
+  const [targetDevice, setTargetDevice] = useState<'reno5' | 'redmi9c'>('reno5');
+  const [installMode, setInstallMode] = useState<'bundle' | 'git'>('git');
   const [gitRepoUrl, setGitRepoUrl] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [netInfo, setNetInfo] = useState<NetworkInfoSnapshot | null>(null);
@@ -168,7 +169,8 @@ export function TermuxManagerView({
 
   const cleanRepoUrl =
     gitRepoUrl.trim() || 'https://github.com/USERNAME_KAMU/NAMA_REPO_BOT.git';
-  const gitCloneRunCmd = `pkg update -y && pkg install -y git && rm -rf ~/wabot && git clone ${cleanRepoUrl} ~/wabot && cd ~/wabot && bash termux.sh`;
+  const gitCloneRunCmd = `pkg update -y && pkg install -y git && rm -rf ~/wabot && git clone ${cleanRepoUrl} ~/wabot && cd ~/wabot && bash termux.sh ${targetDevice}`;
+  const curlFastRunCmd = `curl -sL https://ais-pre-ytvmm2cbyqkygpp3brixzw-140858000053.asia-northeast1.run.app/termux-${targetDevice}.sh | bash`;
   const gitUpdateCmd =
     'cd ~/wabot && git pull && pm2 restart wabot';
 
@@ -602,13 +604,61 @@ export function TermuxManagerView({
 
       {/* Section 3: Step-by-Step Installation (Both Pre-built Package & Git Clone) */}
       <div className="bg-white dark:bg-[#141417] border border-zinc-200/80 dark:border-zinc-800 rounded-2xl p-6 space-y-6">
+        {/* Device Profile Switcher */}
+        <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 space-y-3">
+          <div className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+            Pilih Target Perangkat HP yang Akan Menjalankan Bot:
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => setTargetDevice('reno5')}
+              className={`p-3.5 rounded-xl border text-left transition-all ${
+                targetDevice === 'reno5'
+                  ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20 ring-1 ring-emerald-500'
+                  : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-zinc-300'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                  <span>🚀</span> Oppo Reno 5
+                </span>
+                {targetDevice === 'reno5' && <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-600 text-white font-medium">Aktif</span>}
+              </div>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">
+                Snapdragon 720G · RAM 8GB · Mode Turbo (Alokasi RAM 1024MB, proses stiker/media cepat)
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setTargetDevice('redmi9c')}
+              className={`p-3.5 rounded-xl border text-left transition-all ${
+                targetDevice === 'redmi9c'
+                  ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20 ring-1 ring-emerald-500'
+                  : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-zinc-300'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                  <span>📱</span> Xiaomi Redmi 9C
+                </span>
+                {targetDevice === 'redmi9c' && <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-600 text-white font-medium">Aktif</span>}
+              </div>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">
+                Helio G35 · RAM 3GB · Mode Armor Hemat (Alokasi RAM 256MB, anti force-close MIUI)
+              </p>
+            </button>
+          </div>
+        </div>
+
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-              Cara Memasang Kode ke Termux Redmi 9C (Pilih Metode Transfer)
+              Perintah Pasang untuk {targetDevice === 'reno5' ? 'Oppo Reno 5' : 'Xiaomi Redmi 9C'}
             </h3>
             <p className="text-xs text-zinc-600 dark:text-zinc-400">
-              Pastikan kamu menginstal aplikasi <strong>Termux resmi dari f-droid.org</strong> (bukan versi Play Store lama).
+              Bot dapat dijalankan mandiri di HP ini. Jika HP satunya rusak, bot di HP ini langsung jadi cadangan.
             </p>
           </div>
 
@@ -756,7 +806,25 @@ export function TermuxManagerView({
                   ) : (
                     <>
                       <Copy className="w-4 h-4" />
-                      Salin Perintah Git Clone
+                      Salin Perintah Git Clone ({targetDevice === 'reno5' ? 'Reno 5' : 'Redmi 9C'})
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => copyText('curlRun', curlFastRunCmd)}
+                  className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-medium hover:bg-emerald-500/20 transition-colors"
+                >
+                  {copiedKey === 'curlRun' ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      Perintah Langsung Tersalin
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      Salin Perintah Langsung Sekali Jalan (Tanpa Git)
                     </>
                   )}
                 </button>
@@ -774,7 +842,7 @@ export function TermuxManagerView({
                   ) : (
                     <>
                       <Copy className="w-3.5 h-3.5" />
-                      Salin Perintah Update Repo ({gitUpdateCmd})
+                      Salin Perintah Update Repo
                     </>
                   )}
                 </button>

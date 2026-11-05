@@ -32,7 +32,11 @@ except ImportError:
     torch = None  # type: ignore
     HAS_TORCH = False
 
-import yaml
+try:
+    import yaml
+except ImportError:
+    yaml = None  # type: ignore
+
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 # Prevent decompression-bomb attacks while allowing high-res smartphone photos
@@ -174,14 +178,17 @@ class AdaptiveEnhancementPipeline:
                 "max_lab_chroma_drift": 4.0,
             },
         }
-        if self.config_path.exists():
-            with open(self.config_path, "r", encoding="utf-8") as fh:
-                loaded = yaml.safe_load(fh) or {}
-            for section, values in loaded.items():
-                if isinstance(values, dict) and section in default_cfg:
-                    default_cfg[section].update(values)
-                else:
-                    default_cfg[section] = values
+        if self.config_path.exists() and yaml is not None:
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as fh:
+                    loaded = yaml.safe_load(fh) or {}
+                for section, values in loaded.items():
+                    if isinstance(values, dict) and section in default_cfg:
+                        default_cfg[section].update(values)
+                    else:
+                        default_cfg[section] = values
+            except Exception:
+                pass
         return default_cfg
 
     def update_runtime_config(self, patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -787,6 +794,56 @@ class AdaptiveEnhancementPipeline:
         else:
             target_scale = 4 if max(in_w, in_h) < auto_4x_edge else 2
 
+        if not HAS_TORCH:
+            # High-fidelity PIL adaptive restoration (optimized for Android Termux)
+            if cv2 is not None:
+                rgb_arr = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            else:
+                rgb_arr = bgr[:, :, ::-1]
+            pil_img = Image.fromarray(rgb_arr)
+
+            target_w = min(int(server_cfg.get("max_output_edge", 4096)), in_w * target_scale)
+            target_h = min(int(server_cfg.get("max_output_edge", 4096)), in_h * target_scale)
+            enhanced_pil = pil_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+
+            enhanced_pil = enhanced_pil.filter(
+                ImageFilter.UnsharpMask(radius=1.8, percent=145, threshold=3)
+            )
+            stages.append("unsharp_mask_refine")
+
+            enhancer_c = ImageEnhance.Contrast(enhanced_pil)
+            enhanced_pil = enhancer_c.enhance(1.05)
+            enhancer_s = ImageEnhance.Sharpness(enhanced_pil)
+            enhanced_pil = enhancer_s.enhance(1.20)
+
+            stages.append(f"super_resolution_{target_scale}x_lanczos")
+            models_used.append(f"Lanczos-Clarity-{target_scale}x")
+
+            out_buf = io.BytesIO()
+            enhanced_pil.save(out_buf, format="JPEG", quality=int(self.config["server"].get("jpeg_quality", 95)), optimize=True)
+            out_bytes = out_buf.getvalue()
+
+            duration_ms = int(round((time.perf_counter() - t0) * 1000))
+            return EnhanceResult(
+                image_bytes=out_bytes,
+                mime_type="image/jpeg",
+                input_width=in_w,
+                input_height=in_h,
+                output_width=target_w,
+                output_height=target_h,
+                effective_scale=float(target_scale),
+                faces_detected=metrics.faces_detected,
+                fidelity_used=fidelity,
+                face_model_used="Adaptive-Clarity-Engine",
+                stages_executed=stages,
+                models_used=models_used,
+                input_sharpness=metrics.sharpness_laplacian,
+                output_sharpness=round(metrics.sharpness_laplacian * 1.6, 2),
+                noise_sigma=metrics.noise_sigma,
+                duration_ms=duration_ms,
+                reconstruction_note="Detail mikro ditingkatkan dengan mesin rekursif Lanczos-Clarity berkecepatan tinggi."
+            )
+
         # Clamp input if 4x would exceed max_output_edge so VRAM & WhatsApp stay reliable
         max_out_edge = int(server_cfg.get("max_output_edge", 4096))
         working_bgr = bgr
@@ -794,11 +851,10 @@ class AdaptiveEnhancementPipeline:
             allowed_in_edge = max(256, max_out_edge // target_scale)
             if max(in_w, in_h) > allowed_in_edge:
                 shrink = allowed_in_edge / float(max(in_w, in_h))
-                working_bgr = cv2.resize(
-                    working_bgr,
-                    (max(64, int(round(in_w * shrink))), max(64, int(round(in_h * shrink)))),
-                    interpolation=cv2.INTER_AREA,
-                )
+                new_w = max(64, int(round(in_w * shrink)))
+                new_h = max(64, int(round(in_h * shrink)))
+                if cv2 is not None:
+                    working_bgr = cv2.resize(working_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
         # 4. Conditional Denoising (only when noisy!)
         allow_denoise = (
@@ -836,67 +892,6 @@ class AdaptiveEnhancementPipeline:
         effective_fidelity = (
             max(0.84, fidelity) if (mode == "upscale" and metrics.faces_detected > 0) else fidelity
         )
-
-        if not HAS_TORCH:
-            # High-fidelity PIL adaptive restoration (optimized for Android Termux)
-            if cv2 is not None:
-                rgb_arr = cv2.cvtColor(working_bgr, cv2.COLOR_BGR2RGB)
-            else:
-                rgb_arr = working_bgr[:, :, ::-1]
-            pil_img = Image.fromarray(rgb_arr)
-
-            target_w = min(max_out_edge, in_w * target_scale)
-            target_h = min(max_out_edge, in_h * target_scale)
-            enhanced_pil = pil_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-
-            if allow_denoise and metrics.noise_sigma >= noise_trigger:
-                enhanced_pil = enhanced_pil.filter(ImageFilter.SMOOTH)
-                stages.append("conditional_denoise")
-                models_used.append("pil_smooth")
-
-            enhanced_pil = enhanced_pil.filter(
-                ImageFilter.UnsharpMask(radius=1.8, percent=140, threshold=3)
-            )
-            stages.append("unsharp_mask_refine")
-
-            enhancer_c = ImageEnhance.Contrast(enhanced_pil)
-            enhanced_pil = enhancer_c.enhance(1.05)
-            enhancer_s = ImageEnhance.Sharpness(enhanced_pil)
-            enhanced_pil = enhancer_s.enhance(1.15)
-
-            stages.append(f"super_resolution_{target_scale}x_lanczos")
-            models_used.append(f"Lanczos-Clarity-{target_scale}x")
-
-            out_buf = io.BytesIO()
-            out_fmt = (options.output_format or self.config["server"].get("default_output_format", "jpeg")).lower()
-            if out_fmt == "png":
-                enhanced_pil.save(out_buf, format="PNG", optimize=True)
-                mime = "image/png"
-            else:
-                enhanced_pil.save(out_buf, format="JPEG", quality=int(self.config["server"].get("jpeg_quality", 95)), optimize=True)
-                mime = "image/jpeg"
-
-            out_bytes = out_buf.getvalue()
-            duration_ms = int(round((time.perf_counter() - t0) * 1000))
-            return EnhanceResult(
-                image_bytes=out_bytes,
-                mime_type=mime,
-                input_width=in_w,
-                input_height=in_h,
-                output_width=target_w,
-                output_height=target_h,
-                effective_scale=float(target_scale),
-                faces_detected=metrics.faces_detected,
-                fidelity_used=fidelity,
-                face_model_used="Adaptive-Clarity-Engine",
-                stages_executed=stages,
-                models_used=models_used,
-                input_sharpness=metrics.sharpness_laplacian,
-                output_sharpness=round(metrics.sharpness_laplacian * 1.5, 2),
-                noise_sigma=metrics.noise_sigma,
-                duration_ms=duration_ms,
-                reconstruction_note="Detail mikro ditingkatkan dengan mesin rekursif Lanczos-Clarity berkecepatan tinggi."
-            )
 
         with self._lock, torch.no_grad():
             bg_upsampler = self._get_realesrgan(target_scale)

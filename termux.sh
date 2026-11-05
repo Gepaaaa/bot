@@ -6,13 +6,32 @@
 # ==============================================================================
 set -e
 
+PROFILE_INPUT="${1:-auto}"
 ARCH="$(uname -m 2>/dev/null || echo unknown)"
+MEM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo "3000000")
+MEM_MB=$(( MEM_KB / 1024 ))
+
+if [ "$PROFILE_INPUT" = "reno5" ] || [ "$PROFILE_INPUT" = "oppo" ] || [ "$PROFILE_INPUT" = "high" ] || { [ "$PROFILE_INPUT" = "auto" ] && [ "$MEM_MB" -gt 4500 ]; }; then
+  TARGET_DEVICE="Oppo Reno 5 (Snapdragon 720G / 8GB RAM Turbo Mode)"
+  DEVICE_CODE="reno5"
+  MAX_OLD_SPACE="1024"
+  MAX_RESTART_MEM="1200M"
+  PROFILE_DESC="Performa Tinggi: Alokasi RAM 1024 MB, Proses Cepat"
+else
+  TARGET_DEVICE="Redmi 9C (Helio G35 / 3GB RAM Armor Mode)"
+  DEVICE_CODE="redmi9c"
+  MAX_OLD_SPACE="256"
+  MAX_RESTART_MEM="320M"
+  PROFILE_DESC="Hemat RAM: Alokasi RAM 256 MB, Anti Force-Close"
+fi
 
 echo ""
 echo "============================================================"
 echo "  WABOT MULTI-FEATURE — INSTALLER TERMUX 24/7"
-echo "  Arsitektur HP Terdeteksi : $ARCH"
-echo "  Mode Hemat RAM           : Aktif (Optimal untuk RAM 3GB)"
+echo "  Target Perangkat         : $TARGET_DEVICE"
+echo "  Arsitektur & Total RAM   : $ARCH (~$MEM_MB MB)"
+echo "  Batas Memori Node.js     : $MAX_OLD_SPACE MB (Restart: $MAX_RESTART_MEM)"
+echo "  Profil Optimasi          : $PROFILE_DESC"
 echo "============================================================"
 echo ""
 
@@ -343,10 +362,9 @@ BOTEOF
   chmod +x "$PREFIX_BIN/bot"
 fi
 
-# 7. Jalankan satu proses bersih dengan batas memori optimal untuk Redmi 9C (3GB RAM)
-echo "[6/6] Menyalakan mesin WABot di background via PM2..."
+echo "[6/6] Menyalakan mesin WABot di background via PM2 ($PROFILE_DESC)..."
 pm2 delete wabot 2>/dev/null || true
-pm2 start index.js --name "wabot" --node-args="--max-old-space-size=256" --max-memory-restart 320M
+pm2 start index.js --name "wabot" --node-args="--max-old-space-size=$MAX_OLD_SPACE" --max-memory-restart "$MAX_RESTART_MEM"
 pm2 save 2>/dev/null || true
 
 # Tunggu 3 detik hingga server port 3000 siap lalu tampilkan info IP & kontrol lengkap

@@ -12035,8 +12035,10 @@ async function startServer() {
     }
     res.json({ ok: true, config: updated });
   });
-  app.get("/api/ai-enhance/status", async (_req, res) => {
-    const status = await checkAiServiceHealth(botStore.config.aiEnhance);
+  app.get("/api/ai-enhance/status", async (req, res) => {
+    const queryUrl = typeof req.query.url === "string" ? req.query.url.trim() : "";
+    const cfg = queryUrl ? { ...botStore.config.aiEnhance, serviceUrl: queryUrl } : botStore.config.aiEnhance;
+    const status = await checkAiServiceHealth(cfg);
     res.json(status);
   });
   app.get("/api/sample-cat.jpg", async (_req, res) => {
@@ -12840,6 +12842,26 @@ ${stepLabel}` : stepLabel : stepLabel;
       }
     }
   );
+  app.get("/termux-redmi9c.sh", async (_req, res) => {
+    try {
+      const p = path9.join(process.cwd(), "termux-redmi9c.sh");
+      const content = await fs11.readFile(p, "utf-8");
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.send(content);
+    } catch {
+      res.status(404).send("# termux-redmi9c.sh not found");
+    }
+  });
+  app.get("/termux-reno5.sh", async (_req, res) => {
+    try {
+      const p = path9.join(process.cwd(), "termux-reno5.sh");
+      const content = await fs11.readFile(p, "utf-8");
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.send(content);
+    } catch {
+      res.status(404).send("# termux-reno5.sh not found");
+    }
+  });
   app.get("/ai-service.tar.gz", (_req, res) => {
     res.setHeader("Content-Type", "application/gzip");
     res.setHeader("Content-Disposition", 'attachment; filename="ai_service.tar.gz"');
@@ -13388,6 +13410,29 @@ ${stepLabel}` : stepLabel : stepLabel;
             <button type="button" class="btn btn-outline" onclick="stopRemote()">Matikan Link Luar</button>
           </div>
         </div>
+
+        <div class="card" style="grid-column: span 2;">
+          <h2>Pilihan Jalur Perangkat Server (Redmi 9C vs Oppo Reno 5)</h2>
+          <p class="subtext">Bot dapat dijalankan secara mandiri di salah satu HP kapan saja. Jika satu HP rusak/habis baterai, kamu cukup nyalakan bot di HP cadangan.</p>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px;margin-top:12px;">
+            <div style="padding:16px;border-radius:12px;border:1px solid var(--border);background:var(--surface-sub);">
+              <div style="font-weight:700;font-size:14px;color:var(--text);display:flex;align-items:center;gap:8px;">
+                <span>\u{1F4F1}</span> Jalur 1: Xiaomi Redmi 9C
+              </div>
+              <div style="font-size:12px;color:var(--muted);margin:6px 0 12px;">Helio G35 \xB7 RAM 3GB \xB7 Mode Armor Hemat RAM (Alokasi 256MB)</div>
+              <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:4px;">Perintah 1-Baris Sekali Jalan:</div>
+              <pre class="font-mono" style="padding:10px;background:var(--surface);border-radius:8px;font-size:11px;overflow-x:auto;user-select:all;">curl -sL https://ais-pre-ytvmm2cbyqkygpp3brixzw-140858000053.asia-northeast1.run.app/termux-redmi9c.sh | bash</pre>
+            </div>
+            <div style="padding:16px;border-radius:12px;border:1px solid var(--border);background:var(--surface-sub);">
+              <div style="font-weight:700;font-size:14px;color:var(--text);display:flex;align-items:center;gap:8px;">
+                <span>\u{1F680}</span> Jalur 2: Oppo Reno 5
+              </div>
+              <div style="font-size:12px;color:var(--muted);margin:6px 0 12px;">Snapdragon 720G \xB7 RAM 8GB \xB7 Mode Turbo (Alokasi 1024MB, Proses Cepat)</div>
+              <div style="font-size:11px;font-weight:600;color:var(--text);margin-bottom:4px;">Perintah 1-Baris Sekali Jalan:</div>
+              <pre class="font-mono" style="padding:10px;background:var(--surface);border-radius:8px;font-size:11px;overflow-x:auto;user-select:all;">curl -sL https://ais-pre-ytvmm2cbyqkygpp3brixzw-140858000053.asia-northeast1.run.app/termux-reno5.sh | bash</pre>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -13830,14 +13875,33 @@ ${stepLabel}` : stepLabel : stepLabel;
 
     async function probeAiGpu() {
       const toast = document.getElementById('toast-ai');
+      const serviceUrl = (document.getElementById('cfg-ai-url').value || '').trim();
+      const preferredFaceModel = document.getElementById('cfg-ai-face').value || 'codeformer';
+      const defaultScale = Number(document.getElementById('cfg-ai-scale').value) || 2;
+      
       toast.style.color = 'var(--amber)';
-      toast.innerText = 'Menghubungi server AI GPU...';
+      toast.innerText = 'Menghubungi server AI di ' + (serviceUrl || '...') + '...';
       try {
-        const res = await fetch('/api/ai-enhance/status');
+        // Otomatis simpan alamat yang diketik
+        await fetch('/api/config', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            aiEnhance: {
+              ...(currentCfg && currentCfg.aiEnhance ? currentCfg.aiEnhance : {}),
+              serviceUrl,
+              preferredFaceModel,
+              defaultScale
+            }
+          })
+        });
+
+        const res = await fetch('/api/ai-enhance/status?url=' + encodeURIComponent(serviceUrl));
         const st = await res.json();
         if (st.ok) {
           toast.style.color = 'var(--emerald)';
-          toast.innerText = 'Terhubung ke AI GPU (' + (st.gpuName || st.device || 'Online') + ' \xB7 ' + (st.latencyMs || 0) + 'ms)';
+          toast.innerText = '\u2713 Berhasil Terhubung ke AI GPU (' + (st.gpuName || st.device || 'Online') + ' \xB7 ' + (st.latencyMs || 0) + 'ms)';
+          await loadState();
         } else {
           toast.style.color = 'var(--danger)';
           toast.innerText = 'Gagal terhubung: ' + (st.error || 'Server tidak merespons');
