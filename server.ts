@@ -1988,6 +1988,36 @@ async function startServer() {
         </div>
 
         <div class="card">
+          <h2>Server AI Photo Enhancement (Oppo Reno 5 / Colab)</h2>
+          <p class="subtext">Hubungkan ke IP server GPU untuk memproses perintah <code class="font-mono">.hd</code>, <code class="font-mono">.remini</code>, <code class="font-mono">.upscale</code>.</p>
+          <div>
+            <label>Endpoint HTTP Layanan AI GPU (Contoh: http://192.168.1.15:8001)</label>
+            <input type="text" id="cfg-ai-url" placeholder="http://192.168.1.15:8001" class="font-mono" />
+          </div>
+          <div class="row" style="margin-top:10px;">
+            <div style="flex:1;">
+              <label>Model Wajah</label>
+              <select id="cfg-ai-face" style="width:100%;padding:10px;border-radius:12px;border:1px solid var(--border);background:var(--surface-input);color:var(--text);">
+                <option value="codeformer">CodeFormer (Natural &amp; Detail)</option>
+                <option value="gfpgan">GFPGAN v1.4</option>
+              </select>
+            </div>
+            <div style="width:110px;">
+              <label>Skala</label>
+              <select id="cfg-ai-scale" style="width:100%;padding:10px;border-radius:12px;border:1px solid var(--border);background:var(--surface-input);color:var(--text);">
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <button type="button" class="btn btn-emerald" onclick="saveAiConfig()">Simpan Alamat AI</button>
+            <button type="button" class="btn btn-outline" onclick="probeAiGpu()">Cek Status GPU</button>
+          </div>
+          <div class="toast" id="toast-ai"></div>
+        </div>
+
+        <div class="card">
           <h2>Template Balasan Chat &amp; Grup</h2>
           <p class="subtext">Kustomisasi header <code class="font-mono">.menu</code> dan sambutan member grup.</p>
           <div style="display:flex;flex-direction:column;gap:10px;">
@@ -2110,6 +2140,9 @@ async function startServer() {
           document.getElementById('tpl-menuheader').value = (cfg.templates && cfg.templates.menuHeader) || '';
           document.getElementById('tpl-welcome').value = (cfg.templates && cfg.templates.welcomeMsg) || '';
           document.getElementById('tpl-goodbye').value = (cfg.templates && cfg.templates.goodbyeMsg) || '';
+          document.getElementById('cfg-ai-url').value = (cfg.aiEnhance && cfg.aiEnhance.serviceUrl) || 'http://127.0.0.1:8001';
+          document.getElementById('cfg-ai-face').value = (cfg.aiEnhance && cfg.aiEnhance.preferredFaceModel) || 'codeformer';
+          document.getElementById('cfg-ai-scale').value = String((cfg.aiEnhance && cfg.aiEnhance.defaultScale) || 2);
           document.getElementById('ab-min').value = String((cfg.antiBan && cfg.antiBan.minDelayMs) || 1200);
           document.getElementById('ab-max').value = String((cfg.antiBan && cfg.antiBan.maxDelayMs) || 2800);
           document.getElementById('ab-cool').value = String(Math.round(((cfg.antiBan && cfg.antiBan.userCooldownMs) || 3000) / 1000));
@@ -2286,6 +2319,47 @@ async function startServer() {
       document.getElementById('toast-tpl').innerText = 'Template balasan berhasil diperbarui.';
       setTimeout(() => { document.getElementById('toast-tpl').innerText = ''; }, 2500);
       await loadState();
+    }
+
+    async function saveAiConfig() {
+      const serviceUrl = (document.getElementById('cfg-ai-url').value || '').trim();
+      const preferredFaceModel = document.getElementById('cfg-ai-face').value || 'codeformer';
+      const defaultScale = Number(document.getElementById('cfg-ai-scale').value) || 2;
+      await fetch('/api/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          aiEnhance: {
+            ...(currentCfg && currentCfg.aiEnhance ? currentCfg.aiEnhance : {}),
+            serviceUrl,
+            preferredFaceModel,
+            defaultScale
+          }
+        })
+      });
+      document.getElementById('toast-ai').innerText = 'Alamat IP server AI berhasil disimpan.';
+      setTimeout(() => { document.getElementById('toast-ai').innerText = ''; }, 2500);
+      await loadState();
+    }
+
+    async function probeAiGpu() {
+      const toast = document.getElementById('toast-ai');
+      toast.style.color = 'var(--amber)';
+      toast.innerText = 'Menghubungi server AI GPU...';
+      try {
+        const res = await fetch('/api/ai-enhance/status');
+        const st = await res.json();
+        if (st.ok) {
+          toast.style.color = 'var(--emerald)';
+          toast.innerText = 'Terhubung ke AI GPU (' + (st.gpuName || st.device || 'Online') + ' · ' + (st.latencyMs || 0) + 'ms)';
+        } else {
+          toast.style.color = 'var(--danger)';
+          toast.innerText = 'Gagal terhubung: ' + (st.error || 'Server tidak merespons');
+        }
+      } catch (e) {
+        toast.style.color = 'var(--danger)';
+        toast.innerText = 'Tidak dapat menghubungi server lokal.';
+      }
     }
 
     async function loadRemote() {

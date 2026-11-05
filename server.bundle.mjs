@@ -1,10 +1,10 @@
 // server.ts
 import "dotenv/config";
 import { spawn as spawn2 } from "node:child_process";
-import fs10 from "node:fs/promises";
+import fs11 from "node:fs/promises";
 import http from "node:http";
-import os5 from "node:os";
-import path8 from "node:path";
+import os6 from "node:os";
+import path9 from "node:path";
 import readline from "node:readline";
 import express from "express";
 import { WebSocketServer } from "ws";
@@ -29,6 +29,19 @@ var DEFAULT_REACTIONS = {
   pending: "\u23F3",
   success: "\u2714\uFE0F",
   error: "\u274C"
+};
+var DEFAULT_AI_ENHANCE_CONFIG = {
+  serviceUrl: "http://127.0.0.1:8001",
+  preferredFaceModel: "codeformer",
+  faceFidelity: 0.72,
+  defaultScale: 2,
+  autoDenoise: true,
+  autoDeblur: true,
+  sendProgressNotice: true,
+  maxConcurrentJobs: 2,
+  maxQueueSize: 15,
+  timeoutMs: 9e4,
+  maxFileSizeMb: 15
 };
 var SUSPENSION_RISK_DISABLED_REPLY = "fitur dinonaktifkan karena berpotensi grup ditangguhkan";
 var DEFAULT_TEMPLATES = {
@@ -302,11 +315,51 @@ var COMMAND_CATALOG = [
   },
   {
     id: "hd",
-    aliases: ["remini", "upscale", "jernih", "hdr"],
+    aliases: ["enhance", "jernih", "hdr"],
     category: "media",
-    usage: "hd (kirim/reply foto)",
-    description: "Pertajam detail dan tingkatkan resolusi foto 2\xD7 lipat dengan pemrosesan Lanczos3 + Unsharp Mask.",
+    usage: "hd [fidelity 0.1-0.95] (kirim/reply foto)",
+    description: "Peningkatan kualitas foto otomatis adaptif berbasis AI (Real-ESRGAN + CodeFormer/GFPGAN + SCUNet/NAFNet sesuai kondisi noise, blur, dan wajah).",
     example: "hd",
+    requiresMedia: true,
+    mediaKindHint: "image"
+  },
+  {
+    id: "remini",
+    aliases: ["facehd", "restoreface"],
+    category: "media",
+    usage: "remini [fidelity 0.1-0.95] (kirim/reply foto)",
+    description: "Fokus restorasi detail wajah natural menggunakan CodeFormer / GFPGAN dengan kontrol fidelity agar identitas wajah asli tetap terjaga dan tidak tampak plastik.",
+    example: "remini",
+    requiresMedia: true,
+    mediaKindHint: "image"
+  },
+  {
+    id: "upscale",
+    aliases: ["sr", "superres"],
+    category: "media",
+    usage: "upscale (kirim/reply foto)",
+    description: "Tingkatkan resolusi dan ketajaman tekstur umum foto menggunakan pretrained super-resolution Real-ESRGAN.",
+    example: "upscale",
+    requiresMedia: true,
+    mediaKindHint: "image"
+  },
+  {
+    id: "hd2",
+    aliases: ["upscale2x", "2x"],
+    category: "media",
+    usage: "hd2 (kirim/reply foto)",
+    description: "Super-resolution AI 2\xD7 lipat dengan Real-ESRGAN x2plus serta penjagaan warna natural.",
+    example: "hd2",
+    requiresMedia: true,
+    mediaKindHint: "image"
+  },
+  {
+    id: "hd4",
+    aliases: ["upscale4x", "4x"],
+    category: "media",
+    usage: "hd4 (kirim/reply foto)",
+    description: "Super-resolution AI 4\xD7 lipat resolusi tinggi dengan Real-ESRGAN x4plus dan pipeline restorasi adaptif.",
+    example: "hd4",
     requiresMedia: true,
     mediaKindHint: "image"
   },
@@ -799,7 +852,11 @@ var COMPACT_COMMAND_META = {
   toimg: { shortUsage: "toimg", shortDesc: "Ubah stiker kembali jadi foto" },
   tovid: { shortUsage: "tovid", shortDesc: "Ubah stiker gerak jadi video MP4" },
   hdsw: { shortUsage: "hdsw", shortDesc: "Dokumen asli ke Status HD (Grup/PC)" },
-  hd: { shortUsage: "hd", shortDesc: "Pertajam & upscale resolusi foto 2\xD7" },
+  hd: { shortUsage: "hd", shortDesc: "AI Enhance foto adaptif otomatis" },
+  remini: { shortUsage: "remini", shortDesc: "AI restorasi wajah natural" },
+  upscale: { shortUsage: "upscale", shortDesc: "AI super-resolution Real-ESRGAN" },
+  hd2: { shortUsage: "hd2", shortDesc: "AI upscale resolusi foto 2\xD7" },
+  hd4: { shortUsage: "hd4", shortDesc: "AI upscale resolusi foto 4\xD7" },
   rvo: { shortUsage: "rvo", shortDesc: "Buka media View Once sekali lihat" },
   toptv: { shortUsage: "toptv", shortDesc: "Ubah video jadi Video Note bulat" },
   hitamkan: { shortUsage: "hitamkan", shortDesc: "Filter foto monokrom hitam-putih" },
@@ -931,6 +988,10 @@ var MENU_SECTIONS = [
       "media",
       "tools",
       "hd",
+      "remini",
+      "upscale",
+      "hd2",
+      "hd4",
       "sw",
       "hdsw",
       "foto",
@@ -938,11 +999,26 @@ var MENU_SECTIONS = [
       "menumedia",
       "menutools"
     ],
-    ids: ["hdsw", "hd", "meme", "rvo", "toptv", "hitamkan", "imgedit", "tourl", "qrcode"],
+    ids: [
+      "hdsw",
+      "hd",
+      "remini",
+      "upscale",
+      "hd2",
+      "hd4",
+      "meme",
+      "rvo",
+      "toptv",
+      "hitamkan",
+      "imgedit",
+      "tourl",
+      "qrcode"
+    ],
     compactRows: [
       { ids: ["hdsw"], summary: "Dokumen ke Status HD (Grup & PC)" },
-      { ids: ["hd", "hitamkan"], summary: "Upscale foto 2\xD7 & hitam-putih" },
-      { ids: ["imgedit"], summary: "Filter blur, invert, mirror, sepia" },
+      { ids: ["hd", "remini", "upscale"], summary: "AI Enhance adaptif, wajah & SR" },
+      { ids: ["hd2", "hd4"], summary: "AI Super-Resolution 2\xD7 & 4\xD7" },
+      { ids: ["hitamkan", "imgedit"], summary: "Hitam-putih, blur, invert, mirror" },
       { ids: ["meme", "rvo", "toptv"], summary: "Meme web lucu, ViewOnce & video PTV" },
       { ids: ["tourl", "qrcode"], summary: "Link media publik & kode QR" }
     ]
@@ -1240,6 +1316,12 @@ var CLEAN_DEFAULT_RULES = [
 ];
 function sanitizeBotConfig(raw) {
   let changed = false;
+  const rawAi = raw.aiEnhance || DEFAULT_AI_ENHANCE_CONFIG;
+  const clampedFidelity = Number.isFinite(Number(rawAi.faceFidelity)) ? Math.min(0.98, Math.max(0.05, Number(rawAi.faceFidelity))) : DEFAULT_AI_ENHANCE_CONFIG.faceFidelity;
+  const clampedConcurrency = Number.isFinite(Number(rawAi.maxConcurrentJobs)) ? Math.min(8, Math.max(1, Math.round(Number(rawAi.maxConcurrentJobs)))) : DEFAULT_AI_ENHANCE_CONFIG.maxConcurrentJobs;
+  const clampedQueue = Number.isFinite(Number(rawAi.maxQueueSize)) ? Math.min(60, Math.max(1, Math.round(Number(rawAi.maxQueueSize)))) : DEFAULT_AI_ENHANCE_CONFIG.maxQueueSize;
+  const clampedTimeout = Number.isFinite(Number(rawAi.timeoutMs)) ? Math.min(3e5, Math.max(1e4, Math.round(Number(rawAi.timeoutMs)))) : DEFAULT_AI_ENHANCE_CONFIG.timeoutMs;
+  const clampedMaxMb = Number.isFinite(Number(rawAi.maxFileSizeMb)) ? Math.min(30, Math.max(1, Math.round(Number(rawAi.maxFileSizeMb)))) : DEFAULT_AI_ENHANCE_CONFIG.maxFileSizeMb;
   const next = {
     ...raw,
     reactions: { ...DEFAULT_REACTIONS, ...raw.reactions || {} },
@@ -1251,6 +1333,21 @@ function sanitizeBotConfig(raw) {
     },
     groupOverrides: raw.groupOverrides ? { ...raw.groupOverrides } : {},
     antiBan: { ...raw.antiBan },
+    aiEnhance: {
+      serviceUrl: String(
+        rawAi.serviceUrl ?? DEFAULT_AI_ENHANCE_CONFIG.serviceUrl
+      ).trim().replace(/\/+$/, ""),
+      preferredFaceModel: rawAi.preferredFaceModel === "gfpgan" ? "gfpgan" : "codeformer",
+      faceFidelity: Math.round(clampedFidelity * 100) / 100,
+      defaultScale: rawAi.defaultScale === 4 ? 4 : 2,
+      autoDenoise: rawAi.autoDenoise ?? true,
+      autoDeblur: rawAi.autoDeblur ?? true,
+      sendProgressNotice: rawAi.sendProgressNotice ?? true,
+      maxConcurrentJobs: clampedConcurrency,
+      maxQueueSize: clampedQueue,
+      timeoutMs: clampedTimeout,
+      maxFileSizeMb: clampedMaxMb
+    },
     autoResponder: Array.isArray(raw.autoResponder) ? [...raw.autoResponder] : [...CLEAN_DEFAULT_RULES]
   };
   if (!next.botName?.trim() || hasLegacyIdentity(next.botName)) {
@@ -1342,13 +1439,1301 @@ function sanitizeLogs(logs) {
   return cleaned;
 }
 
-// server/stateStore.ts
-import fs3 from "node:fs";
+// server/aiEnhancer.ts
+import fs3 from "node:fs/promises";
+import os2 from "node:os";
 import path2 from "node:path";
 
-// server/cloudSync.ts
-import fs from "node:fs/promises";
+// server/imageAdapter.ts
+import { execFile } from "node:child_process";
+import fs2 from "node:fs/promises";
+import { createRequire as createRequire2 } from "node:module";
+import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
+import { initWasm, Resvg } from "@resvg/resvg-wasm";
+import WebP from "node-webpmux";
+
+// server/ffmpegBin.ts
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import { createRequire } from "node:module";
+var require2 = createRequire(import.meta.url);
+var cachedBin = null;
+function getFfmpegBin() {
+  if (cachedBin) return cachedBin;
+  try {
+    const check = spawnSync("ffmpeg", ["-version"], {
+      stdio: "ignore",
+      timeout: 3e3
+    });
+    if (check.status === 0) {
+      cachedBin = "ffmpeg";
+      return cachedBin;
+    }
+  } catch {
+  }
+  try {
+    const ffmpegStatic = require2("ffmpeg-static");
+    if (ffmpegStatic && fs.existsSync(ffmpegStatic)) {
+      try {
+        fs.chmodSync(ffmpegStatic, 493);
+      } catch {
+      }
+      cachedBin = ffmpegStatic;
+      return cachedBin;
+    }
+  } catch {
+  }
+  cachedBin = "ffmpeg";
+  return cachedBin;
+}
+
+// server/imageAdapter.ts
+var execFileAsync = promisify(execFile);
+var nodeRequire = createRequire2(import.meta.url);
+var cachedSharp;
+function getOptionalSharp() {
+  if (cachedSharp !== void 0) return cachedSharp;
+  try {
+    const mod = nodeRequire("sharp");
+    const fn = mod?.default || mod;
+    if (typeof fn === "function") {
+      cachedSharp = fn;
+      return cachedSharp;
+    }
+  } catch {
+  }
+  cachedSharp = null;
+  return null;
+}
+function getActiveImageBackend() {
+  return getOptionalSharp() ? "sharp-native" : "resvg-wasm+ffmpeg";
+}
+async function withTempDir(fn) {
+  const dir = await fs2.mkdtemp(path.join(os.tmpdir(), "wabot-img-"));
+  try {
+    return await fn(dir);
+  } finally {
+    await fs2.rm(dir, { recursive: true, force: true }).catch(() => {
+    });
+  }
+}
+var wasmInitPromise = null;
+var cachedFontsPromise = null;
+async function ensureResvgInitialized() {
+  if (!wasmInitPromise) {
+    wasmInitPromise = (async () => {
+      let wasmPath = path.join(
+        process.cwd(),
+        "node_modules",
+        "@resvg",
+        "resvg-wasm",
+        "index_bg.wasm"
+      );
+      try {
+        const entryPath = nodeRequire.resolve("@resvg/resvg-wasm");
+        wasmPath = path.join(path.dirname(entryPath), "index_bg.wasm");
+      } catch {
+      }
+      const wasmBytes = await fs2.readFile(wasmPath);
+      await initWasm(wasmBytes);
+    })().catch((err) => {
+      wasmInitPromise = null;
+      throw err;
+    });
+  }
+  return wasmInitPromise;
+}
+async function loadFontBuffersOnce() {
+  if (!cachedFontsPromise) {
+    cachedFontsPromise = (async () => {
+      const fontGroups = [
+        {
+          family: "Roboto",
+          files: [
+            "/system/fonts/Roboto-Regular.ttf",
+            "/system/fonts/Roboto-Bold.ttf",
+            "/system/fonts/DroidSans.ttf"
+          ]
+        },
+        {
+          family: "DejaVu Sans",
+          files: [
+            "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+          ]
+        },
+        {
+          family: "Liberation Sans",
+          files: [
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
+          ]
+        }
+      ];
+      for (const group of fontGroups) {
+        const loaded = [];
+        for (const fpath of group.files) {
+          try {
+            const buf = await fs2.readFile(fpath);
+            loaded.push(new Uint8Array(buf));
+            if (loaded.length >= 2) break;
+          } catch {
+          }
+        }
+        if (loaded.length > 0) {
+          return { buffers: loaded, family: group.family };
+        }
+      }
+      return { buffers: [], family: "sans-serif" };
+    })();
+  }
+  return cachedFontsPromise;
+}
+async function renderSvgViaResvgWasm(svg) {
+  await ensureResvgInitialized();
+  const fonts = await loadFontBuffersOnce();
+  const normalizedSvg = fonts.buffers.length > 0 ? svg.replace(
+    /font-family="([^"]*)"/g,
+    (_m, existing) => `font-family="${fonts.family}, ${existing}"`
+  ) : svg;
+  const resvg = new Resvg(normalizedSvg, {
+    font: fonts.buffers.length > 0 ? {
+      fontBuffers: fonts.buffers,
+      defaultFontFamily: fonts.family,
+      sansSerifFamily: fonts.family
+    } : {
+      loadSystemFonts: true
+    }
+  });
+  try {
+    const rendered = resvg.render();
+    try {
+      return Buffer.from(rendered.asPng());
+    } finally {
+      rendered.free();
+    }
+  } finally {
+    resvg.free();
+  }
+}
+function xmlEscapeAttr(raw) {
+  return raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+async function measureSvgTextWidth(text, fontSize, fontWeight = 400) {
+  if (!text) return 0;
+  const trimmed = text.replace(/\r/g, "");
+  if (!trimmed.trim()) {
+    return trimmed.length * fontSize * 0.28;
+  }
+  await ensureResvgInitialized();
+  const fonts = await loadFontBuffersOnce();
+  const familyAttr = fonts.buffers.length > 0 ? `${fonts.family}, Arial, Helvetica, DejaVu Sans, sans-serif` : "Arial, Helvetica, DejaVu Sans, sans-serif";
+  const probeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="256"><text x="32" y="128" xml:space="preserve" font-family="${familyAttr}" font-size="${fontSize}" font-weight="${fontWeight}">${xmlEscapeAttr(
+    trimmed
+  )}</text></svg>`;
+  const resvg = new Resvg(probeSvg, {
+    font: fonts.buffers.length > 0 ? {
+      fontBuffers: fonts.buffers,
+      defaultFontFamily: fonts.family,
+      sansSerifFamily: fonts.family
+    } : {
+      loadSystemFonts: true
+    }
+  });
+  let bboxWidth = 0;
+  try {
+    const bbox = resvg.getBBox();
+    if (bbox) {
+      try {
+        bboxWidth = Math.max(0, bbox.x - 32 + bbox.width);
+      } finally {
+        bbox.free();
+      }
+    }
+  } finally {
+    resvg.free();
+  }
+  let emojiExtra = 0;
+  for (const ch of Array.from(trimmed)) {
+    const cp = ch.codePointAt(0) || 0;
+    if (cp >= 127744) {
+      emojiExtra += fontSize * 0.35;
+    }
+  }
+  const trailingSpaces = trimmed.length - trimmed.trimEnd().length;
+  const spaceExtra = trailingSpaces > 0 ? trailingSpaces * fontSize * 0.28 : 0;
+  return Math.max(bboxWidth + spaceExtra, emojiExtra > 0 ? bboxWidth + emojiExtra * 0.4 : 0);
+}
+async function renderSvgConsistentToWebp(svg, quality = 92) {
+  const pngBuf = await renderSvgViaResvgWasm(svg);
+  return pngBufferToWebp(pngBuf, quality);
+}
+function sniffImageMetadata(buf) {
+  if (buf.length >= 24 && buf[0] === 137 && buf[1] === 80 && buf[2] === 78 && buf[3] === 71) {
+    return {
+      format: "png",
+      width: buf.readUInt32BE(16),
+      height: buf.readUInt32BE(20)
+    };
+  }
+  if (buf.length >= 10 && buf.toString("ascii", 0, 3) === "GIF") {
+    return {
+      format: "gif",
+      width: buf.readUInt16LE(6),
+      height: buf.readUInt16LE(8)
+    };
+  }
+  if (buf.length >= 30 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") {
+    const chunk = buf.toString("ascii", 12, 16);
+    if (chunk === "VP8X" && buf.length >= 30) {
+      const w = 1 + (buf[24] | buf[25] << 8 | buf[26] << 16);
+      const h = 1 + (buf[27] | buf[28] << 8 | buf[29] << 16);
+      return { format: "webp", width: w, height: h };
+    }
+    if (chunk === "VP8 " && buf.length >= 30) {
+      const w = buf.readUInt16LE(26) & 16383;
+      const h = buf.readUInt16LE(28) & 16383;
+      return { format: "webp", width: w, height: h };
+    }
+    if (chunk === "VP8L" && buf.length >= 25) {
+      const b0 = buf[21];
+      const b1 = buf[22];
+      const b2 = buf[23];
+      const b3 = buf[24];
+      const w = 1 + ((b1 & 63) << 8 | b0);
+      const h = 1 + ((b3 & 15) << 10 | b2 << 2 | (b1 & 192) >> 6);
+      return { format: "webp", width: w, height: h };
+    }
+    return { format: "webp" };
+  }
+  if (buf.length >= 4 && buf[0] === 255 && buf[1] === 216) {
+    let offset = 2;
+    while (offset + 9 < buf.length) {
+      if (buf[offset] !== 255) {
+        offset += 1;
+        continue;
+      }
+      const marker = buf[offset + 1];
+      if (marker === 255) {
+        offset += 1;
+        continue;
+      }
+      if (marker === 216 || marker === 217) {
+        offset += 2;
+        continue;
+      }
+      const segLen = buf.readUInt16BE(offset + 2);
+      if (segLen < 2) break;
+      if (marker >= 192 && marker <= 195 || marker >= 197 && marker <= 199 || marker >= 201 && marker <= 203 || marker >= 205 && marker <= 207) {
+        const h = buf.readUInt16BE(offset + 5);
+        const w = buf.readUInt16BE(offset + 7);
+        return { format: "jpeg", width: w, height: h };
+      }
+      offset += 2 + segLen;
+    }
+    return { format: "jpeg" };
+  }
+  return { format: "unknown" };
+}
+async function renderSvgToPng(svg) {
+  const sharp = getOptionalSharp();
+  if (sharp) {
+    return sharp(Buffer.from(svg)).png().toBuffer();
+  }
+  return renderSvgViaResvgWasm(svg);
+}
+async function pngBufferToWebp(pngBuffer, quality = 88) {
+  const sharp = getOptionalSharp();
+  if (sharp) {
+    return sharp(pngBuffer).webp({ quality }).toBuffer();
+  }
+  return withTempDir(async (dir) => {
+    const inPng = path.join(dir, "in.png");
+    const outWebp = path.join(dir, "out.webp");
+    await fs2.writeFile(inPng, pngBuffer);
+    await execFileAsync(
+      getFfmpegBin(),
+      [
+        "-y",
+        "-i",
+        inPng,
+        "-vcodec",
+        "libwebp",
+        "-lossless",
+        "0",
+        "-compression_level",
+        "4",
+        "-q:v",
+        String(quality),
+        "-an",
+        outWebp
+      ],
+      { timeout: 2e4 }
+    );
+    return fs2.readFile(outWebp);
+  });
+}
+async function renderSvgToWebp(svg, quality = 90) {
+  const sharp = getOptionalSharp();
+  if (sharp) {
+    return sharp(Buffer.from(svg)).webp({ quality }).toBuffer();
+  }
+  const pngBuf = await renderSvgViaResvgWasm(svg);
+  return pngBufferToWebp(pngBuf, quality);
+}
+async function renderBratFramePngAdapter(svg) {
+  const sharp = getOptionalSharp();
+  if (sharp) {
+    const lowFiPng = await sharp(Buffer.from(svg)).resize(330, 330).blur(1.15).png().toBuffer();
+    return sharp(lowFiPng).resize(512, 512, { kernel: "linear" }).png().toBuffer();
+  }
+  const basePng = await renderSvgViaResvgWasm(svg);
+  return withTempDir(async (dir) => {
+    const inPng = path.join(dir, "brat_in.png");
+    const outPng = path.join(dir, "brat_out.png");
+    await fs2.writeFile(inPng, basePng);
+    await execFileAsync(
+      getFfmpegBin(),
+      [
+        "-y",
+        "-i",
+        inPng,
+        "-vf",
+        "scale=330:330:flags=bilinear,gblur=sigma=1.15,scale=512:512:flags=bilinear",
+        "-frames:v",
+        "1",
+        outPng
+      ],
+      { timeout: 2e4 }
+    );
+    return fs2.readFile(outPng);
+  });
+}
+async function imageBufferToStickerWebp(imageBuffer) {
+  const sharp = getOptionalSharp();
+  if (sharp) {
+    return sharp(imageBuffer, { animated: true }).rotate().resize(512, 512, {
+      fit: "contain",
+      background: { r: 0, g: 0, b: 0, alpha: 0 }
+    }).webp({ quality: 84 }).toBuffer();
+  }
+  const meta = sniffImageMetadata(imageBuffer);
+  if (meta.format === "webp") {
+    try {
+      const wimg = new WebP.Image();
+      await wimg.load(imageBuffer);
+      if (wimg.hasAnim) {
+        return imageBuffer;
+      }
+    } catch {
+    }
+  }
+  return withTempDir(async (dir) => {
+    const ext = meta.format === "png" ? "png" : meta.format === "gif" ? "gif" : meta.format === "webp" ? "webp" : "jpg";
+    const inPath = path.join(dir, `in.${ext}`);
+    const outPath = path.join(dir, "out.webp");
+    await fs2.writeFile(inPath, imageBuffer);
+    if (meta.format === "gif") {
+      await execFileAsync(
+        getFfmpegBin(),
+        [
+          "-y",
+          "-i",
+          inPath,
+          "-t",
+          "7",
+          "-vf",
+          "fps=12,scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,format=rgba,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000",
+          "-vcodec",
+          "libwebp",
+          "-lossless",
+          "0",
+          "-compression_level",
+          "4",
+          "-q:v",
+          "75",
+          "-loop",
+          "0",
+          "-an",
+          "-vsync",
+          "0",
+          outPath
+        ],
+        { timeout: 25e3 }
+      );
+    } else {
+      await execFileAsync(
+        getFfmpegBin(),
+        [
+          "-y",
+          "-i",
+          inPath,
+          "-vf",
+          "scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,format=rgba,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000",
+          "-vcodec",
+          "libwebp",
+          "-lossless",
+          "0",
+          "-compression_level",
+          "4",
+          "-q:v",
+          "84",
+          "-an",
+          outPath
+        ],
+        { timeout: 2e4 }
+      );
+    }
+    return fs2.readFile(outPath);
+  });
+}
+async function webpBufferToPng(webpBuffer) {
+  const sharp = getOptionalSharp();
+  if (sharp) {
+    return sharp(webpBuffer, { animated: false }).png().toBuffer();
+  }
+  return withTempDir(async (dir) => {
+    let staticFrameBuf = webpBuffer;
+    try {
+      const wimg = new WebP.Image();
+      await wimg.load(webpBuffer);
+      if (wimg.hasAnim) {
+        const demuxed = await wimg.demux({ buffers: true, frame: 0 });
+        if (demuxed && demuxed[0]) {
+          staticFrameBuf = Buffer.from(demuxed[0]);
+        }
+      }
+    } catch {
+    }
+    const inPath = path.join(dir, "in.webp");
+    const outPath = path.join(dir, "out.png");
+    await fs2.writeFile(inPath, staticFrameBuf);
+    await execFileAsync(
+      getFfmpegBin(),
+      ["-y", "-i", inPath, "-frames:v", "1", outPath],
+      { timeout: 2e4 }
+    );
+    return fs2.readFile(outPath);
+  });
+}
+async function webpStickerToMp4Buffer(webpBuffer) {
+  const sharp = getOptionalSharp();
+  if (sharp) {
+    return withTempDir(async (dir) => {
+      const meta = await sharp(webpBuffer, { animated: true }).metadata();
+      const pages = Math.min(meta.pages || 1, 90);
+      const pageHeight = meta.pageHeight || (meta.height && meta.pages ? Math.floor(meta.height / meta.pages) : meta.height || 512);
+      const width = meta.width || 512;
+      if (pages <= 1) {
+        const singlePng = path.join(dir, "frame.png");
+        const outMp42 = path.join(dir, "out.mp4");
+        await sharp(webpBuffer).flatten({ background: "#111114" }).resize(512, 512, { fit: "contain", background: "#111114" }).png().toFile(singlePng);
+        await execFileAsync(
+          getFfmpegBin(),
+          [
+            "-y",
+            "-loop",
+            "1",
+            "-i",
+            singlePng,
+            "-t",
+            "3",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            outMp42
+          ],
+          { timeout: 2e4 }
+        );
+        return fs2.readFile(outMp42);
+      }
+      const delays = meta.delay || [];
+      const avgDelayMs = delays.length > 0 ? Math.max(
+        40,
+        Math.round(
+          delays.reduce((a, b) => a + b, 0) / delays.length
+        )
+      ) : 90;
+      const fps = Math.max(4, Math.min(25, Math.round(1e3 / avgDelayMs)));
+      const stripPng = await sharp(webpBuffer, { animated: true }).flatten({ background: "#111114" }).png().toBuffer();
+      for (let i = 0; i < pages; i += 1) {
+        const framePath = path.join(
+          dir,
+          `frame_${String(i).padStart(3, "0")}.png`
+        );
+        await sharp(stripPng).extract({
+          left: 0,
+          top: i * pageHeight,
+          width,
+          height: pageHeight
+        }).resize(512, 512, { fit: "contain", background: "#111114" }).png().toFile(framePath);
+      }
+      const outMp4 = path.join(dir, "out.mp4");
+      await execFileAsync(
+        getFfmpegBin(),
+        [
+          "-y",
+          "-framerate",
+          String(fps),
+          "-i",
+          path.join(dir, "frame_%03d.png"),
+          "-vf",
+          "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+          "-c:v",
+          "libx264",
+          "-pix_fmt",
+          "yuv420p",
+          "-movflags",
+          "+faststart",
+          outMp4
+        ],
+        { timeout: 25e3 }
+      );
+      return fs2.readFile(outMp4);
+    });
+  }
+  return withTempDir(async (dir) => {
+    const wimg = new WebP.Image();
+    await wimg.load(webpBuffer);
+    if (!wimg.hasAnim || !wimg.frames || wimg.frames.length <= 1) {
+      const inPath = path.join(dir, "single.webp");
+      const outMp42 = path.join(dir, "out.mp4");
+      await fs2.writeFile(inPath, webpBuffer);
+      await execFileAsync(
+        getFfmpegBin(),
+        [
+          "-y",
+          "-loop",
+          "1",
+          "-i",
+          inPath,
+          "-t",
+          "3",
+          "-vf",
+          "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#111114,format=yuv420p",
+          "-c:v",
+          "libx264",
+          "-pix_fmt",
+          "yuv420p",
+          "-movflags",
+          "+faststart",
+          outMp42
+        ],
+        { timeout: 25e3 }
+      );
+      return fs2.readFile(outMp42);
+    }
+    const totalFrames = Math.min(wimg.frames.length, 90);
+    const demuxed = await wimg.demux({ buffers: true, start: 0, end: totalFrames - 1 }) || [];
+    const delays = wimg.frames.slice(0, totalFrames).map((f) => f.delay || 90);
+    const avgDelayMs = delays.length > 0 ? Math.max(
+      40,
+      Math.round(delays.reduce((a, b) => a + b, 0) / delays.length)
+    ) : 90;
+    const fps = Math.max(4, Math.min(25, Math.round(1e3 / avgDelayMs)));
+    for (let i = 0; i < demuxed.length; i += 1) {
+      await fs2.writeFile(
+        path.join(dir, `frame_${String(i).padStart(3, "0")}.webp`),
+        Buffer.from(demuxed[i])
+      );
+    }
+    const outMp4 = path.join(dir, "out.mp4");
+    await execFileAsync(
+      getFfmpegBin(),
+      [
+        "-y",
+        "-framerate",
+        String(fps),
+        "-i",
+        path.join(dir, "frame_%03d.webp"),
+        "-vf",
+        "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#111114,format=yuv420p",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        outMp4
+      ],
+      { timeout: 25e3 }
+    );
+    return fs2.readFile(outMp4);
+  });
+}
+async function compositeMemeToWebp(sourceBuffer, overlaySvg) {
+  const sharp = getOptionalSharp();
+  if (sharp) {
+    return sharp(sourceBuffer).rotate().resize(512, 512, { fit: "cover" }).composite([{ input: Buffer.from(overlaySvg), top: 0, left: 0 }]).webp({ quality: 88 }).toBuffer();
+  }
+  const overlayPng = await renderSvgViaResvgWasm(overlaySvg);
+  return withTempDir(async (dir) => {
+    const meta = sniffImageMetadata(sourceBuffer);
+    const ext = meta.format === "png" ? "png" : meta.format === "webp" ? "webp" : "jpg";
+    const baseIn = path.join(dir, `base.${ext}`);
+    const overIn = path.join(dir, "overlay.png");
+    const outWebp = path.join(dir, "meme.webp");
+    await fs2.writeFile(baseIn, sourceBuffer);
+    await fs2.writeFile(overIn, overlayPng);
+    await execFileAsync(
+      getFfmpegBin(),
+      [
+        "-y",
+        "-i",
+        baseIn,
+        "-i",
+        overIn,
+        "-filter_complex",
+        "[0:v]scale=512:512:force_original_aspect_ratio=increase,crop=512:512,format=rgba[bg];[1:v]format=rgba[ov];[bg][ov]overlay=0:0:format=auto",
+        "-vcodec",
+        "libwebp",
+        "-lossless",
+        "0",
+        "-compression_level",
+        "4",
+        "-q:v",
+        "88",
+        "-an",
+        outWebp
+      ],
+      { timeout: 25e3 }
+    );
+    return fs2.readFile(outWebp);
+  });
+}
+async function applyImageFilterAdapter(imageBuffer, filter) {
+  const sharp = getOptionalSharp();
+  if (sharp) {
+    let pipeline = sharp(imageBuffer).rotate();
+    switch (filter) {
+      case "hitamkan":
+      case "grayscale":
+        pipeline = pipeline.grayscale().linear(1.12, -8);
+        break;
+      case "invert":
+        pipeline = pipeline.negate({ alpha: false });
+        break;
+      case "blur":
+        pipeline = pipeline.blur(8);
+        break;
+      case "mirror":
+        pipeline = pipeline.flop();
+        break;
+      case "flip":
+        pipeline = pipeline.flip();
+        break;
+      case "sepia":
+        pipeline = pipeline.recomb([
+          [0.393, 0.769, 0.189],
+          [0.349, 0.686, 0.168],
+          [0.272, 0.534, 0.131]
+        ]);
+        break;
+    }
+    return pipeline.jpeg({ quality: 91 }).toBuffer();
+  }
+  let vf = "hue=s=0,eq=contrast=1.12:brightness=-0.03";
+  switch (filter) {
+    case "hitamkan":
+    case "grayscale":
+      vf = "hue=s=0,eq=contrast=1.12:brightness=-0.03";
+      break;
+    case "invert":
+      vf = "negate";
+      break;
+    case "blur":
+      vf = "gblur=sigma=8";
+      break;
+    case "mirror":
+      vf = "hflip";
+      break;
+    case "flip":
+      vf = "vflip";
+      break;
+    case "sepia":
+      vf = "colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131";
+      break;
+  }
+  return withTempDir(async (dir) => {
+    const sniffed = sniffImageMetadata(imageBuffer);
+    const ext = sniffed.format === "png" ? "png" : sniffed.format === "webp" ? "webp" : "jpg";
+    const inPath = path.join(dir, `in.${ext}`);
+    const outPath = path.join(dir, "filtered.jpg");
+    await fs2.writeFile(inPath, imageBuffer);
+    await execFileAsync(
+      getFfmpegBin(),
+      ["-y", "-i", inPath, "-vf", vf, "-q:v", "3", "-frames:v", "1", outPath],
+      { timeout: 25e3 }
+    );
+    return fs2.readFile(outPath);
+  });
+}
+async function prepareHdStatusImage(buffer, mimeType, fallbackThumbBase64) {
+  const sharp = getOptionalSharp();
+  if (sharp) {
+    try {
+      let finalBuffer = buffer;
+      let finalMime = mimeType;
+      const meta = await sharp(finalBuffer).metadata();
+      const width = meta.width;
+      const height = meta.height;
+      if (meta.format === "webp" || finalMime.toLowerCase().includes("webp")) {
+        finalBuffer = await sharp(finalBuffer).png({ compressionLevel: 0 }).toBuffer();
+        finalMime = "image/png";
+      } else if (meta.format === "png") {
+        finalMime = "image/png";
+      } else {
+        finalMime = "image/jpeg";
+      }
+      const thumbBuf = await sharp(finalBuffer).resize(72, 72, { fit: "inside" }).jpeg({ quality: 65 }).toBuffer();
+      return {
+        buffer: finalBuffer,
+        mimeType: finalMime,
+        width,
+        height,
+        jpegThumbnail: thumbBuf.toString("base64")
+      };
+    } catch {
+      return {
+        buffer,
+        mimeType: mimeType.startsWith("image/") ? mimeType : "image/jpeg",
+        jpegThumbnail: fallbackThumbBase64
+      };
+    }
+  }
+  try {
+    let finalBuffer = buffer;
+    let sniffed = sniffImageMetadata(finalBuffer);
+    let finalMime = mimeType;
+    if (sniffed.format === "webp" || finalMime.toLowerCase().includes("webp")) {
+      finalBuffer = await webpBufferToPng(finalBuffer);
+      sniffed = sniffImageMetadata(finalBuffer);
+      finalMime = "image/png";
+    } else if (sniffed.format === "png") {
+      finalMime = "image/png";
+    } else {
+      finalMime = "image/jpeg";
+    }
+    const thumbBase64 = await withTempDir(async (dir) => {
+      const ext = finalMime === "image/png" ? "png" : "jpg";
+      const inPath = path.join(dir, `in.${ext}`);
+      const thumbPath = path.join(dir, "thumb.jpg");
+      await fs2.writeFile(inPath, finalBuffer);
+      await execFileAsync(
+        getFfmpegBin(),
+        [
+          "-y",
+          "-i",
+          inPath,
+          "-vf",
+          "scale=72:72:force_original_aspect_ratio=decrease",
+          "-q:v",
+          "6",
+          "-frames:v",
+          "1",
+          thumbPath
+        ],
+        { timeout: 15e3 }
+      );
+      const tbuf = await fs2.readFile(thumbPath);
+      return tbuf.toString("base64");
+    }).catch(() => fallbackThumbBase64);
+    return {
+      buffer: finalBuffer,
+      mimeType: finalMime,
+      width: sniffed.width,
+      height: sniffed.height,
+      jpegThumbnail: thumbBase64
+    };
+  } catch {
+    return {
+      buffer,
+      mimeType: mimeType.startsWith("image/") ? mimeType : "image/jpeg",
+      jpegThumbnail: fallbackThumbBase64
+    };
+  }
+}
+async function ensureWhatsappImageBuffer(buffer, mimeType = "image/jpeg") {
+  const sniffed = sniffImageMetadata(buffer);
+  if (sniffed.format === "jpeg") {
+    return { buffer, mimeType: "image/jpeg" };
+  }
+  if (sniffed.format === "png") {
+    return { buffer, mimeType: "image/png" };
+  }
+  const sharp = getOptionalSharp();
+  if (sharp) {
+    try {
+      const jpg = await sharp(buffer, { animated: false }).flatten({ background: "#000000" }).jpeg({ quality: 92 }).toBuffer();
+      return { buffer: jpg, mimeType: "image/jpeg" };
+    } catch {
+    }
+  }
+  try {
+    const jpgBuf = await withTempDir(async (dir) => {
+      const inPath = path.join(dir, "slide.img");
+      const outPath = path.join(dir, "slide.jpg");
+      await fs2.writeFile(inPath, buffer);
+      await execFileAsync(
+        getFfmpegBin(),
+        ["-y", "-i", inPath, "-frames:v", "1", "-q:v", "2", outPath],
+        { timeout: 18e3 }
+      );
+      return fs2.readFile(outPath);
+    });
+    return { buffer: jpgBuf, mimeType: "image/jpeg" };
+  } catch {
+    return {
+      buffer,
+      mimeType: mimeType.startsWith("image/") ? mimeType : "image/jpeg"
+    };
+  }
+}
+
+// server/aiEnhancer.ts
+var ALLOWED_INPUT_MIMES = /* @__PURE__ */ new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "application/octet-stream"
+]);
+var AiEnhanceServiceError = class extends Error {
+  constructor(code, message) {
+    super(redactSecrets(message));
+    this.name = "AiEnhanceServiceError";
+    this.code = code;
+  }
+};
+function redactSecrets(input) {
+  if (!input) return "";
+  let out = input;
+  const apiKey = (process.env.AI_ENHANCE_API_KEY || "").trim();
+  if (apiKey && apiKey.length >= 4) {
+    out = out.split(apiKey).join("[REDACTED]");
+  }
+  out = out.replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [REDACTED]");
+  out = out.replace(
+    /(x-api-key\s*[:=]\s*)[^\s,;]+/gi,
+    "$1[REDACTED]"
+  );
+  out = out.replace(/(https?:\/\/)([^/\s:@]+):([^/\s@]+)@/gi, "$1[REDACTED]@");
+  return out;
+}
+function buildAuthHeaders() {
+  const apiKey = (process.env.AI_ENHANCE_API_KEY || "").trim();
+  if (!apiKey) return {};
+  return {
+    "X-API-Key": apiKey,
+    Authorization: `Bearer ${apiKey}`
+  };
+}
+function normalizeServiceBaseUrl(rawUrl) {
+  const trimmed = (rawUrl || "").trim().replace(/\/+$/, "");
+  if (!trimmed) {
+    throw new AiEnhanceServiceError(
+      "UNCONFIGURED_URL",
+      "URL layanan AI GPU belum diatur. Atur endpoint FastAPI GPU di tab Pengaturan atau variabel AI_ENHANCE_SERVICE_URL."
+    );
+  }
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new AiEnhanceServiceError(
+      "UNCONFIGURED_URL",
+      "Format URL layanan AI GPU tidak valid (gunakan http:// atau https://)."
+    );
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new AiEnhanceServiceError(
+      "UNCONFIGURED_URL",
+      "Protokol URL layanan AI GPU harus http:// atau https://."
+    );
+  }
+  return trimmed;
+}
+function describeModeLabel(mode, defaultScale) {
+  switch (mode) {
+    case "face":
+      return "Restorasi Wajah Natural (CodeFormer / GFPGAN)";
+    case "upscale":
+      return `Super-Resolution Real-ESRGAN ${defaultScale}\xD7`;
+    case "2x":
+      return "AI Super-Resolution 2\xD7";
+    case "4x":
+      return "AI Super-Resolution 4\xD7";
+    case "auto":
+    default:
+      return "AI Enhance Adaptif Otomatis";
+  }
+}
+var AiEnhanceOrchestrator = class {
+  constructor() {
+    this.activeJobs = 0;
+    this.waitQueue = [];
+  }
+  getQueueMetrics() {
+    return {
+      activeJobs: this.activeJobs,
+      queuedJobs: this.waitQueue.length
+    };
+  }
+  async acquireSlot(maxConcurrent, maxQueue) {
+    const safeConcurrency = Math.max(1, Math.min(8, maxConcurrent || 2));
+    const safeMaxQueue = Math.max(1, Math.min(60, maxQueue || 15));
+    if (this.activeJobs < safeConcurrency) {
+      this.activeJobs += 1;
+      return { queuedPosition: 0 };
+    }
+    if (this.waitQueue.length >= safeMaxQueue) {
+      throw new AiEnhanceServiceError(
+        "QUEUE_FULL",
+        `Antrean pemrosesan foto AI sedang penuh (${this.waitQueue.length}/${safeMaxQueue}). Silakan tunggu beberapa saat lalu coba kembali.`
+      );
+    }
+    const position = this.waitQueue.length + 1;
+    await new Promise((resolve) => {
+      this.waitQueue.push({ resolve });
+    });
+    return { queuedPosition: position };
+  }
+  releaseSlot() {
+    const next = this.waitQueue.shift();
+    if (next) {
+      next.resolve();
+      return;
+    }
+    this.activeJobs = Math.max(0, this.activeJobs - 1);
+  }
+  validateInputImage(buffer, mimeType, maxFileSizeMb) {
+    if (!Buffer.isBuffer(buffer) || buffer.length < 32) {
+      throw new AiEnhanceServiceError(
+        "INVALID_IMAGE",
+        "Berkas gambar kosong atau rusak."
+      );
+    }
+    const safeLimitMb = Math.max(1, Math.min(30, maxFileSizeMb || 15));
+    const maxBytes = safeLimitMb * 1024 * 1024;
+    if (buffer.length > maxBytes) {
+      const actualMb = (buffer.length / (1024 * 1024)).toFixed(2);
+      throw new AiEnhanceServiceError(
+        "FILE_TOO_LARGE",
+        `Ukuran foto (${actualMb} MB) melebihi batas aman pemrosesan AI (${safeLimitMb} MB).`
+      );
+    }
+    const normalizedMime = (mimeType || "").trim().toLowerCase().split(";")[0];
+    if (normalizedMime && !ALLOWED_INPUT_MIMES.has(normalizedMime)) {
+      throw new AiEnhanceServiceError(
+        "INVALID_IMAGE",
+        `Format berkas (${normalizedMime}) tidak didukung. Kirim foto berformat JPG, PNG, atau WebP statis.`
+      );
+    }
+    const sniffed = sniffImageMetadata(buffer);
+    if (sniffed.format !== "jpeg" && sniffed.format !== "png" && sniffed.format !== "webp") {
+      throw new AiEnhanceServiceError(
+        "INVALID_IMAGE",
+        "Header biner berkas bukan foto JPG, PNG, atau WebP yang valid."
+      );
+    }
+    if (sniffed.width && sniffed.height && (sniffed.width < 24 || sniffed.height < 24)) {
+      throw new AiEnhanceServiceError(
+        "INVALID_IMAGE",
+        `Dimensi foto terlalu kecil (${sniffed.width}\xD7${sniffed.height} px, minimal 24\xD724 px).`
+      );
+    }
+    const resolvedMime = sniffed.format === "png" ? "image/png" : sniffed.format === "webp" ? "image/webp" : "image/jpeg";
+    return {
+      format: sniffed.format,
+      mimeType: resolvedMime,
+      width: sniffed.width,
+      height: sniffed.height
+    };
+  }
+  async enhancePhoto(req) {
+    const { config } = req;
+    const baseUrl = normalizeServiceBaseUrl(config.serviceUrl);
+    const inputInfo = this.validateInputImage(
+      req.imageBuffer,
+      req.mimeType,
+      config.maxFileSizeMb
+    );
+    const modeLabel = describeModeLabel(req.mode, config.defaultScale);
+    const willQueue = this.activeJobs >= Math.max(1, config.maxConcurrentJobs || 2);
+    if (willQueue && config.sendProgressNotice && req.onStatus) {
+      const estPos = this.waitQueue.length + 1;
+      await req.onStatus(
+        `\u23F3 *Antrean AI Enhance (#${estPos})*
+Mode: *${modeLabel}*
+Foto sedang menunggu giliran server GPU...`
+      ).catch(() => {
+      });
+    }
+    await this.acquireSlot(config.maxConcurrentJobs, config.maxQueueSize);
+    if (!willQueue && config.sendProgressNotice && req.onStatus) {
+      await req.onStatus(
+        `\u23F3 *Memproses Foto dengan AI...*
+Mode: *${modeLabel}*
+Menjalankan analisis kualitas, deteksi wajah, dan super-resolution di server GPU.`
+      ).catch(() => {
+      });
+    }
+    let tempDir = null;
+    try {
+      tempDir = await fs3.mkdtemp(path2.join(os2.tmpdir(), "wabot-ai-hd-"));
+      const ext = inputInfo.format === "png" ? "png" : inputInfo.format === "webp" ? "webp" : "jpg";
+      const tempInputPath = path2.join(tempDir, `input.${ext}`);
+      await fs3.writeFile(tempInputPath, req.imageBuffer);
+      const stagedBytes = await fs3.readFile(tempInputPath);
+      const effectiveScale = req.scaleOverride ?? (req.mode === "2x" ? 2 : req.mode === "4x" ? 4 : config.defaultScale);
+      const effectiveFaceModel = req.faceModelOverride ?? config.preferredFaceModel;
+      const rawFidelity = req.fidelityOverride ?? config.faceFidelity;
+      const effectiveFidelity = Math.min(
+        0.98,
+        Math.max(0.05, Number.isFinite(rawFidelity) ? rawFidelity : 0.72)
+      );
+      const form = new FormData();
+      const fileBlob = new Blob([new Uint8Array(stagedBytes)], {
+        type: inputInfo.mimeType
+      });
+      form.append("image", fileBlob, `input.${ext}`);
+      form.append("mode", req.mode);
+      form.append("scale", String(effectiveScale));
+      form.append("face_model", effectiveFaceModel);
+      form.append("fidelity", effectiveFidelity.toFixed(2));
+      form.append("enable_denoise", config.autoDenoise ? "true" : "false");
+      form.append("enable_deblur", config.autoDeblur ? "true" : "false");
+      form.append("output_format", "jpeg");
+      const timeoutMs = Math.min(
+        3e5,
+        Math.max(1e4, config.timeoutMs || 9e4)
+      );
+      let response;
+      try {
+        response = await fetch(`${baseUrl}/v1/enhance`, {
+          method: "POST",
+          headers: buildAuthHeaders(),
+          body: form,
+          signal: AbortSignal.timeout(timeoutMs)
+        });
+      } catch (err) {
+        const errName = err instanceof Error ? err.name : "";
+        const errMsg = redactSecrets(
+          err instanceof Error ? err.message : String(err)
+        );
+        if (errName === "TimeoutError" || errName === "AbortError" || /timed?\s*out|aborted/i.test(errMsg)) {
+          throw new AiEnhanceServiceError(
+            "TIMEOUT",
+            `Pemrosesan AI melebihi batas waktu (${Math.round(
+              timeoutMs / 1e3
+            )} detik). Coba gunakan foto berukuran lebih ringan atau mode 2\xD7.`
+          );
+        }
+        throw new AiEnhanceServiceError(
+          "SERVICE_UNAVAILABLE",
+          "Layanan pemrosesan AI GPU sedang tidak aktif atau belum terhubung. Pastikan microservice Python FastAPI (/ai_service) berjalan dan URL-nya sesuai di Pengaturan."
+        );
+      }
+      if (!response.ok) {
+        let upstreamDetail = `HTTP ${response.status}`;
+        try {
+          const textBody = await response.text();
+          if (textBody) {
+            try {
+              const parsed = JSON.parse(textBody);
+              upstreamDetail = parsed.detail || parsed.error || textBody.slice(0, 220);
+            } catch {
+              upstreamDetail = textBody.slice(0, 220);
+            }
+          }
+        } catch {
+        }
+        upstreamDetail = redactSecrets(upstreamDetail);
+        if (response.status === 401 || response.status === 403) {
+          throw new AiEnhanceServiceError(
+            "UPSTREAM_ERROR",
+            "Autentikasi ke server AI GPU ditolak (periksa kesesuaian variabel server AI_ENHANCE_API_KEY)."
+          );
+        }
+        if (response.status === 429) {
+          throw new AiEnhanceServiceError(
+            "QUEUE_FULL",
+            "Server GPU sedang menangani antrean maksimum. Silakan coba beberapa saat lagi."
+          );
+        }
+        if (response.status === 504) {
+          throw new AiEnhanceServiceError("TIMEOUT", upstreamDetail);
+        }
+        throw new AiEnhanceServiceError(
+          "UPSTREAM_ERROR",
+          `Layanan AI gagal memproses foto: ${upstreamDetail}`
+        );
+      }
+      const outArrayBuf = await response.arrayBuffer();
+      const outBuffer = Buffer.from(outArrayBuf);
+      if (outBuffer.length < 64) {
+        throw new AiEnhanceServiceError(
+          "UPSTREAM_ERROR",
+          "Server AI mengembalikan berkas gambar kosong."
+        );
+      }
+      const outSniff = sniffImageMetadata(outBuffer);
+      if (outSniff.format !== "jpeg" && outSniff.format !== "png") {
+        throw new AiEnhanceServiceError(
+          "UPSTREAM_ERROR",
+          "Hasil keluaran dari server AI bukan berkas gambar JPG/PNG yang valid."
+        );
+      }
+      const outExt = outSniff.format === "png" ? "png" : "jpg";
+      const tempOutPath = path2.join(tempDir, `enhanced.${outExt}`);
+      await fs3.writeFile(tempOutPath, outBuffer);
+      let parsedMeta = {};
+      const rawMetaHeader = response.headers.get("x-enhance-meta");
+      if (rawMetaHeader) {
+        try {
+          parsedMeta = JSON.parse(rawMetaHeader);
+        } catch {
+          parsedMeta = {};
+        }
+      }
+      const meta = {
+        mode: req.mode,
+        inputWidth: Number(parsedMeta.input_width || inputInfo.width || 0),
+        inputHeight: Number(parsedMeta.input_height || inputInfo.height || 0),
+        outputWidth: Number(parsedMeta.output_width || outSniff.width || 0),
+        outputHeight: Number(parsedMeta.output_height || outSniff.height || 0),
+        effectiveScale: Number(parsedMeta.effective_scale || effectiveScale),
+        facesDetected: Number(parsedMeta.faces_detected || 0),
+        fidelityUsed: Number(parsedMeta.fidelity_used ?? effectiveFidelity),
+        faceModelUsed: parsedMeta.face_model_used ? String(parsedMeta.face_model_used) : null,
+        stagesExecuted: Array.isArray(parsedMeta.stages_executed) ? parsedMeta.stages_executed.map(String) : [],
+        modelsUsed: Array.isArray(parsedMeta.models_used) ? parsedMeta.models_used.map(String) : ["Real-ESRGAN"],
+        inputSharpness: Number(parsedMeta.input_sharpness || 0),
+        outputSharpness: Number(parsedMeta.output_sharpness || 0),
+        noiseSigma: Number(parsedMeta.noise_sigma || 0),
+        durationMs: Number(parsedMeta.duration_ms || 0),
+        note: String(
+          parsedMeta.note || "Detail mikro direkonstruksi oleh model AI pretrained (estimasi restorasi, bukan rekaman optik asli)."
+        )
+      };
+      return {
+        buffer: outBuffer,
+        mimeType: outSniff.format === "png" ? "image/png" : "image/jpeg",
+        meta
+      };
+    } finally {
+      this.releaseSlot();
+      if (tempDir) {
+        await fs3.rm(tempDir, { recursive: true, force: true }).catch(() => {
+        });
+      }
+    }
+  }
+};
+var aiEnhancer = new AiEnhanceOrchestrator();
+async function checkAiServiceHealth(config) {
+  const localMetrics = aiEnhancer.getQueueMetrics();
+  const apiKeyConfigured = Boolean(
+    (process.env.AI_ENHANCE_API_KEY || "").trim()
+  );
+  const rawUrl = (config.serviceUrl || "").trim().replace(/\/+$/, "");
+  if (!rawUrl) {
+    return {
+      ok: false,
+      reachable: false,
+      serviceUrl: "",
+      apiKeyConfigured,
+      botActiveJobs: localMetrics.activeJobs,
+      botQueuedJobs: localMetrics.queuedJobs,
+      error: "URL layanan AI GPU belum diisi."
+    };
+  }
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(`${rawUrl}/health`, {
+      method: "GET",
+      headers: buildAuthHeaders(),
+      signal: AbortSignal.timeout(6e3)
+    });
+    const latencyMs = Date.now() - startedAt;
+    if (!response.ok) {
+      return {
+        ok: false,
+        reachable: true,
+        serviceUrl: rawUrl,
+        apiKeyConfigured,
+        botActiveJobs: localMetrics.activeJobs,
+        botQueuedJobs: localMetrics.queuedJobs,
+        latencyMs,
+        error: response.status === 401 ? "API key server tidak cocok (HTTP 401)." : `Respon tidak normal dari server GPU (HTTP ${response.status}).`
+      };
+    }
+    const body = await response.json();
+    return {
+      ok: true,
+      reachable: true,
+      serviceUrl: rawUrl,
+      apiKeyConfigured,
+      device: body.device ? String(body.device) : void 0,
+      gpuName: body.gpu_name ? String(body.gpu_name) : null,
+      vramTotalGb: typeof body.vram_total_gb === "number" ? body.vram_total_gb : null,
+      fp16: Boolean(body.fp16),
+      weightsPresent: body.weights_present && typeof body.weights_present === "object" ? body.weights_present : void 0,
+      upstreamActiveJobs: typeof body.active_jobs === "number" ? body.active_jobs : void 0,
+      upstreamQueuedJobs: typeof body.queued_jobs === "number" ? body.queued_jobs : void 0,
+      botActiveJobs: localMetrics.activeJobs,
+      botQueuedJobs: localMetrics.queuedJobs,
+      latencyMs
+    };
+  } catch (err) {
+    const msg = redactSecrets(err instanceof Error ? err.message : String(err));
+    return {
+      ok: false,
+      reachable: false,
+      serviceUrl: rawUrl,
+      apiKeyConfigured,
+      botActiveJobs: localMetrics.activeJobs,
+      botQueuedJobs: localMetrics.queuedJobs,
+      error: /timeout|aborted/i.test(msg) ? "Koneksi ke server GPU timeout (6 detik)." : "Server FastAPI GPU belum aktif atau tidak terjangkau."
+    };
+  }
+}
+async function pushRuntimeConfigToAiService(config) {
+  const rawUrl = (config.serviceUrl || "").trim().replace(/\/+$/, "");
+  if (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://")) {
+    return;
+  }
+  try {
+    await fetch(`${rawUrl}/v1/config`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...buildAuthHeaders()
+      },
+      body: JSON.stringify({
+        default_face_model: config.preferredFaceModel,
+        default_fidelity: config.faceFidelity
+      }),
+      signal: AbortSignal.timeout(4e3)
+    });
+  } catch {
+  }
+}
+
+// server/stateStore.ts
+import fs6 from "node:fs";
+import path4 from "node:path";
+
+// server/cloudSync.ts
+import fs4 from "node:fs/promises";
+import path3 from "node:path";
 import pg from "pg";
 var { Pool } = pg;
 var mockKvStore = /* @__PURE__ */ new Map();
@@ -1484,20 +2869,20 @@ var CloudSessionSync = class {
       const { rows } = await this.pool.query(
         "SELECT key, value FROM wabot_kv"
       );
-      const authDir = path.join(dataDir, ".baileys_auth");
-      await fs.mkdir(authDir, { recursive: true });
+      const authDir = path3.join(dataDir, ".baileys_auth");
+      await fs4.mkdir(authDir, { recursive: true });
       let restoredAuthFiles = 0;
       for (const row of rows) {
         if (row.key === "state:bot-state.json") {
-          const statePath = path.join(dataDir, ".bot-state.json");
-          await fs.writeFile(statePath, row.value, "utf-8");
+          const statePath = path3.join(dataDir, ".bot-state.json");
+          await fs4.writeFile(statePath, row.value, "utf-8");
           this.lastSyncedState = row.value;
         } else if (row.key.startsWith("auth:")) {
           const rawName = row.key.slice("auth:".length);
-          const safeName = path.basename(rawName);
+          const safeName = path3.basename(rawName);
           if (!safeName || safeName !== rawName) continue;
-          const filePath = path.join(authDir, safeName);
-          await fs.writeFile(filePath, row.value, "utf-8");
+          const filePath = path3.join(authDir, safeName);
+          await fs4.writeFile(filePath, row.value, "utf-8");
           this.lastSyncedAuth.set(safeName, row.value);
           restoredAuthFiles += 1;
         }
@@ -1531,7 +2916,7 @@ var CloudSessionSync = class {
       if (!pool) return;
       let entries = [];
       try {
-        entries = await fs.readdir(authDir);
+        entries = await fs4.readdir(authDir);
       } catch {
         return;
       }
@@ -1541,7 +2926,7 @@ var CloudSessionSync = class {
         if (!name.endsWith(".json")) continue;
         currentFiles.add(name);
         try {
-          const content = await fs.readFile(path.join(authDir, name), "utf-8");
+          const content = await fs4.readFile(path3.join(authDir, name), "utf-8");
           if (this.lastSyncedAuth.get(name) !== content) {
             upserts.push({ key: `auth:${name}`, value: content });
           }
@@ -1779,19 +3164,19 @@ var PacedOutboundQueue = class {
 var queueEngine = new PacedOutboundQueue();
 
 // server/storagePath.ts
-import fs2 from "node:fs";
+import fs5 from "node:fs";
 function resolveDataDir() {
   const explicit = (process.env.DATA_DIR || "").trim();
   if (explicit) {
     try {
-      fs2.mkdirSync(explicit, { recursive: true });
+      fs5.mkdirSync(explicit, { recursive: true });
       return explicit;
     } catch {
     }
   }
   try {
-    if (fs2.existsSync("/data") && fs2.statSync("/data").isDirectory()) {
-      fs2.accessSync("/data", fs2.constants.W_OK);
+    if (fs5.existsSync("/data") && fs5.statSync("/data").isDirectory()) {
+      fs5.accessSync("/data", fs5.constants.W_OK);
       return "/data";
     }
   } catch {
@@ -1925,7 +3310,7 @@ var WebhookDispatcher = class {
 var webhookDispatcher = new WebhookDispatcher();
 
 // server/stateStore.ts
-var STATE_FILE = path2.join(resolveDataDir(), ".bot-state.json");
+var STATE_FILE = path4.join(resolveDataDir(), ".bot-state.json");
 var DEFAULT_WEBHOOK_CONFIG = {
   enabled: false,
   url: "",
@@ -1971,6 +3356,27 @@ var DEFAULT_ANTIBAN_CONFIG = {
   ownerNumber: OFFICIAL_OWNER_NUMBER,
   browserProfile: "windows_chrome"
 };
+function buildInitialAiEnhanceConfig() {
+  const envUrl = (process.env.AI_ENHANCE_SERVICE_URL || "").trim();
+  const envFace = (process.env.AI_ENHANCE_FACE_MODEL || "").trim().toLowerCase();
+  const envFidelity = Number(process.env.AI_ENHANCE_FIDELITY);
+  const envConc = Number(process.env.AI_ENHANCE_CONCURRENCY);
+  const envTimeout = Number(process.env.AI_ENHANCE_TIMEOUT_MS);
+  const envMaxMb = Number(process.env.AI_ENHANCE_MAX_FILE_MB);
+  return {
+    ...DEFAULT_AI_ENHANCE_CONFIG,
+    serviceUrl: (envUrl || DEFAULT_AI_ENHANCE_CONFIG.serviceUrl).replace(
+      /\/+$/,
+      ""
+    ),
+    preferredFaceModel: envFace === "gfpgan" ? "gfpgan" : DEFAULT_AI_ENHANCE_CONFIG.preferredFaceModel,
+    faceFidelity: Number.isFinite(envFidelity) && envFidelity >= 0.05 && envFidelity <= 0.98 ? envFidelity : DEFAULT_AI_ENHANCE_CONFIG.faceFidelity,
+    maxConcurrentJobs: Number.isFinite(envConc) && envConc >= 1 && envConc <= 8 ? Math.round(envConc) : DEFAULT_AI_ENHANCE_CONFIG.maxConcurrentJobs,
+    timeoutMs: Number.isFinite(envTimeout) && envTimeout >= 1e4 ? Math.round(envTimeout) : DEFAULT_AI_ENHANCE_CONFIG.timeoutMs,
+    maxFileSizeMb: Number.isFinite(envMaxMb) && envMaxMb >= 1 && envMaxMb <= 30 ? Math.round(envMaxMb) : DEFAULT_AI_ENHANCE_CONFIG.maxFileSizeMb
+  };
+}
+var INITIAL_AI_ENHANCE_CONFIG = buildInitialAiEnhanceConfig();
 var DEFAULT_CONFIG = {
   prefix: ".",
   botName: "WABot",
@@ -1990,6 +3396,7 @@ var DEFAULT_CONFIG = {
   },
   groupOverrides: {},
   antiBan: { ...DEFAULT_ANTIBAN_CONFIG },
+  aiEnhance: { ...INITIAL_AI_ENHANCE_CONFIG },
   lockSettingsManualOnly: false,
   webhook: { ...DEFAULT_WEBHOOK_CONFIG },
   autoResponder: [...DEFAULT_AUTORESPONDER_RULES]
@@ -2071,6 +3478,7 @@ var BotStateStore = class {
       groupSettings: { ...DEFAULT_CONFIG.groupSettings },
       groupOverrides: {},
       antiBan: { ...DEFAULT_ANTIBAN_CONFIG },
+      aiEnhance: { ...INITIAL_AI_ENHANCE_CONFIG },
       lockSettingsManualOnly: true,
       webhook: { ...DEFAULT_WEBHOOK_CONFIG },
       autoResponder: [...DEFAULT_AUTORESPONDER_RULES]
@@ -2101,8 +3509,8 @@ var BotStateStore = class {
   }
   loadFromDisk() {
     try {
-      if (fs3.existsSync(STATE_FILE)) {
-        const raw = JSON.parse(fs3.readFileSync(STATE_FILE, "utf-8"));
+      if (fs6.existsSync(STATE_FILE)) {
+        const raw = JSON.parse(fs6.readFileSync(STATE_FILE, "utf-8"));
         let migrated = false;
         if (raw.config) {
           const mergedConfig = {
@@ -2124,6 +3532,16 @@ var BotStateStore = class {
             antiBan: {
               ...DEFAULT_ANTIBAN_CONFIG,
               ...raw.config.antiBan || {}
+            },
+            aiEnhance: {
+              ...INITIAL_AI_ENHANCE_CONFIG,
+              ...raw.config.aiEnhance || {},
+              ...process.env.AI_ENHANCE_SERVICE_URL?.trim() ? {
+                serviceUrl: process.env.AI_ENHANCE_SERVICE_URL.trim().replace(
+                  /\/+$/,
+                  ""
+                )
+              } : {}
             },
             lockSettingsManualOnly: raw.config.lockSettingsManualOnly !== void 0 ? Boolean(raw.config.lockSettingsManualOnly) : true,
             webhook: {
@@ -2185,8 +3603,8 @@ var BotStateStore = class {
       2
     );
     try {
-      fs3.mkdirSync(path2.dirname(STATE_FILE), { recursive: true });
-      fs3.writeFileSync(STATE_FILE, serialized);
+      fs6.mkdirSync(path4.dirname(STATE_FILE), { recursive: true });
+      fs6.writeFileSync(STATE_FILE, serialized);
     } catch {
     }
     cloudSync.scheduleStateSync(serialized);
@@ -2250,6 +3668,10 @@ var BotStateStore = class {
       antiBan: {
         ...this.config.antiBan,
         ...patch.antiBan || {}
+      },
+      aiEnhance: {
+        ...this.config.aiEnhance,
+        ...patch.aiEnhance || {}
       },
       lockSettingsManualOnly: patch.lockSettingsManualOnly !== void 0 ? patch.lockSettingsManualOnly : this.config.lockSettingsManualOnly,
       webhook: {
@@ -2426,9 +3848,15 @@ var BotStateStore = class {
     }
     return `/api/stickers/${id}.webp`;
   }
-  storeHdMedia(buffer, mimeType, fileName) {
+  storeHdMedia(buffer, mimeType, fileName, ttlMs) {
     const id = `hd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     this.hdMediaCache.set(id, { buffer, mimeType, fileName });
+    if (ttlMs && ttlMs > 0) {
+      const timer = setTimeout(() => {
+        this.hdMediaCache.delete(id);
+      }, ttlMs);
+      timer.unref?.();
+    }
     const maxItems = 8;
     const maxTotalBytes = 36 * 1024 * 1024;
     let totalBytes = 0;
@@ -2489,919 +3917,6 @@ function evaluateAutoResponder(text, context) {
     }
   }
   return { matched: false };
-}
-
-// server/imageAdapter.ts
-import { execFile } from "node:child_process";
-import fs5 from "node:fs/promises";
-import { createRequire as createRequire2 } from "node:module";
-import os from "node:os";
-import path3 from "node:path";
-import { promisify } from "node:util";
-import { initWasm, Resvg } from "@resvg/resvg-wasm";
-import WebP from "node-webpmux";
-
-// server/ffmpegBin.ts
-import { spawnSync } from "node:child_process";
-import fs4 from "node:fs";
-import { createRequire } from "node:module";
-var require2 = createRequire(import.meta.url);
-var cachedBin = null;
-function getFfmpegBin() {
-  if (cachedBin) return cachedBin;
-  try {
-    const check = spawnSync("ffmpeg", ["-version"], {
-      stdio: "ignore",
-      timeout: 3e3
-    });
-    if (check.status === 0) {
-      cachedBin = "ffmpeg";
-      return cachedBin;
-    }
-  } catch {
-  }
-  try {
-    const ffmpegStatic = require2("ffmpeg-static");
-    if (ffmpegStatic && fs4.existsSync(ffmpegStatic)) {
-      try {
-        fs4.chmodSync(ffmpegStatic, 493);
-      } catch {
-      }
-      cachedBin = ffmpegStatic;
-      return cachedBin;
-    }
-  } catch {
-  }
-  cachedBin = "ffmpeg";
-  return cachedBin;
-}
-
-// server/imageAdapter.ts
-var execFileAsync = promisify(execFile);
-var nodeRequire = createRequire2(import.meta.url);
-var cachedSharp;
-function getOptionalSharp() {
-  if (cachedSharp !== void 0) return cachedSharp;
-  try {
-    const mod = nodeRequire("sharp");
-    const fn = mod?.default || mod;
-    if (typeof fn === "function") {
-      cachedSharp = fn;
-      return cachedSharp;
-    }
-  } catch {
-  }
-  cachedSharp = null;
-  return null;
-}
-function getActiveImageBackend() {
-  return getOptionalSharp() ? "sharp-native" : "resvg-wasm+ffmpeg";
-}
-async function withTempDir(fn) {
-  const dir = await fs5.mkdtemp(path3.join(os.tmpdir(), "wabot-img-"));
-  try {
-    return await fn(dir);
-  } finally {
-    await fs5.rm(dir, { recursive: true, force: true }).catch(() => {
-    });
-  }
-}
-var wasmInitPromise = null;
-var cachedFontsPromise = null;
-async function ensureResvgInitialized() {
-  if (!wasmInitPromise) {
-    wasmInitPromise = (async () => {
-      let wasmPath = path3.join(
-        process.cwd(),
-        "node_modules",
-        "@resvg",
-        "resvg-wasm",
-        "index_bg.wasm"
-      );
-      try {
-        const entryPath = nodeRequire.resolve("@resvg/resvg-wasm");
-        wasmPath = path3.join(path3.dirname(entryPath), "index_bg.wasm");
-      } catch {
-      }
-      const wasmBytes = await fs5.readFile(wasmPath);
-      await initWasm(wasmBytes);
-    })().catch((err) => {
-      wasmInitPromise = null;
-      throw err;
-    });
-  }
-  return wasmInitPromise;
-}
-async function loadFontBuffersOnce() {
-  if (!cachedFontsPromise) {
-    cachedFontsPromise = (async () => {
-      const fontGroups = [
-        {
-          family: "Roboto",
-          files: [
-            "/system/fonts/Roboto-Regular.ttf",
-            "/system/fonts/Roboto-Bold.ttf",
-            "/system/fonts/DroidSans.ttf"
-          ]
-        },
-        {
-          family: "DejaVu Sans",
-          files: [
-            "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans.ttf",
-            "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-          ]
-        },
-        {
-          family: "Liberation Sans",
-          files: [
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
-          ]
-        }
-      ];
-      for (const group of fontGroups) {
-        const loaded = [];
-        for (const fpath of group.files) {
-          try {
-            const buf = await fs5.readFile(fpath);
-            loaded.push(new Uint8Array(buf));
-            if (loaded.length >= 2) break;
-          } catch {
-          }
-        }
-        if (loaded.length > 0) {
-          return { buffers: loaded, family: group.family };
-        }
-      }
-      return { buffers: [], family: "sans-serif" };
-    })();
-  }
-  return cachedFontsPromise;
-}
-async function renderSvgViaResvgWasm(svg) {
-  await ensureResvgInitialized();
-  const fonts = await loadFontBuffersOnce();
-  const normalizedSvg = fonts.buffers.length > 0 ? svg.replace(
-    /font-family="([^"]*)"/g,
-    (_m, existing) => `font-family="${fonts.family}, ${existing}"`
-  ) : svg;
-  const resvg = new Resvg(normalizedSvg, {
-    font: fonts.buffers.length > 0 ? {
-      fontBuffers: fonts.buffers,
-      defaultFontFamily: fonts.family,
-      sansSerifFamily: fonts.family
-    } : {
-      loadSystemFonts: true
-    }
-  });
-  try {
-    const rendered = resvg.render();
-    try {
-      return Buffer.from(rendered.asPng());
-    } finally {
-      rendered.free();
-    }
-  } finally {
-    resvg.free();
-  }
-}
-function xmlEscapeAttr(raw) {
-  return raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-}
-async function measureSvgTextWidth(text, fontSize, fontWeight = 400) {
-  if (!text) return 0;
-  const trimmed = text.replace(/\r/g, "");
-  if (!trimmed.trim()) {
-    return trimmed.length * fontSize * 0.28;
-  }
-  await ensureResvgInitialized();
-  const fonts = await loadFontBuffersOnce();
-  const familyAttr = fonts.buffers.length > 0 ? `${fonts.family}, Arial, Helvetica, DejaVu Sans, sans-serif` : "Arial, Helvetica, DejaVu Sans, sans-serif";
-  const probeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="256"><text x="32" y="128" xml:space="preserve" font-family="${familyAttr}" font-size="${fontSize}" font-weight="${fontWeight}">${xmlEscapeAttr(
-    trimmed
-  )}</text></svg>`;
-  const resvg = new Resvg(probeSvg, {
-    font: fonts.buffers.length > 0 ? {
-      fontBuffers: fonts.buffers,
-      defaultFontFamily: fonts.family,
-      sansSerifFamily: fonts.family
-    } : {
-      loadSystemFonts: true
-    }
-  });
-  let bboxWidth = 0;
-  try {
-    const bbox = resvg.getBBox();
-    if (bbox) {
-      try {
-        bboxWidth = Math.max(0, bbox.x - 32 + bbox.width);
-      } finally {
-        bbox.free();
-      }
-    }
-  } finally {
-    resvg.free();
-  }
-  let emojiExtra = 0;
-  for (const ch of Array.from(trimmed)) {
-    const cp = ch.codePointAt(0) || 0;
-    if (cp >= 127744) {
-      emojiExtra += fontSize * 0.35;
-    }
-  }
-  const trailingSpaces = trimmed.length - trimmed.trimEnd().length;
-  const spaceExtra = trailingSpaces > 0 ? trailingSpaces * fontSize * 0.28 : 0;
-  return Math.max(bboxWidth + spaceExtra, emojiExtra > 0 ? bboxWidth + emojiExtra * 0.4 : 0);
-}
-async function renderSvgConsistentToWebp(svg, quality = 92) {
-  const pngBuf = await renderSvgViaResvgWasm(svg);
-  return pngBufferToWebp(pngBuf, quality);
-}
-function sniffImageMetadata(buf) {
-  if (buf.length >= 24 && buf[0] === 137 && buf[1] === 80 && buf[2] === 78 && buf[3] === 71) {
-    return {
-      format: "png",
-      width: buf.readUInt32BE(16),
-      height: buf.readUInt32BE(20)
-    };
-  }
-  if (buf.length >= 10 && buf.toString("ascii", 0, 3) === "GIF") {
-    return {
-      format: "gif",
-      width: buf.readUInt16LE(6),
-      height: buf.readUInt16LE(8)
-    };
-  }
-  if (buf.length >= 30 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") {
-    const chunk = buf.toString("ascii", 12, 16);
-    if (chunk === "VP8X" && buf.length >= 30) {
-      const w = 1 + (buf[24] | buf[25] << 8 | buf[26] << 16);
-      const h = 1 + (buf[27] | buf[28] << 8 | buf[29] << 16);
-      return { format: "webp", width: w, height: h };
-    }
-    if (chunk === "VP8 " && buf.length >= 30) {
-      const w = buf.readUInt16LE(26) & 16383;
-      const h = buf.readUInt16LE(28) & 16383;
-      return { format: "webp", width: w, height: h };
-    }
-    if (chunk === "VP8L" && buf.length >= 25) {
-      const b0 = buf[21];
-      const b1 = buf[22];
-      const b2 = buf[23];
-      const b3 = buf[24];
-      const w = 1 + ((b1 & 63) << 8 | b0);
-      const h = 1 + ((b3 & 15) << 10 | b2 << 2 | (b1 & 192) >> 6);
-      return { format: "webp", width: w, height: h };
-    }
-    return { format: "webp" };
-  }
-  if (buf.length >= 4 && buf[0] === 255 && buf[1] === 216) {
-    let offset = 2;
-    while (offset + 9 < buf.length) {
-      if (buf[offset] !== 255) {
-        offset += 1;
-        continue;
-      }
-      const marker = buf[offset + 1];
-      if (marker === 255) {
-        offset += 1;
-        continue;
-      }
-      if (marker === 216 || marker === 217) {
-        offset += 2;
-        continue;
-      }
-      const segLen = buf.readUInt16BE(offset + 2);
-      if (segLen < 2) break;
-      if (marker >= 192 && marker <= 195 || marker >= 197 && marker <= 199 || marker >= 201 && marker <= 203 || marker >= 205 && marker <= 207) {
-        const h = buf.readUInt16BE(offset + 5);
-        const w = buf.readUInt16BE(offset + 7);
-        return { format: "jpeg", width: w, height: h };
-      }
-      offset += 2 + segLen;
-    }
-    return { format: "jpeg" };
-  }
-  return { format: "unknown" };
-}
-async function renderSvgToPng(svg) {
-  const sharp = getOptionalSharp();
-  if (sharp) {
-    return sharp(Buffer.from(svg)).png().toBuffer();
-  }
-  return renderSvgViaResvgWasm(svg);
-}
-async function pngBufferToWebp(pngBuffer, quality = 88) {
-  const sharp = getOptionalSharp();
-  if (sharp) {
-    return sharp(pngBuffer).webp({ quality }).toBuffer();
-  }
-  return withTempDir(async (dir) => {
-    const inPng = path3.join(dir, "in.png");
-    const outWebp = path3.join(dir, "out.webp");
-    await fs5.writeFile(inPng, pngBuffer);
-    await execFileAsync(
-      getFfmpegBin(),
-      [
-        "-y",
-        "-i",
-        inPng,
-        "-vcodec",
-        "libwebp",
-        "-lossless",
-        "0",
-        "-compression_level",
-        "4",
-        "-q:v",
-        String(quality),
-        "-an",
-        outWebp
-      ],
-      { timeout: 2e4 }
-    );
-    return fs5.readFile(outWebp);
-  });
-}
-async function renderSvgToWebp(svg, quality = 90) {
-  const sharp = getOptionalSharp();
-  if (sharp) {
-    return sharp(Buffer.from(svg)).webp({ quality }).toBuffer();
-  }
-  const pngBuf = await renderSvgViaResvgWasm(svg);
-  return pngBufferToWebp(pngBuf, quality);
-}
-async function renderBratFramePngAdapter(svg) {
-  const sharp = getOptionalSharp();
-  if (sharp) {
-    const lowFiPng = await sharp(Buffer.from(svg)).resize(330, 330).blur(1.15).png().toBuffer();
-    return sharp(lowFiPng).resize(512, 512, { kernel: "linear" }).png().toBuffer();
-  }
-  const basePng = await renderSvgViaResvgWasm(svg);
-  return withTempDir(async (dir) => {
-    const inPng = path3.join(dir, "brat_in.png");
-    const outPng = path3.join(dir, "brat_out.png");
-    await fs5.writeFile(inPng, basePng);
-    await execFileAsync(
-      getFfmpegBin(),
-      [
-        "-y",
-        "-i",
-        inPng,
-        "-vf",
-        "scale=330:330:flags=bilinear,gblur=sigma=1.15,scale=512:512:flags=bilinear",
-        "-frames:v",
-        "1",
-        outPng
-      ],
-      { timeout: 2e4 }
-    );
-    return fs5.readFile(outPng);
-  });
-}
-async function imageBufferToStickerWebp(imageBuffer) {
-  const sharp = getOptionalSharp();
-  if (sharp) {
-    return sharp(imageBuffer, { animated: true }).rotate().resize(512, 512, {
-      fit: "contain",
-      background: { r: 0, g: 0, b: 0, alpha: 0 }
-    }).webp({ quality: 84 }).toBuffer();
-  }
-  const meta = sniffImageMetadata(imageBuffer);
-  if (meta.format === "webp") {
-    try {
-      const wimg = new WebP.Image();
-      await wimg.load(imageBuffer);
-      if (wimg.hasAnim) {
-        return imageBuffer;
-      }
-    } catch {
-    }
-  }
-  return withTempDir(async (dir) => {
-    const ext = meta.format === "png" ? "png" : meta.format === "gif" ? "gif" : meta.format === "webp" ? "webp" : "jpg";
-    const inPath = path3.join(dir, `in.${ext}`);
-    const outPath = path3.join(dir, "out.webp");
-    await fs5.writeFile(inPath, imageBuffer);
-    if (meta.format === "gif") {
-      await execFileAsync(
-        getFfmpegBin(),
-        [
-          "-y",
-          "-i",
-          inPath,
-          "-t",
-          "7",
-          "-vf",
-          "fps=12,scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,format=rgba,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000",
-          "-vcodec",
-          "libwebp",
-          "-lossless",
-          "0",
-          "-compression_level",
-          "4",
-          "-q:v",
-          "75",
-          "-loop",
-          "0",
-          "-an",
-          "-vsync",
-          "0",
-          outPath
-        ],
-        { timeout: 25e3 }
-      );
-    } else {
-      await execFileAsync(
-        getFfmpegBin(),
-        [
-          "-y",
-          "-i",
-          inPath,
-          "-vf",
-          "scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,format=rgba,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000",
-          "-vcodec",
-          "libwebp",
-          "-lossless",
-          "0",
-          "-compression_level",
-          "4",
-          "-q:v",
-          "84",
-          "-an",
-          outPath
-        ],
-        { timeout: 2e4 }
-      );
-    }
-    return fs5.readFile(outPath);
-  });
-}
-async function webpBufferToPng(webpBuffer) {
-  const sharp = getOptionalSharp();
-  if (sharp) {
-    return sharp(webpBuffer, { animated: false }).png().toBuffer();
-  }
-  return withTempDir(async (dir) => {
-    let staticFrameBuf = webpBuffer;
-    try {
-      const wimg = new WebP.Image();
-      await wimg.load(webpBuffer);
-      if (wimg.hasAnim) {
-        const demuxed = await wimg.demux({ buffers: true, frame: 0 });
-        if (demuxed && demuxed[0]) {
-          staticFrameBuf = Buffer.from(demuxed[0]);
-        }
-      }
-    } catch {
-    }
-    const inPath = path3.join(dir, "in.webp");
-    const outPath = path3.join(dir, "out.png");
-    await fs5.writeFile(inPath, staticFrameBuf);
-    await execFileAsync(
-      getFfmpegBin(),
-      ["-y", "-i", inPath, "-frames:v", "1", outPath],
-      { timeout: 2e4 }
-    );
-    return fs5.readFile(outPath);
-  });
-}
-async function webpStickerToMp4Buffer(webpBuffer) {
-  const sharp = getOptionalSharp();
-  if (sharp) {
-    return withTempDir(async (dir) => {
-      const meta = await sharp(webpBuffer, { animated: true }).metadata();
-      const pages = Math.min(meta.pages || 1, 90);
-      const pageHeight = meta.pageHeight || (meta.height && meta.pages ? Math.floor(meta.height / meta.pages) : meta.height || 512);
-      const width = meta.width || 512;
-      if (pages <= 1) {
-        const singlePng = path3.join(dir, "frame.png");
-        const outMp42 = path3.join(dir, "out.mp4");
-        await sharp(webpBuffer).flatten({ background: "#111114" }).resize(512, 512, { fit: "contain", background: "#111114" }).png().toFile(singlePng);
-        await execFileAsync(
-          getFfmpegBin(),
-          [
-            "-y",
-            "-loop",
-            "1",
-            "-i",
-            singlePng,
-            "-t",
-            "3",
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-            outMp42
-          ],
-          { timeout: 2e4 }
-        );
-        return fs5.readFile(outMp42);
-      }
-      const delays = meta.delay || [];
-      const avgDelayMs = delays.length > 0 ? Math.max(
-        40,
-        Math.round(
-          delays.reduce((a, b) => a + b, 0) / delays.length
-        )
-      ) : 90;
-      const fps = Math.max(4, Math.min(25, Math.round(1e3 / avgDelayMs)));
-      const stripPng = await sharp(webpBuffer, { animated: true }).flatten({ background: "#111114" }).png().toBuffer();
-      for (let i = 0; i < pages; i += 1) {
-        const framePath = path3.join(
-          dir,
-          `frame_${String(i).padStart(3, "0")}.png`
-        );
-        await sharp(stripPng).extract({
-          left: 0,
-          top: i * pageHeight,
-          width,
-          height: pageHeight
-        }).resize(512, 512, { fit: "contain", background: "#111114" }).png().toFile(framePath);
-      }
-      const outMp4 = path3.join(dir, "out.mp4");
-      await execFileAsync(
-        getFfmpegBin(),
-        [
-          "-y",
-          "-framerate",
-          String(fps),
-          "-i",
-          path3.join(dir, "frame_%03d.png"),
-          "-vf",
-          "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-          "-c:v",
-          "libx264",
-          "-pix_fmt",
-          "yuv420p",
-          "-movflags",
-          "+faststart",
-          outMp4
-        ],
-        { timeout: 25e3 }
-      );
-      return fs5.readFile(outMp4);
-    });
-  }
-  return withTempDir(async (dir) => {
-    const wimg = new WebP.Image();
-    await wimg.load(webpBuffer);
-    if (!wimg.hasAnim || !wimg.frames || wimg.frames.length <= 1) {
-      const inPath = path3.join(dir, "single.webp");
-      const outMp42 = path3.join(dir, "out.mp4");
-      await fs5.writeFile(inPath, webpBuffer);
-      await execFileAsync(
-        getFfmpegBin(),
-        [
-          "-y",
-          "-loop",
-          "1",
-          "-i",
-          inPath,
-          "-t",
-          "3",
-          "-vf",
-          "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#111114,format=yuv420p",
-          "-c:v",
-          "libx264",
-          "-pix_fmt",
-          "yuv420p",
-          "-movflags",
-          "+faststart",
-          outMp42
-        ],
-        { timeout: 25e3 }
-      );
-      return fs5.readFile(outMp42);
-    }
-    const totalFrames = Math.min(wimg.frames.length, 90);
-    const demuxed = await wimg.demux({ buffers: true, start: 0, end: totalFrames - 1 }) || [];
-    const delays = wimg.frames.slice(0, totalFrames).map((f) => f.delay || 90);
-    const avgDelayMs = delays.length > 0 ? Math.max(
-      40,
-      Math.round(delays.reduce((a, b) => a + b, 0) / delays.length)
-    ) : 90;
-    const fps = Math.max(4, Math.min(25, Math.round(1e3 / avgDelayMs)));
-    for (let i = 0; i < demuxed.length; i += 1) {
-      await fs5.writeFile(
-        path3.join(dir, `frame_${String(i).padStart(3, "0")}.webp`),
-        Buffer.from(demuxed[i])
-      );
-    }
-    const outMp4 = path3.join(dir, "out.mp4");
-    await execFileAsync(
-      getFfmpegBin(),
-      [
-        "-y",
-        "-framerate",
-        String(fps),
-        "-i",
-        path3.join(dir, "frame_%03d.webp"),
-        "-vf",
-        "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#111114,format=yuv420p",
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-        outMp4
-      ],
-      { timeout: 25e3 }
-    );
-    return fs5.readFile(outMp4);
-  });
-}
-async function compositeMemeToWebp(sourceBuffer, overlaySvg) {
-  const sharp = getOptionalSharp();
-  if (sharp) {
-    return sharp(sourceBuffer).rotate().resize(512, 512, { fit: "cover" }).composite([{ input: Buffer.from(overlaySvg), top: 0, left: 0 }]).webp({ quality: 88 }).toBuffer();
-  }
-  const overlayPng = await renderSvgViaResvgWasm(overlaySvg);
-  return withTempDir(async (dir) => {
-    const meta = sniffImageMetadata(sourceBuffer);
-    const ext = meta.format === "png" ? "png" : meta.format === "webp" ? "webp" : "jpg";
-    const baseIn = path3.join(dir, `base.${ext}`);
-    const overIn = path3.join(dir, "overlay.png");
-    const outWebp = path3.join(dir, "meme.webp");
-    await fs5.writeFile(baseIn, sourceBuffer);
-    await fs5.writeFile(overIn, overlayPng);
-    await execFileAsync(
-      getFfmpegBin(),
-      [
-        "-y",
-        "-i",
-        baseIn,
-        "-i",
-        overIn,
-        "-filter_complex",
-        "[0:v]scale=512:512:force_original_aspect_ratio=increase,crop=512:512,format=rgba[bg];[1:v]format=rgba[ov];[bg][ov]overlay=0:0:format=auto",
-        "-vcodec",
-        "libwebp",
-        "-lossless",
-        "0",
-        "-compression_level",
-        "4",
-        "-q:v",
-        "88",
-        "-an",
-        outWebp
-      ],
-      { timeout: 25e3 }
-    );
-    return fs5.readFile(outWebp);
-  });
-}
-async function enhanceImageHdAdapter(imageBuffer) {
-  const sharp = getOptionalSharp();
-  if (sharp) {
-    const meta = await sharp(imageBuffer).metadata();
-    const origW2 = meta.width || 600;
-    const origH2 = meta.height || 600;
-    const scaleFactor2 = Math.min(2, 2048 / Math.max(origW2, origH2, 1));
-    const targetW2 = Math.max(
-      origW2,
-      Math.round(origW2 * Math.max(1.25, scaleFactor2))
-    );
-    const targetH2 = Math.max(
-      origH2,
-      Math.round(origH2 * Math.max(1.25, scaleFactor2))
-    );
-    const out = await sharp(imageBuffer).rotate().resize(targetW2, targetH2, { kernel: "lanczos3", fit: "fill" }).modulate({ brightness: 1.02, saturation: 1.05 }).sharpen({ sigma: 1.2, m1: 1, m2: 2.4 }).jpeg({ quality: 94, mozjpeg: true }).toBuffer();
-    return { buffer: out, width: targetW2, height: targetH2 };
-  }
-  const sniffed = sniffImageMetadata(imageBuffer);
-  const origW = sniffed.width || 640;
-  const origH = sniffed.height || 640;
-  const scaleFactor = Math.min(2, 2048 / Math.max(origW, origH, 1));
-  const targetW = Math.max(
-    2,
-    Math.round(origW * Math.max(1.25, scaleFactor) / 2) * 2
-  );
-  const targetH = Math.max(
-    2,
-    Math.round(origH * Math.max(1.25, scaleFactor) / 2) * 2
-  );
-  const outBuf = await withTempDir(async (dir) => {
-    const ext = sniffed.format === "png" ? "png" : sniffed.format === "webp" ? "webp" : "jpg";
-    const inPath = path3.join(dir, `in.${ext}`);
-    const outPath = path3.join(dir, "hd.jpg");
-    await fs5.writeFile(inPath, imageBuffer);
-    await execFileAsync(
-      getFfmpegBin(),
-      [
-        "-y",
-        "-i",
-        inPath,
-        "-vf",
-        `scale=${targetW}:${targetH}:flags=lanczos,eq=brightness=0.02:saturation=1.05,unsharp=5:5:0.9:5:5:0.0`,
-        "-q:v",
-        "2",
-        "-frames:v",
-        "1",
-        outPath
-      ],
-      { timeout: 25e3 }
-    );
-    return fs5.readFile(outPath);
-  });
-  const outMeta = sniffImageMetadata(outBuf);
-  return {
-    buffer: outBuf,
-    width: outMeta.width || targetW,
-    height: outMeta.height || targetH
-  };
-}
-async function applyImageFilterAdapter(imageBuffer, filter) {
-  const sharp = getOptionalSharp();
-  if (sharp) {
-    let pipeline = sharp(imageBuffer).rotate();
-    switch (filter) {
-      case "hitamkan":
-      case "grayscale":
-        pipeline = pipeline.grayscale().linear(1.12, -8);
-        break;
-      case "invert":
-        pipeline = pipeline.negate({ alpha: false });
-        break;
-      case "blur":
-        pipeline = pipeline.blur(8);
-        break;
-      case "mirror":
-        pipeline = pipeline.flop();
-        break;
-      case "flip":
-        pipeline = pipeline.flip();
-        break;
-      case "sepia":
-        pipeline = pipeline.recomb([
-          [0.393, 0.769, 0.189],
-          [0.349, 0.686, 0.168],
-          [0.272, 0.534, 0.131]
-        ]);
-        break;
-    }
-    return pipeline.jpeg({ quality: 91 }).toBuffer();
-  }
-  let vf = "hue=s=0,eq=contrast=1.12:brightness=-0.03";
-  switch (filter) {
-    case "hitamkan":
-    case "grayscale":
-      vf = "hue=s=0,eq=contrast=1.12:brightness=-0.03";
-      break;
-    case "invert":
-      vf = "negate";
-      break;
-    case "blur":
-      vf = "gblur=sigma=8";
-      break;
-    case "mirror":
-      vf = "hflip";
-      break;
-    case "flip":
-      vf = "vflip";
-      break;
-    case "sepia":
-      vf = "colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131";
-      break;
-  }
-  return withTempDir(async (dir) => {
-    const sniffed = sniffImageMetadata(imageBuffer);
-    const ext = sniffed.format === "png" ? "png" : sniffed.format === "webp" ? "webp" : "jpg";
-    const inPath = path3.join(dir, `in.${ext}`);
-    const outPath = path3.join(dir, "filtered.jpg");
-    await fs5.writeFile(inPath, imageBuffer);
-    await execFileAsync(
-      getFfmpegBin(),
-      ["-y", "-i", inPath, "-vf", vf, "-q:v", "3", "-frames:v", "1", outPath],
-      { timeout: 25e3 }
-    );
-    return fs5.readFile(outPath);
-  });
-}
-async function prepareHdStatusImage(buffer, mimeType, fallbackThumbBase64) {
-  const sharp = getOptionalSharp();
-  if (sharp) {
-    try {
-      let finalBuffer = buffer;
-      let finalMime = mimeType;
-      const meta = await sharp(finalBuffer).metadata();
-      const width = meta.width;
-      const height = meta.height;
-      if (meta.format === "webp" || finalMime.toLowerCase().includes("webp")) {
-        finalBuffer = await sharp(finalBuffer).png({ compressionLevel: 0 }).toBuffer();
-        finalMime = "image/png";
-      } else if (meta.format === "png") {
-        finalMime = "image/png";
-      } else {
-        finalMime = "image/jpeg";
-      }
-      const thumbBuf = await sharp(finalBuffer).resize(72, 72, { fit: "inside" }).jpeg({ quality: 65 }).toBuffer();
-      return {
-        buffer: finalBuffer,
-        mimeType: finalMime,
-        width,
-        height,
-        jpegThumbnail: thumbBuf.toString("base64")
-      };
-    } catch {
-      return {
-        buffer,
-        mimeType: mimeType.startsWith("image/") ? mimeType : "image/jpeg",
-        jpegThumbnail: fallbackThumbBase64
-      };
-    }
-  }
-  try {
-    let finalBuffer = buffer;
-    let sniffed = sniffImageMetadata(finalBuffer);
-    let finalMime = mimeType;
-    if (sniffed.format === "webp" || finalMime.toLowerCase().includes("webp")) {
-      finalBuffer = await webpBufferToPng(finalBuffer);
-      sniffed = sniffImageMetadata(finalBuffer);
-      finalMime = "image/png";
-    } else if (sniffed.format === "png") {
-      finalMime = "image/png";
-    } else {
-      finalMime = "image/jpeg";
-    }
-    const thumbBase64 = await withTempDir(async (dir) => {
-      const ext = finalMime === "image/png" ? "png" : "jpg";
-      const inPath = path3.join(dir, `in.${ext}`);
-      const thumbPath = path3.join(dir, "thumb.jpg");
-      await fs5.writeFile(inPath, finalBuffer);
-      await execFileAsync(
-        getFfmpegBin(),
-        [
-          "-y",
-          "-i",
-          inPath,
-          "-vf",
-          "scale=72:72:force_original_aspect_ratio=decrease",
-          "-q:v",
-          "6",
-          "-frames:v",
-          "1",
-          thumbPath
-        ],
-        { timeout: 15e3 }
-      );
-      const tbuf = await fs5.readFile(thumbPath);
-      return tbuf.toString("base64");
-    }).catch(() => fallbackThumbBase64);
-    return {
-      buffer: finalBuffer,
-      mimeType: finalMime,
-      width: sniffed.width,
-      height: sniffed.height,
-      jpegThumbnail: thumbBase64
-    };
-  } catch {
-    return {
-      buffer,
-      mimeType: mimeType.startsWith("image/") ? mimeType : "image/jpeg",
-      jpegThumbnail: fallbackThumbBase64
-    };
-  }
-}
-async function ensureWhatsappImageBuffer(buffer, mimeType = "image/jpeg") {
-  const sniffed = sniffImageMetadata(buffer);
-  if (sniffed.format === "jpeg") {
-    return { buffer, mimeType: "image/jpeg" };
-  }
-  if (sniffed.format === "png") {
-    return { buffer, mimeType: "image/png" };
-  }
-  const sharp = getOptionalSharp();
-  if (sharp) {
-    try {
-      const jpg = await sharp(buffer, { animated: false }).flatten({ background: "#000000" }).jpeg({ quality: 92 }).toBuffer();
-      return { buffer: jpg, mimeType: "image/jpeg" };
-    } catch {
-    }
-  }
-  try {
-    const jpgBuf = await withTempDir(async (dir) => {
-      const inPath = path3.join(dir, "slide.img");
-      const outPath = path3.join(dir, "slide.jpg");
-      await fs5.writeFile(inPath, buffer);
-      await execFileAsync(
-        getFfmpegBin(),
-        ["-y", "-i", inPath, "-frames:v", "1", "-q:v", "2", outPath],
-        { timeout: 18e3 }
-      );
-      return fs5.readFile(outPath);
-    });
-    return { buffer: jpgBuf, mimeType: "image/jpeg" };
-  } catch {
-    return {
-      buffer,
-      mimeType: mimeType.startsWith("image/") ? mimeType : "image/jpeg"
-    };
-  }
 }
 
 // server/mediaDownloader.ts
@@ -4704,32 +5219,29 @@ async function fetchRemoteBuffer(url, maxBytes = 35 * 1024 * 1024, fallbackUrls 
 
 // server/mediaProcessor.ts
 import { execFile as execFile3 } from "node:child_process";
-import fs6 from "node:fs/promises";
-import os2 from "node:os";
-import path4 from "node:path";
+import fs7 from "node:fs/promises";
+import os3 from "node:os";
+import path5 from "node:path";
 import { promisify as promisify3 } from "node:util";
 import QRCode from "qrcode";
 var execFileAsync3 = promisify3(execFile3);
 async function withTempDir2(fn) {
-  const dir = await fs6.mkdtemp(path4.join(os2.tmpdir(), "wabot-media-"));
+  const dir = await fs7.mkdtemp(path5.join(os3.tmpdir(), "wabot-media-"));
   try {
     return await fn(dir);
   } finally {
-    await fs6.rm(dir, { recursive: true, force: true }).catch(() => {
+    await fs7.rm(dir, { recursive: true, force: true }).catch(() => {
     });
   }
-}
-async function enhanceImageHd(imageBuffer) {
-  return enhanceImageHdAdapter(imageBuffer);
 }
 async function applyImageFilter(imageBuffer, filter) {
   return applyImageFilterAdapter(imageBuffer, filter);
 }
 async function convertVideoToPtv(videoBuffer) {
   return withTempDir2(async (dir) => {
-    const inPath = path4.join(dir, "input.mp4");
-    const outPath = path4.join(dir, "ptv.mp4");
-    await fs6.writeFile(inPath, videoBuffer);
+    const inPath = path5.join(dir, "input.mp4");
+    const outPath = path5.join(dir, "ptv.mp4");
+    await fs7.writeFile(inPath, videoBuffer);
     await execFileAsync3(
       getFfmpegBin(),
       [
@@ -4758,15 +5270,15 @@ async function convertVideoToPtv(videoBuffer) {
       ],
       { timeout: 25e3 }
     );
-    return fs6.readFile(outPath);
+    return fs7.readFile(outPath);
   });
 }
 async function extractOrConvertAudio(inputBuffer, target) {
   return withTempDir2(async (dir) => {
-    const inPath = path4.join(dir, "input.media");
-    await fs6.writeFile(inPath, inputBuffer);
+    const inPath = path5.join(dir, "input.media");
+    await fs7.writeFile(inPath, inputBuffer);
     if (target === "vn") {
-      const outPath2 = path4.join(dir, "out.ogg");
+      const outPath2 = path5.join(dir, "out.ogg");
       await execFileAsync3(
         getFfmpegBin(),
         [
@@ -4787,12 +5299,12 @@ async function extractOrConvertAudio(inputBuffer, target) {
         { timeout: 25e3 }
       );
       return {
-        buffer: await fs6.readFile(outPath2),
+        buffer: await fs7.readFile(outPath2),
         mimeType: "audio/ogg; codecs=opus",
         ext: "ogg"
       };
     }
-    const outPath = path4.join(dir, "out.mp3");
+    const outPath = path5.join(dir, "out.mp3");
     await execFileAsync3(
       getFfmpegBin(),
       [
@@ -4813,7 +5325,7 @@ async function extractOrConvertAudio(inputBuffer, target) {
       { timeout: 25e3 }
     );
     return {
-      buffer: await fs6.readFile(outPath),
+      buffer: await fs7.readFile(outPath),
       mimeType: "audio/mpeg",
       ext: "mp3"
     };
@@ -4821,9 +5333,9 @@ async function extractOrConvertAudio(inputBuffer, target) {
 }
 async function applyAudioEffect(inputBuffer, effect) {
   return withTempDir2(async (dir) => {
-    const inPath = path4.join(dir, "input.media");
-    const outPath = path4.join(dir, "effect.mp3");
-    await fs6.writeFile(inPath, inputBuffer);
+    const inPath = path5.join(dir, "input.media");
+    const outPath = path5.join(dir, "effect.mp3");
+    await fs7.writeFile(inPath, inputBuffer);
     let af = "volume=1.0";
     switch (effect) {
       case "bass":
@@ -4867,7 +5379,7 @@ async function applyAudioEffect(inputBuffer, effect) {
       { timeout: 25e3 }
     );
     return {
-      buffer: await fs6.readFile(outPath),
+      buffer: await fs7.readFile(outPath),
       mimeType: "audio/mpeg"
     };
   });
@@ -4933,7 +5445,7 @@ var cachedSampleAudio = null;
 async function getOrCreateSampleVideoBuffer() {
   if (cachedSampleVideo) return cachedSampleVideo;
   cachedSampleVideo = await withTempDir2(async (dir) => {
-    const out = path4.join(dir, "sample.mp4");
+    const out = path5.join(dir, "sample.mp4");
     await execFileAsync3(
       getFfmpegBin(),
       [
@@ -4960,14 +5472,14 @@ async function getOrCreateSampleVideoBuffer() {
       ],
       { timeout: 15e3 }
     );
-    return fs6.readFile(out);
+    return fs7.readFile(out);
   });
   return cachedSampleVideo;
 }
 async function getOrCreateSampleAudioBuffer() {
   if (cachedSampleAudio) return cachedSampleAudio;
   cachedSampleAudio = await withTempDir2(async (dir) => {
-    const out = path4.join(dir, "sample.mp3");
+    const out = path5.join(dir, "sample.mp3");
     await execFileAsync3(
       getFfmpegBin(),
       [
@@ -4986,7 +5498,7 @@ async function getOrCreateSampleAudioBuffer() {
       ],
       { timeout: 15e3 }
     );
-    return fs6.readFile(out);
+    return fs7.readFile(out);
   });
   return cachedSampleAudio;
 }
@@ -4994,13 +5506,13 @@ async function getOrCreateSampleAudioBuffer() {
 // server/remoteTunnel.ts
 import { execFileSync, spawn } from "node:child_process";
 import crypto2 from "node:crypto";
-import fs7 from "node:fs";
-import os3 from "node:os";
-import path5 from "node:path";
+import fs8 from "node:fs";
+import os4 from "node:os";
+import path6 from "node:path";
 function getLocalLanUrls(port) {
   const urls = [];
   try {
-    const nets = os3.networkInterfaces();
+    const nets = os4.networkInterfaces();
     for (const entries of Object.values(nets)) {
       if (!entries) continue;
       for (const net of entries) {
@@ -5026,7 +5538,7 @@ function detectBinaryAvailable(binName) {
     return true;
   } catch {
     const termuxPath = `/data/data/com.termux/files/usr/bin/${binName}`;
-    return fs7.existsSync(termuxPath);
+    return fs8.existsSync(termuxPath);
   }
 }
 function parseCookies(cookieHeader) {
@@ -5362,7 +5874,7 @@ var RemoteTunnelManager = class {
 </body>
 </html>`);
     };
-    this.configFile = path5.join(resolveDataDir(), ".remote-access.json");
+    this.configFile = path6.join(resolveDataDir(), ".remote-access.json");
     const loaded = this.loadConfig();
     this.accessKey = loaded.accessKey;
     this.autoStartTunnel = loaded.autoStartTunnel;
@@ -5372,9 +5884,9 @@ var RemoteTunnelManager = class {
   }
   loadConfig() {
     try {
-      if (fs7.existsSync(this.configFile)) {
+      if (fs8.existsSync(this.configFile)) {
         const raw = JSON.parse(
-          fs7.readFileSync(this.configFile, "utf-8")
+          fs8.readFileSync(this.configFile, "utf-8")
         );
         if (raw.accessKey && raw.accessKey.length >= 8) {
           return {
@@ -5398,8 +5910,8 @@ var RemoteTunnelManager = class {
       autoStartTunnel: this.autoStartTunnel
     };
     try {
-      fs7.mkdirSync(path5.dirname(this.configFile), { recursive: true });
-      fs7.writeFileSync(this.configFile, JSON.stringify(payload, null, 2));
+      fs8.mkdirSync(path6.dirname(this.configFile), { recursive: true });
+      fs8.writeFileSync(this.configFile, JSON.stringify(payload, null, 2));
     } catch {
     }
   }
@@ -5487,7 +5999,7 @@ var RemoteTunnelManager = class {
       };
       if (hasCloudflared) {
         this.provider = "cloudflared";
-        const cfBin = fs7.existsSync(
+        const cfBin = fs8.existsSync(
           "/data/data/com.termux/files/usr/bin/cloudflared"
         ) ? "/data/data/com.termux/files/usr/bin/cloudflared" : "cloudflared";
         const proc = spawn(
@@ -5630,9 +6142,9 @@ var remoteTunnel = new RemoteTunnelManager();
 
 // server/stickerStudio.ts
 import { execFile as execFile4 } from "node:child_process";
-import fs8 from "node:fs/promises";
-import os4 from "node:os";
-import path6 from "node:path";
+import fs9 from "node:fs/promises";
+import os5 from "node:os";
+import path7 from "node:path";
 import { promisify as promisify4 } from "node:util";
 import WebP2 from "node-webpmux";
 var execFileAsync4 = promisify4(execFile4);
@@ -5640,11 +6152,11 @@ function escapeXml(input) {
   return input.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
 async function withTempDir3(fn) {
-  const dir = await fs8.mkdtemp(path6.join(os4.tmpdir(), "wabot-stk-"));
+  const dir = await fs9.mkdtemp(path7.join(os5.tmpdir(), "wabot-stk-"));
   try {
     return await fn(dir);
   } finally {
-    await fs8.rm(dir, { recursive: true, force: true }).catch(() => {
+    await fs9.rm(dir, { recursive: true, force: true }).catch(() => {
     });
   }
 }
@@ -5701,9 +6213,9 @@ async function imageToStickerWebp(imageBuffer, packName, author) {
 }
 async function videoToAnimatedStickerWebp(videoBuffer, packName, author) {
   return withTempDir3(async (dir) => {
-    const inPath = path6.join(dir, "input.mp4");
-    const outPath = path6.join(dir, "output.webp");
-    await fs8.writeFile(inPath, videoBuffer);
+    const inPath = path7.join(dir, "input.mp4");
+    const outPath = path7.join(dir, "output.webp");
+    await fs9.writeFile(inPath, videoBuffer);
     await execFileAsync4(
       getFfmpegBin(),
       [
@@ -5733,7 +6245,7 @@ async function videoToAnimatedStickerWebp(videoBuffer, packName, author) {
       ],
       { timeout: 25e3 }
     );
-    const webpBuf = await fs8.readFile(outPath);
+    const webpBuf = await fs9.readFile(outPath);
     return injectWhatsAppExif(webpBuf, packName, author);
   });
 }
@@ -5840,12 +6352,12 @@ async function createBratAnimatedSticker(rawText, packName, author) {
     frames.push(frames[frames.length - 1]);
     frames.push(frames[frames.length - 1]);
     for (let idx = 0; idx < frames.length; idx += 1) {
-      await fs8.writeFile(
-        path6.join(dir, `frame_${String(idx).padStart(3, "0")}.png`),
+      await fs9.writeFile(
+        path7.join(dir, `frame_${String(idx).padStart(3, "0")}.png`),
         frames[idx]
       );
     }
-    const outPath = path6.join(dir, "bratvid.webp");
+    const outPath = path7.join(dir, "bratvid.webp");
     await execFileAsync4(
       getFfmpegBin(),
       [
@@ -5853,7 +6365,7 @@ async function createBratAnimatedSticker(rawText, packName, author) {
         "-framerate",
         "2.4",
         "-i",
-        path6.join(dir, "frame_%03d.png"),
+        path7.join(dir, "frame_%03d.png"),
         "-vcodec",
         "libwebp",
         "-lossless",
@@ -5867,7 +6379,7 @@ async function createBratAnimatedSticker(rawText, packName, author) {
       ],
       { timeout: 2e4 }
     );
-    const webpBuf = await fs8.readFile(outPath);
+    const webpBuf = await fs9.readFile(outPath);
     return injectWhatsAppExif(webpBuf, packName, author);
   });
 }
@@ -5908,12 +6420,12 @@ async function createAttpSticker(rawText, packName, author) {
     for (let i = 0; i < colors.length; i += 1) {
       const svg = buildTtpSvg(rawText, colors[i], "#09090B");
       const png = await renderSvgToPng(svg);
-      await fs8.writeFile(
-        path6.join(dir, `frame_${String(i).padStart(3, "0")}.png`),
+      await fs9.writeFile(
+        path7.join(dir, `frame_${String(i).padStart(3, "0")}.png`),
         png
       );
     }
-    const outPath = path6.join(dir, "attp.webp");
+    const outPath = path7.join(dir, "attp.webp");
     await execFileAsync4(
       getFfmpegBin(),
       [
@@ -5921,7 +6433,7 @@ async function createAttpSticker(rawText, packName, author) {
         "-framerate",
         "7",
         "-i",
-        path6.join(dir, "frame_%03d.png"),
+        path7.join(dir, "frame_%03d.png"),
         "-vcodec",
         "libwebp",
         "-lossless",
@@ -5935,7 +6447,7 @@ async function createAttpSticker(rawText, packName, author) {
       ],
       { timeout: 2e4 }
     );
-    const webpBuf = await fs8.readFile(outPath);
+    const webpBuf = await fs9.readFile(outPath);
     return injectWhatsAppExif(webpBuf, packName, author);
   });
 }
@@ -6261,7 +6773,7 @@ async function createEmojiMixSticker(rawInput, packName, author) {
   return injectWhatsAppExif(webp, packName, author);
 }
 async function getFallbackMemeBackground() {
-  const sampleImagePath = path6.join(
+  const sampleImagePath = path7.join(
     process.cwd(),
     "src",
     "assets",
@@ -6269,7 +6781,7 @@ async function getFallbackMemeBackground() {
     "sample_sticker_cat_1793095457845.jpg"
   );
   try {
-    return await fs8.readFile(sampleImagePath);
+    return await fs9.readFile(sampleImagePath);
   } catch {
     const fallbackSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">
       <defs>
@@ -7261,30 +7773,89 @@ Bisa dipakai di *Grup* maupun *Chat Pribadi*! Bot akan membalasnya sebagai media
         };
         break;
       }
-      case "hd": {
+      case "hd":
+      case "remini":
+      case "upscale":
+      case "hd2":
+      case "hd4": {
         const imgBuf = ctx.imageBuffer || (ctx.documentMedia?.kind === "image" ? ctx.documentMedia.buffer : null);
+        const inputMime = ctx.imageMimeType || (ctx.documentMedia?.kind === "image" ? ctx.documentMedia.mimeType : void 0);
         if (!imgBuf) {
           return failReply(
-            `Kirim atau balas (reply) sebuah foto dengan *${config.prefix}hd* untuk dipertajam resolusinya 2\xD7 lipat.`
+            `Kirim sebuah foto dengan caption *${config.prefix}${matchedCmd.id}* atau balas (reply) foto seseorang dengan perintah *${config.prefix}${matchedCmd.id}*.`
           );
         }
-        const enhanced = await enhanceImageHd(imgBuf);
-        const webUrl = botStore.storeHdMedia(
+        const modeMap = {
+          hd: "auto",
+          remini: "face",
+          upscale: "upscale",
+          hd2: "2x",
+          hd4: "4x"
+        };
+        const enhanceMode = modeMap[matchedCmd.id] || "auto";
+        const scaleOverride = matchedCmd.id === "hd2" ? 2 : matchedCmd.id === "hd4" ? 4 : void 0;
+        let faceModelOverride;
+        let fidelityOverride;
+        if (argsText) {
+          const tokens = argsText.toLowerCase().split(/\s+/).filter(Boolean);
+          for (const tok of tokens) {
+            if (tok === "codeformer" || tok === "cf") {
+              faceModelOverride = "codeformer";
+            } else if (tok === "gfpgan" || tok === "gfp") {
+              faceModelOverride = "gfpgan";
+            } else {
+              const maybeNum = Number(tok.replace(",", "."));
+              if (Number.isFinite(maybeNum) && maybeNum >= 0.05 && maybeNum <= 0.98) {
+                fidelityOverride = maybeNum;
+              }
+            }
+          }
+        }
+        const enhanced = await aiEnhancer.enhancePhoto({
+          imageBuffer: imgBuf,
+          mimeType: inputMime,
+          mode: enhanceMode,
+          scaleOverride,
+          faceModelOverride,
+          fidelityOverride,
+          config: config.aiEnhance,
+          onStatus: ctx.onProgressStatus
+        });
+        const ephemeralWebUrl = ctx.source === "simulator" ? botStore.storeHdMedia(
           enhanced.buffer,
-          "image/jpeg",
-          "wabot-hd-upscale.jpg"
-        );
+          enhanced.mimeType,
+          `wabot-${matchedCmd.id}.${enhanced.mimeType === "image/png" ? "png" : "jpg"}`,
+          5 * 60 * 1e3
+        ) : void 0;
         botStore.incrementStat("mediaDownloaded");
+        const headerTitle = enhanceMode === "face" ? "*AI Face Restoration Selesai*" : enhanceMode === "2x" ? "*AI Super-Resolution 2\xD7 Selesai*" : enhanceMode === "4x" ? "*AI Super-Resolution 4\xD7 Selesai*" : enhanceMode === "upscale" ? "*AI Super-Resolution Selesai*" : "*AI Photo Enhance Selesai*";
+        const { meta } = enhanced;
+        const captionLines = [
+          headerTitle,
+          `\u2022 Resolusi: *${meta.inputWidth}\xD7${meta.inputHeight} px* \u2192 *${meta.outputWidth}\xD7${meta.outputHeight} px* (*${meta.effectiveScale}\xD7*)`,
+          `\u2022 Pipeline Model: *${meta.modelsUsed.join(" + ")}*`
+        ];
+        if (meta.facesDetected > 0 && meta.faceModelUsed) {
+          captionLines.push(
+            `\u2022 Restorasi Wajah: *${meta.facesDetected} wajah* (Fidelity: *${meta.fidelityUsed.toFixed(
+              2
+            )}*)`
+          );
+        }
+        const elapsedSec = meta.durationMs > 0 ? `${(meta.durationMs / 1e3).toFixed(1)} dtk \xB7 ` : "";
+        captionLines.push(
+          `\u2022 Berkas: *${elapsedSec}${formatByteSize(enhanced.buffer.length)}*`
+        );
+        captionLines.push(
+          "_Catatan: Detail mikro direkonstruksi oleh model AI pretrained sebagai estimasi restorasi visual, bukan rekaman optik asli yang hilang._"
+        );
         result = {
           handled: true,
           reactionStatus: "success",
           imageBuffer: enhanced.buffer,
-          imageMimeType: "image/jpeg",
-          imageWebUrl: webUrl,
-          replyText: `*Foto HD Berhasil Dipertajam*
-Resolusi akhir: *${enhanced.width}\xD7${enhanced.height} px* (${formatByteSize(
-            enhanced.buffer.length
-          )})`
+          imageMimeType: enhanced.mimeType,
+          imageWebUrl: ephemeralWebUrl,
+          replyText: captionLines.join("\n")
         };
         break;
       }
@@ -9044,8 +9615,8 @@ gatewayRouter.delete("/auto-responder/:id", (req, res) => {
 });
 
 // server/waManager.ts
-import fs9 from "node:fs/promises";
-import path7 from "node:path";
+import fs10 from "node:fs/promises";
+import path8 from "node:path";
 import makeWASocket, {
   Browsers,
   DisconnectReason,
@@ -9056,8 +9627,8 @@ import makeWASocket, {
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import QRCode2 from "qrcode";
-var AUTH_DIR = path7.join(resolveDataDir(), ".baileys_auth");
-var VIEWONCE_DIR = path7.join(resolveDataDir(), "viewonce_cache");
+var AUTH_DIR = path8.join(resolveDataDir(), ".baileys_auth");
+var VIEWONCE_DIR = path8.join(resolveDataDir(), "viewonce_cache");
 var silentLogger = pino({ level: "silent" });
 var WhatsAppSessionManager = class {
   constructor() {
@@ -9293,8 +9864,8 @@ var WhatsAppSessionManager = class {
   }
   async initAutoResume() {
     try {
-      const credsPath = path7.join(AUTH_DIR, "creds.json");
-      const raw = await fs9.readFile(credsPath, "utf-8");
+      const credsPath = path8.join(AUTH_DIR, "creds.json");
+      const raw = await fs10.readFile(credsPath, "utf-8");
       const parsed = JSON.parse(raw);
       const hasValidSession = Boolean(
         parsed.registered || parsed.account || parsed.me?.id && parsed.me.id.includes(":")
@@ -9339,7 +9910,7 @@ var WhatsAppSessionManager = class {
       } catch {
       }
       try {
-        await fs9.rm(AUTH_DIR, { recursive: true, force: true });
+        await fs10.rm(AUTH_DIR, { recursive: true, force: true });
       } catch {
       }
       await cloudSync.clearAuth();
@@ -9431,7 +10002,7 @@ var WhatsAppSessionManager = class {
       lastError: null
     });
     try {
-      await fs9.mkdir(AUTH_DIR, { recursive: true });
+      await fs10.mkdir(AUTH_DIR, { recursive: true });
       if (!this.authContext) {
         const loaded = await useMultiFileAuthState(AUTH_DIR);
         const origKeysSet = loaded.state.keys.set.bind(loaded.state.keys);
@@ -9705,7 +10276,7 @@ ${noticeText}`
             const retryMode = options.mode === "pairing" ? { mode: "pairing", phoneNumber: options.phoneNumber } : { mode: "qr" };
             if (options.mode === "pairing" && !paired) {
               this.authContext = null;
-              await fs9.rm(AUTH_DIR, { recursive: true, force: true }).catch(() => {
+              await fs10.rm(AUTH_DIR, { recursive: true, force: true }).catch(() => {
               });
             }
             this.clearReconnectTimer();
@@ -10005,7 +10576,7 @@ ${noticeText}`
   }
   async ensureViewOnceDir() {
     try {
-      await fs9.mkdir(VIEWONCE_DIR, { recursive: true });
+      await fs10.mkdir(VIEWONCE_DIR, { recursive: true });
     } catch {
     }
   }
@@ -10013,8 +10584,8 @@ ${noticeText}`
     if (!item.buffer || item.buffer.length === 0) return;
     try {
       await this.ensureViewOnceDir();
-      const metaPath = path7.join(VIEWONCE_DIR, `${item.id}.json`);
-      const binPath = path7.join(VIEWONCE_DIR, `${item.id}.bin`);
+      const metaPath = path8.join(VIEWONCE_DIR, `${item.id}.json`);
+      const binPath = path8.join(VIEWONCE_DIR, `${item.id}.bin`);
       const meta = {
         id: item.id,
         remoteJid: item.remoteJid,
@@ -10024,15 +10595,15 @@ ${noticeText}`
         isVoiceNote: item.isVoiceNote,
         savedAt: item.savedAt
       };
-      await fs9.writeFile(metaPath, JSON.stringify(meta), "utf-8");
-      await fs9.writeFile(binPath, item.buffer);
-      const files = await fs9.readdir(VIEWONCE_DIR);
+      await fs10.writeFile(metaPath, JSON.stringify(meta), "utf-8");
+      await fs10.writeFile(binPath, item.buffer);
+      const files = await fs10.readdir(VIEWONCE_DIR);
       const jsonFiles = files.filter((f) => f.endsWith(".json"));
       if (jsonFiles.length > 25) {
         const parsed = await Promise.all(
           jsonFiles.map(async (jf) => {
             try {
-              const raw = await fs9.readFile(path7.join(VIEWONCE_DIR, jf), "utf-8");
+              const raw = await fs10.readFile(path8.join(VIEWONCE_DIR, jf), "utf-8");
               const data = JSON.parse(raw);
               return { file: jf, id: data.id || jf.replace(".json", ""), savedAt: data.savedAt || 0 };
             } catch {
@@ -10043,9 +10614,9 @@ ${noticeText}`
         parsed.sort((a, b) => a.savedAt - b.savedAt);
         const toDelete = parsed.slice(0, parsed.length - 20);
         for (const d of toDelete) {
-          await fs9.unlink(path7.join(VIEWONCE_DIR, `${d.id}.json`)).catch(() => {
+          await fs10.unlink(path8.join(VIEWONCE_DIR, `${d.id}.json`)).catch(() => {
           });
-          await fs9.unlink(path7.join(VIEWONCE_DIR, `${d.id}.bin`)).catch(() => {
+          await fs10.unlink(path8.join(VIEWONCE_DIR, `${d.id}.bin`)).catch(() => {
           });
         }
       }
@@ -10055,23 +10626,23 @@ ${noticeText}`
   async loadRecentViewOnceFromDisk() {
     try {
       await this.ensureViewOnceDir();
-      const files = await fs9.readdir(VIEWONCE_DIR);
+      const files = await fs10.readdir(VIEWONCE_DIR);
       const jsonFiles = files.filter((f) => f.endsWith(".json"));
       const now = Date.now();
       for (const jf of jsonFiles) {
         try {
-          const metaPath = path7.join(VIEWONCE_DIR, jf);
-          const raw = await fs9.readFile(metaPath, "utf-8");
+          const metaPath = path8.join(VIEWONCE_DIR, jf);
+          const raw = await fs10.readFile(metaPath, "utf-8");
           const data = JSON.parse(raw);
           if (now - data.savedAt > 24 * 60 * 60 * 1e3) {
-            await fs9.unlink(metaPath).catch(() => {
+            await fs10.unlink(metaPath).catch(() => {
             });
-            await fs9.unlink(path7.join(VIEWONCE_DIR, `${data.id}.bin`)).catch(() => {
+            await fs10.unlink(path8.join(VIEWONCE_DIR, `${data.id}.bin`)).catch(() => {
             });
             continue;
           }
-          const binPath = path7.join(VIEWONCE_DIR, `${data.id}.bin`);
-          const buf = await fs9.readFile(binPath).catch(() => null);
+          const binPath = path8.join(VIEWONCE_DIR, `${data.id}.bin`);
+          const buf = await fs10.readFile(binPath).catch(() => null);
           if (buf && buf.length > 0) {
             const item = {
               id: data.id,
@@ -10738,10 +11309,21 @@ Batas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam Whats
       "colong",
       "swm",
       "hd",
-      "remini",
-      "upscale",
+      "enhance",
       "jernih",
       "hdr",
+      "remini",
+      "facehd",
+      "restoreface",
+      "upscale",
+      "sr",
+      "superres",
+      "hd2",
+      "upscale2x",
+      "2x",
+      "hd4",
+      "upscale4x",
+      "4x",
       "hitamkan",
       "grayscale",
       "bw",
@@ -10860,8 +11442,21 @@ Batas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam Whats
       "sticker",
       "sgif",
       "hd",
+      "enhance",
+      "jernih",
+      "hdr",
       "remini",
+      "facehd",
+      "restoreface",
       "upscale",
+      "sr",
+      "superres",
+      "hd2",
+      "upscale2x",
+      "2x",
+      "hd4",
+      "upscale4x",
+      "4x",
       "toptv",
       "ptv",
       "tourl"
@@ -10921,6 +11516,8 @@ Batas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam Whats
         return;
       }
     }
+    const unwrappedIncoming = this.unwrapWaMessage(msg.message);
+    const detectedImageMime = unwrappedIncoming?.imageMessage?.mimetype || unwrappedQuoted?.imageMessage?.mimetype || null;
     const result = await processBotMessage({
       source: "whatsapp",
       isGroup,
@@ -10933,6 +11530,7 @@ Batas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam Whats
       isBotGroupAdmin,
       text,
       imageBuffer,
+      imageMimeType: detectedImageMime,
       videoBuffer,
       audioBuffer,
       stickerBuffer,
@@ -10947,7 +11545,21 @@ Batas perintah diterapkan untuk melindungi nomor bot dari pemblokiran spam Whats
       mentionedJids,
       quotedParticipantJid,
       groupMembers,
-      waGroupOps
+      waGroupOps,
+      onProgressStatus: async (statusText) => {
+        await this.enqueueOutboundSend(async () => {
+          await this.simulateHumanTyping(sock, remoteJid, isGroup);
+          await sock.sendMessage(
+            remoteJid,
+            {
+              text: statusText,
+              linkPreview: null
+            },
+            { quoted: msg }
+          );
+        }).catch(() => {
+        });
+      }
     });
     if (!result.handled) {
       if (pendingSent) {
@@ -11219,7 +11831,7 @@ var LISTEN_CONFIG = resolveListenConfig();
 function getLocalLanUrls2(port) {
   const urls = [];
   try {
-    const nets = os5.networkInterfaces();
+    const nets = os6.networkInterfaces();
     for (const entries of Object.values(nets)) {
       if (!entries) continue;
       for (const net of entries) {
@@ -11254,14 +11866,14 @@ function formatByteLabel(bytes) {
 }
 async function loadSampleCatBuffer() {
   try {
-    const samplePath = path8.join(
+    const samplePath = path9.join(
       process.cwd(),
       "src",
       "assets",
       "images",
       "sample_sticker_cat_1793095457845.jpg"
     );
-    return await fs10.readFile(samplePath);
+    return await fs11.readFile(samplePath);
   } catch {
     return null;
   }
@@ -11418,7 +12030,14 @@ async function startServer() {
   app.patch("/api/config", (req, res) => {
     const patch = req.body || {};
     const updated = botStore.updateConfig(patch);
+    if (patch.aiEnhance) {
+      void pushRuntimeConfigToAiService(updated.aiEnhance);
+    }
     res.json({ ok: true, config: updated });
+  });
+  app.get("/api/ai-enhance/status", async (_req, res) => {
+    const status = await checkAiServiceHealth(botStore.config.aiEnhance);
+    res.json(status);
   });
   app.get("/api/sample-cat.jpg", async (_req, res) => {
     const buf = await loadSampleCatBuffer();
@@ -11892,6 +12511,7 @@ async function startServer() {
         isBotGroupAdmin: true,
         text,
         imageBuffer,
+        imageMimeType: attachedPreviewMedia?.type === "image" ? attachedPreviewMedia.mimeType : replySnapshot?.hasImage ? "image/jpeg" : void 0,
         videoBuffer,
         audioBuffer,
         stickerBuffer,
@@ -11903,7 +12523,25 @@ async function startServer() {
         attachedNonDocumentMedia: !documentMedia && Boolean(imageBuffer || videoBuffer || quotedRegularMedia),
         quotedParticipantPhone,
         quotedParticipantJid,
-        groupMembers: botStore.groupMembers
+        groupMembers: botStore.groupMembers,
+        onProgressStatus: async (statusText) => {
+          const progressMsg = {
+            id: `sim-prog-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            chatMode,
+            sender: "bot",
+            senderName: botStore.config.botName,
+            senderPhone: "Bot Engine",
+            text: statusText,
+            timestamp: Date.now(),
+            replyTo: {
+              id: userMsg.id,
+              senderName: userMsg.senderName,
+              senderPhone: userMsg.senderPhone,
+              text: userMsg.text || "[Lampiran Foto]"
+            }
+          };
+          botStore.addSimulatorMessage(progressMsg);
+        }
       });
       if (pendingReaction) {
         const elapsed = Date.now() - execStartedAt;
@@ -12083,21 +12721,21 @@ ${stepLabel}` : stepLabel : stepLabel;
   let prepareBundlePromise = null;
   async function isFrontendSourceNewerThanDist(root, distHtmlPath) {
     try {
-      const distStat = await fs10.stat(distHtmlPath);
+      const distStat = await fs11.stat(distHtmlPath);
       const distMtime = distStat.mtimeMs;
       const checkTargets = [
-        path8.join(root, "index.html"),
-        path8.join(root, "src")
+        path9.join(root, "index.html"),
+        path9.join(root, "src")
       ];
       const stack = [...checkTargets];
       while (stack.length > 0) {
         const current = stack.pop();
         try {
-          const st = await fs10.stat(current);
+          const st = await fs11.stat(current);
           if (st.isDirectory()) {
-            const entries = await fs10.readdir(current);
+            const entries = await fs11.readdir(current);
             for (const entry of entries) {
-              stack.push(path8.join(current, entry));
+              stack.push(path9.join(current, entry));
             }
           } else if (st.mtimeMs > distMtime + 1e3) {
             return true;
@@ -12114,7 +12752,7 @@ ${stepLabel}` : stepLabel : stepLabel;
     if (!prepareBundlePromise) {
       prepareBundlePromise = (async () => {
         const root = process.cwd();
-        const distHtmlPath = path8.join(root, "dist", "index.html");
+        const distHtmlPath = path9.join(root, "dist", "index.html");
         const needsViteBuild = await isFrontendSourceNewerThanDist(
           root,
           distHtmlPath
@@ -12133,12 +12771,12 @@ ${stepLabel}` : stepLabel : stepLabel;
         try {
           const { build: esbuildBundle } = await import("esbuild");
           await esbuildBundle({
-            entryPoints: [path8.join(root, "server.ts")],
+            entryPoints: [path9.join(root, "server.ts")],
             bundle: true,
             platform: "node",
             format: "esm",
             packages: "external",
-            outfile: path8.join(root, "server.bundle.mjs"),
+            outfile: path9.join(root, "server.bundle.mjs"),
             logLevel: "warning"
           });
         } catch (err) {
@@ -12178,6 +12816,9 @@ ${stepLabel}` : stepLabel : stepLabel;
         "--exclude=.env",
         "--exclude=server.mjs",
         "--exclude=public/assets/aistudio",
+        "--exclude=ai_service/weights",
+        "--exclude=ai_service/__pycache__",
+        "--exclude=ai_service/.venv",
         "-czf",
         "-",
         "."
@@ -12190,8 +12831,8 @@ ${stepLabel}` : stepLabel : stepLabel;
     ["/termux.sh", "/api/termux-install", "/termux-install"],
     async (_req, res) => {
       try {
-        const termuxShPath = path8.join(process.cwd(), "termux.sh");
-        const content = await fs10.readFile(termuxShPath, "utf-8");
+        const termuxShPath = path9.join(process.cwd(), "termux.sh");
+        const content = await fs11.readFile(termuxShPath, "utf-8");
         res.setHeader("Content-Type", "text/plain; charset=utf-8");
         res.send(content);
       } catch {
@@ -12199,6 +12840,16 @@ ${stepLabel}` : stepLabel : stepLabel;
       }
     }
   );
+  app.get("/setup-reno5.sh", async (_req, res) => {
+    try {
+      const scriptPath = path9.join(process.cwd(), "ai_service", "setup_reno5.sh");
+      const content = await fs11.readFile(scriptPath, "utf-8");
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.send(content);
+    } catch {
+      res.status(404).send("# setup_reno5.sh not found");
+    }
+  });
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
@@ -12212,12 +12863,12 @@ ${stepLabel}` : stepLabel : stepLabel;
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path8.join(process.cwd(), "dist");
-    const distHtml = path8.join(distPath, "index.html");
+    const distPath = path9.join(process.cwd(), "dist");
+    const distHtml = path9.join(distPath, "index.html");
     app.use(express.static(distPath));
     app.get("*", async (_req, res) => {
       try {
-        await fs10.access(distHtml);
+        await fs11.access(distHtml);
         res.sendFile(distHtml);
       } catch {
         const catalogJson = JSON.stringify(
@@ -12804,6 +13455,36 @@ ${stepLabel}` : stepLabel : stepLabel;
         </div>
 
         <div class="card">
+          <h2>Server AI Photo Enhancement (Oppo Reno 5 / Colab)</h2>
+          <p class="subtext">Hubungkan ke IP server GPU untuk memproses perintah <code class="font-mono">.hd</code>, <code class="font-mono">.remini</code>, <code class="font-mono">.upscale</code>.</p>
+          <div>
+            <label>Endpoint HTTP Layanan AI GPU (Contoh: http://192.168.1.15:8001)</label>
+            <input type="text" id="cfg-ai-url" placeholder="http://192.168.1.15:8001" class="font-mono" />
+          </div>
+          <div class="row" style="margin-top:10px;">
+            <div style="flex:1;">
+              <label>Model Wajah</label>
+              <select id="cfg-ai-face" style="width:100%;padding:10px;border-radius:12px;border:1px solid var(--border);background:var(--surface-input);color:var(--text);">
+                <option value="codeformer">CodeFormer (Natural &amp; Detail)</option>
+                <option value="gfpgan">GFPGAN v1.4</option>
+              </select>
+            </div>
+            <div style="width:110px;">
+              <label>Skala</label>
+              <select id="cfg-ai-scale" style="width:100%;padding:10px;border-radius:12px;border:1px solid var(--border);background:var(--surface-input);color:var(--text);">
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <button type="button" class="btn btn-emerald" onclick="saveAiConfig()">Simpan Alamat AI</button>
+            <button type="button" class="btn btn-outline" onclick="probeAiGpu()">Cek Status GPU</button>
+          </div>
+          <div class="toast" id="toast-ai"></div>
+        </div>
+
+        <div class="card">
           <h2>Template Balasan Chat &amp; Grup</h2>
           <p class="subtext">Kustomisasi header <code class="font-mono">.menu</code> dan sambutan member grup.</p>
           <div style="display:flex;flex-direction:column;gap:10px;">
@@ -12926,6 +13607,9 @@ ${stepLabel}` : stepLabel : stepLabel;
           document.getElementById('tpl-menuheader').value = (cfg.templates && cfg.templates.menuHeader) || '';
           document.getElementById('tpl-welcome').value = (cfg.templates && cfg.templates.welcomeMsg) || '';
           document.getElementById('tpl-goodbye').value = (cfg.templates && cfg.templates.goodbyeMsg) || '';
+          document.getElementById('cfg-ai-url').value = (cfg.aiEnhance && cfg.aiEnhance.serviceUrl) || 'http://127.0.0.1:8001';
+          document.getElementById('cfg-ai-face').value = (cfg.aiEnhance && cfg.aiEnhance.preferredFaceModel) || 'codeformer';
+          document.getElementById('cfg-ai-scale').value = String((cfg.aiEnhance && cfg.aiEnhance.defaultScale) || 2);
           document.getElementById('ab-min').value = String((cfg.antiBan && cfg.antiBan.minDelayMs) || 1200);
           document.getElementById('ab-max').value = String((cfg.antiBan && cfg.antiBan.maxDelayMs) || 2800);
           document.getElementById('ab-cool').value = String(Math.round(((cfg.antiBan && cfg.antiBan.userCooldownMs) || 3000) / 1000));
@@ -13104,6 +13788,47 @@ ${stepLabel}` : stepLabel : stepLabel;
       await loadState();
     }
 
+    async function saveAiConfig() {
+      const serviceUrl = (document.getElementById('cfg-ai-url').value || '').trim();
+      const preferredFaceModel = document.getElementById('cfg-ai-face').value || 'codeformer';
+      const defaultScale = Number(document.getElementById('cfg-ai-scale').value) || 2;
+      await fetch('/api/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          aiEnhance: {
+            ...(currentCfg && currentCfg.aiEnhance ? currentCfg.aiEnhance : {}),
+            serviceUrl,
+            preferredFaceModel,
+            defaultScale
+          }
+        })
+      });
+      document.getElementById('toast-ai').innerText = 'Alamat IP server AI berhasil disimpan.';
+      setTimeout(() => { document.getElementById('toast-ai').innerText = ''; }, 2500);
+      await loadState();
+    }
+
+    async function probeAiGpu() {
+      const toast = document.getElementById('toast-ai');
+      toast.style.color = 'var(--amber)';
+      toast.innerText = 'Menghubungi server AI GPU...';
+      try {
+        const res = await fetch('/api/ai-enhance/status');
+        const st = await res.json();
+        if (st.ok) {
+          toast.style.color = 'var(--emerald)';
+          toast.innerText = 'Terhubung ke AI GPU (' + (st.gpuName || st.device || 'Online') + ' \xB7 ' + (st.latencyMs || 0) + 'ms)';
+        } else {
+          toast.style.color = 'var(--danger)';
+          toast.innerText = 'Gagal terhubung: ' + (st.error || 'Server tidak merespons');
+        }
+      } catch (e) {
+        toast.style.color = 'var(--danger)';
+        toast.innerText = 'Tidak dapat menghubungi server lokal.';
+      }
+    }
+
     async function loadRemote() {
       try {
         const res = await fetch('/api/remote-tunnel');
@@ -13255,7 +13980,7 @@ ${stepLabel}` : stepLabel : stepLabel;
     }
     botStore.saveToDisk();
     await waManager.shutdownGracefully();
-    await cloudSync.flushAllNow(path8.join(resolveDataDir(), ".baileys_auth"));
+    await cloudSync.flushAllNow(path9.join(resolveDataDir(), ".baileys_auth"));
     server.close(() => {
       process.exit(0);
     });
