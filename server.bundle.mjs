@@ -12840,10 +12840,29 @@ ${stepLabel}` : stepLabel : stepLabel;
       }
     }
   );
-  app.get("/setup-reno5.sh", async (_req, res) => {
+  app.get("/ai-service.tar.gz", (_req, res) => {
+    res.setHeader("Content-Type", "application/gzip");
+    res.setHeader("Content-Disposition", 'attachment; filename="ai_service.tar.gz"');
+    const tar = spawn2("tar", [
+      "--exclude=weights",
+      "--exclude=__pycache__",
+      "--exclude=.venv",
+      "-czf",
+      "-",
+      "-C",
+      path9.join(process.cwd(), "ai_service"),
+      "."
+    ]);
+    tar.stdout.pipe(res);
+  });
+  app.get("/setup-reno5.sh", async (req, res) => {
     try {
       const scriptPath = path9.join(process.cwd(), "ai_service", "setup_reno5.sh");
-      const content = await fs11.readFile(scriptPath, "utf-8");
+      let content = await fs11.readFile(scriptPath, "utf-8");
+      const host = req.get("host") || "ais-pre-ytvmm2cbyqkygpp3brixzw-140858000053.asia-northeast1.run.app";
+      const proto = req.get("x-forwarded-proto") || "https";
+      const baseUrl = `${proto}://${host}`;
+      content = content.replace(/BASE_URL_PLACEHOLDER/g, baseUrl);
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
       res.send(content);
     } catch {
