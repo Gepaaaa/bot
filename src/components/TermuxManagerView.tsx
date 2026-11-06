@@ -626,7 +626,7 @@ export function TermuxManagerView({
                 {targetDevice === 'reno5' && <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-600 text-white font-medium">Aktif</span>}
               </div>
               <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">
-                Snapdragon 720G · RAM 8GB · Mode Turbo (Alokasi RAM 1024MB, proses stiker/media cepat)
+                Snapdragon 720G · RAM 8GB · <strong>Fitur AI HD Image Aktif Penuh</strong> (4x-UltraSharp &amp; Real-ESRGAN) + WABot 24/7 Pure di HP.
               </p>
             </button>
 
@@ -646,7 +646,7 @@ export function TermuxManagerView({
                 {targetDevice === 'redmi9c' && <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-600 text-white font-medium">Aktif</span>}
               </div>
               <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1">
-                Helio G35 · RAM 3GB · Mode Armor Hemat (Alokasi RAM 256MB, anti force-close MIUI)
+                Helio G35 · RAM 3GB · <strong>Fitur HD Image Ditiadakan</strong> (Bebas Lag &amp; Anti Force-Close). Pure Stiker WASM, Downloader &amp; Status HD.
               </p>
             </button>
           </div>

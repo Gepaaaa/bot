@@ -16,6 +16,7 @@ import type {
 import { aiEnhancer } from './aiEnhancer.ts';
 import { evaluateAutoResponder } from './autoResponder.ts';
 import {
+  getExcludedCommandsForDevice,
   isAiHdSupportedOnDevice,
   REDMI9C_AI_HD_NOTICE,
 } from './deviceProfile.ts';
@@ -384,6 +385,7 @@ function buildMenuText(
     stickerPackName: config.stickerPackName,
     stickerAuthor: config.stickerAuthor,
     disabledCommands: config.disabledCommands,
+    excludeCommands: getExcludedCommandsForDevice(),
     menuHeaderTemplate: config.templates.menuHeader,
     menuFooterTemplate: config.templates.menuFooter,
     query,

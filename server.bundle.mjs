@@ -33,6 +33,7 @@ var DEFAULT_REACTIONS = {
 var DEFAULT_AI_ENHANCE_CONFIG = {
   serviceUrl: "http://127.0.0.1:8001",
   preferredFaceModel: "codeformer",
+  preferredSrModel: "ultrasharp",
   faceFidelity: 0.72,
   defaultScale: 2,
   autoDenoise: true,
@@ -315,11 +316,11 @@ var COMMAND_CATALOG = [
   },
   {
     id: "hd",
-    aliases: ["enhance", "jernih", "hdr"],
+    aliases: ["enhance", "jernih", "hdr", "ultra"],
     category: "media",
-    usage: "hd [fidelity 0.1-0.95] (kirim/reply foto)",
-    description: "Peningkatan kualitas foto otomatis adaptif berbasis AI (Real-ESRGAN + CodeFormer/GFPGAN + SCUNet/NAFNet sesuai kondisi noise, blur, dan wajah).",
-    example: "hd",
+    usage: "hd [ultra/esrgan] [0.1-0.95] (kirim/reply foto)",
+    description: "Peningkatan kualitas foto otomatis adaptif berbasis AI super ajib (4x-UltraSharp / Real-ESRGAN + CodeFormer/GFPGAN + SCUNet/NAFNet). Menghasilkan detail mikrotekstur ultra-tajam tanpa efek watercolor atau kulit plastik.",
+    example: "hd ultra",
     requiresMedia: true,
     mediaKindHint: "image"
   },
@@ -335,11 +336,11 @@ var COMMAND_CATALOG = [
   },
   {
     id: "upscale",
-    aliases: ["sr", "superres"],
+    aliases: ["sr", "superres", "ultrasharp"],
     category: "media",
-    usage: "upscale (kirim/reply foto)",
-    description: "Tingkatkan resolusi dan ketajaman tekstur umum foto menggunakan pretrained super-resolution Real-ESRGAN.",
-    example: "upscale",
+    usage: "upscale [ultra/esrgan] (kirim/reply foto)",
+    description: "Tingkatkan resolusi dan ketajaman tekstur umum foto menggunakan model premier 4x-UltraSharp (Super Ajib) atau Real-ESRGAN.",
+    example: "upscale ultra",
     requiresMedia: true,
     mediaKindHint: "image"
   },
@@ -355,10 +356,10 @@ var COMMAND_CATALOG = [
   },
   {
     id: "hd4",
-    aliases: ["upscale4x", "4x"],
+    aliases: ["upscale4x", "4x", "hdultra"],
     category: "media",
     usage: "hd4 (kirim/reply foto)",
-    description: "Super-resolution AI 4\xD7 lipat resolusi tinggi dengan Real-ESRGAN x4plus dan pipeline restorasi adaptif.",
+    description: "Super-resolution AI 4\xD7 lipat resolusi tinggi dengan model premier 4x-UltraSharp (Super Ajib) atau Real-ESRGAN x4plus dan pipeline restorasi adaptif.",
     example: "hd4",
     requiresMedia: true,
     mediaKindHint: "image"
@@ -1174,27 +1175,41 @@ function buildBotMenuText(opts) {
   const p = opts.prefix || ".";
   const cleanOwnerNumber = (opts.ownerNumber || OFFICIAL_OWNER_NUMBER).replace(/[^0-9]/g, "") || OFFICIAL_OWNER_NUMBER;
   const disabledSet = new Set(opts.disabledCommands || []);
+  const excludeSet = new Set(opts.excludeCommands || []);
   const isSuspensionLocked = (id) => {
     const canonical = id === "allmenu" ? "menu" : id;
     const found = COMMAND_CATALOG.find((c) => c.id === canonical);
     return Boolean(found?.suspensionRisk);
   };
+  const isExcluded = (id) => {
+    const canonical = id === "allmenu" ? "menu" : id;
+    return excludeSet.has(canonical);
+  };
   const isEnabled = (id) => {
     const canonical = id === "allmenu" ? "menu" : id;
+    if (isExcluded(canonical)) return false;
     if (isSuspensionLocked(canonical)) return false;
     return !disabledSet.has(canonical);
   };
   const normalizedAlias = (opts.invokedAlias || "").trim().toLowerCase().replace(new RegExp(`^\\${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), "");
   const normalizedQuery = (opts.query || "").trim().toLowerCase().replace(new RegExp(`^\\${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), "");
   const wantsFullList = normalizedAlias === "allmenu" || ["all", "semua", "lengkap", "full", "allmenu"].includes(normalizedQuery);
+  const filterRows = (rows) => {
+    return rows.map((row) => {
+      const remaining = row.ids.filter((id) => !isExcluded(id));
+      return remaining.length > 0 ? { ...row, ids: remaining } : null;
+    }).filter((r) => r !== null);
+  };
   if (wantsFullList) {
     const lines2 = [];
     for (let i = 0; i < MENU_SECTIONS.length; i++) {
       const sec = MENU_SECTIONS[i];
+      const visibleRows = filterRows(sec.compactRows);
+      if (visibleRows.length === 0) continue;
       lines2.push(MENU_DIVIDER);
       lines2.push(`${sec.emoji} *${sec.code} \xB7 ${sec.title}*`);
       lines2.push(MENU_DIVIDER);
-      for (const row of sec.compactRows) {
+      for (const row of visibleRows) {
         const cmdLabels = row.ids.map((id) => `*${p}${id}*`).join(" / ");
         const argPart = row.argHint ? ` ${row.argHint}` : "";
         lines2.push(`\u2022 ${cmdLabels}${argPart} \u2014 ${row.summary}`);
@@ -1212,12 +1227,13 @@ function buildBotMenuText(opts) {
     (sec) => sec.categoryCmd.toLowerCase() === normalizedAlias || sec.keywords.includes(normalizedAlias) || normalizedQuery && sec.keywords.includes(normalizedQuery)
   );
   if (matchedSection && (normalizedQuery || normalizedAlias !== "menu")) {
+    const visibleRows = filterRows(matchedSection.compactRows);
     const lines2 = [
       MENU_DIVIDER,
       `${matchedSection.emoji} *${matchedSection.code} \xB7 ${matchedSection.title}*`,
       MENU_DIVIDER
     ];
-    for (const row of matchedSection.compactRows) {
+    for (const row of visibleRows) {
       const cmdLabels = row.ids.map((id) => `*${p}${id}*`).join(" / ");
       const argPart = row.argHint ? ` ${row.argHint}` : "";
       lines2.push(`\u2022 ${cmdLabels}${argPart} \u2014 ${row.summary}`);
@@ -1338,6 +1354,7 @@ function sanitizeBotConfig(raw) {
         rawAi.serviceUrl ?? DEFAULT_AI_ENHANCE_CONFIG.serviceUrl
       ).trim().replace(/\/+$/, ""),
       preferredFaceModel: rawAi.preferredFaceModel === "gfpgan" ? "gfpgan" : "codeformer",
+      preferredSrModel: rawAi.preferredSrModel === "realesrgan" ? "realesrgan" : "ultrasharp",
       faceFidelity: Math.round(clampedFidelity * 100) / 100,
       defaultScale: rawAi.defaultScale === 4 ? 4 : 2,
       autoDenoise: rawAi.autoDenoise ?? true,
@@ -2364,6 +2381,8 @@ function describeModeLabel(mode, defaultScale) {
   switch (mode) {
     case "face":
       return "Restorasi Wajah Natural (CodeFormer / GFPGAN)";
+    case "ultra":
+      return "Super-Resolution 4x-UltraSharp (Super Ajib)";
     case "upscale":
       return `Super-Resolution Real-ESRGAN ${defaultScale}\xD7`;
     case "2x":
@@ -2499,12 +2518,14 @@ Menjalankan analisis kualitas, deteksi wajah, dan super-resolution di server GPU
         0.98,
         Math.max(0.05, Number.isFinite(rawFidelity) ? rawFidelity : 0.72)
       );
+      const effectiveSrModel = req.srModelOverride ?? (req.mode === "ultra" ? "ultrasharp" : config.preferredSrModel ?? "ultrasharp");
       const form = new FormData();
       const fileBlob = new Blob([new Uint8Array(stagedBytes)], {
         type: inputInfo.mimeType
       });
       form.append("image", fileBlob, `input.${ext}`);
       form.append("mode", req.mode);
+      form.append("sr_model", effectiveSrModel);
       form.append("scale", String(effectiveScale));
       form.append("face_model", effectiveFaceModel);
       form.append("fidelity", effectiveFidelity.toFixed(2));
@@ -3918,6 +3939,38 @@ function evaluateAutoResponder(text, context) {
   }
   return { matched: false };
 }
+
+// server/deviceProfile.ts
+var AI_HD_IMAGE_COMMANDS = ["hd", "remini", "upscale", "hd2", "hd4"];
+function getDeviceProfile() {
+  const envProfile = (process.env.DEVICE_PROFILE || "").trim().toLowerCase();
+  if (envProfile === "redmi9c" || envProfile === "redmi" || envProfile === "redmi_9c") {
+    return "redmi9c";
+  }
+  if (envProfile === "reno5" || envProfile === "reno_5" || envProfile === "oppo") {
+    return "reno5";
+  }
+  if (process.arch === "arm") {
+    return "redmi9c";
+  }
+  return "generic";
+}
+function isRedmi9cProfile() {
+  return getDeviceProfile() === "redmi9c";
+}
+function isAiHdSupportedOnDevice() {
+  if (isRedmi9cProfile()) {
+    return false;
+  }
+  return true;
+}
+function getExcludedCommandsForDevice() {
+  if (isRedmi9cProfile()) {
+    return [...AI_HD_IMAGE_COMMANDS];
+  }
+  return [];
+}
+var REDMI9C_AI_HD_NOTICE = "*Fitur AI HD Ditiadakan Khusus Redmi 9C*\nSesuai pengaturan jalur Xiaomi Redmi 9C (3/32GB ARMv7), fitur AI HD image dihilangkan agar performa bot di Termux tetap enteng dan bebas force-close RAM.\n\n\u{1F4A1} *Ingin pakai fitur HD Image Super Ajib (4x-UltraSharp / Real-ESRGAN)?*\nJalankan di HP Oppo Reno 5 kamu dengan mengetik `bash termux-reno5.sh` di Termux Reno 5.";
 
 // server/mediaDownloader.ts
 import { execFile as execFile2 } from "node:child_process";
@@ -7167,6 +7220,7 @@ function buildMenuText(query, invokedAlias, senderName) {
     stickerPackName: config.stickerPackName,
     stickerAuthor: config.stickerAuthor,
     disabledCommands: config.disabledCommands,
+    excludeCommands: getExcludedCommandsForDevice(),
     menuHeaderTemplate: config.templates.menuHeader,
     menuFooterTemplate: config.templates.menuFooter,
     query,
@@ -7778,6 +7832,9 @@ Bisa dipakai di *Grup* maupun *Chat Pribadi*! Bot akan membalasnya sebagai media
       case "upscale":
       case "hd2":
       case "hd4": {
+        if (!isAiHdSupportedOnDevice()) {
+          return failReply(REDMI9C_AI_HD_NOTICE);
+        }
         const imgBuf = ctx.imageBuffer || (ctx.documentMedia?.kind === "image" ? ctx.documentMedia.buffer : null);
         const inputMime = ctx.imageMimeType || (ctx.documentMedia?.kind === "image" ? ctx.documentMedia.mimeType : void 0);
         if (!imgBuf) {
@@ -7795,6 +7852,7 @@ Bisa dipakai di *Grup* maupun *Chat Pribadi*! Bot akan membalasnya sebagai media
         const enhanceMode = modeMap[matchedCmd.id] || "auto";
         const scaleOverride = matchedCmd.id === "hd2" ? 2 : matchedCmd.id === "hd4" ? 4 : void 0;
         let faceModelOverride;
+        let srModelOverride;
         let fidelityOverride;
         if (argsText) {
           const tokens = argsText.toLowerCase().split(/\s+/).filter(Boolean);
@@ -7803,6 +7861,10 @@ Bisa dipakai di *Grup* maupun *Chat Pribadi*! Bot akan membalasnya sebagai media
               faceModelOverride = "codeformer";
             } else if (tok === "gfpgan" || tok === "gfp") {
               faceModelOverride = "gfpgan";
+            } else if (tok === "ultra" || tok === "ultrasharp" || tok === "4x-ultrasharp" || tok === "ajib") {
+              srModelOverride = "ultrasharp";
+            } else if (tok === "esrgan" || tok === "realesrgan" || tok === "real-esrgan") {
+              srModelOverride = "realesrgan";
             } else {
               const maybeNum = Number(tok.replace(",", "."));
               if (Number.isFinite(maybeNum) && maybeNum >= 0.05 && maybeNum <= 0.98) {
@@ -7817,6 +7879,7 @@ Bisa dipakai di *Grup* maupun *Chat Pribadi*! Bot akan membalasnya sebagai media
           mode: enhanceMode,
           scaleOverride,
           faceModelOverride,
+          srModelOverride,
           fidelityOverride,
           config: config.aiEnhance,
           onStatus: ctx.onProgressStatus
@@ -7828,8 +7891,11 @@ Bisa dipakai di *Grup* maupun *Chat Pribadi*! Bot akan membalasnya sebagai media
           5 * 60 * 1e3
         ) : void 0;
         botStore.incrementStat("mediaDownloaded");
-        const headerTitle = enhanceMode === "face" ? "*AI Face Restoration Selesai*" : enhanceMode === "2x" ? "*AI Super-Resolution 2\xD7 Selesai*" : enhanceMode === "4x" ? "*AI Super-Resolution 4\xD7 Selesai*" : enhanceMode === "upscale" ? "*AI Super-Resolution Selesai*" : "*AI Photo Enhance Selesai*";
         const { meta } = enhanced;
+        const isUltraSharpUsed = meta.modelsUsed.some(
+          (m) => m.toLowerCase().includes("ultrasharp")
+        );
+        const headerTitle = enhanceMode === "face" ? "*AI Face Restoration Selesai*" : isUltraSharpUsed ? "*AI Super-Resolution 4x-UltraSharp Selesai (Super Ajib)*" : enhanceMode === "2x" ? "*AI Super-Resolution 2\xD7 Selesai*" : enhanceMode === "4x" ? "*AI Super-Resolution 4\xD7 Selesai*" : enhanceMode === "upscale" ? "*AI Super-Resolution Selesai*" : "*AI Photo Enhance Selesai*";
         const captionLines = [
           headerTitle,
           `\u2022 Resolusi: *${meta.inputWidth}\xD7${meta.inputHeight} px* \u2192 *${meta.outputWidth}\xD7${meta.outputHeight} px* (*${meta.effectiveScale}\xD7*)`,
@@ -11968,6 +12034,8 @@ async function startServer() {
       arch: process.arch,
       platform: process.platform,
       nodeVersion: process.version,
+      deviceProfile: getDeviceProfile(),
+      aiHdSupported: isAiHdSupportedOnDevice(),
       imageBackend: getActiveImageBackend(),
       memoryRssMb: Math.round(process.memoryUsage().rss / (1024 * 1024))
     });

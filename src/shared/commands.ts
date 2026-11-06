@@ -1324,6 +1324,7 @@ export interface BuildBotMenuOptions {
   stickerPackName: string;
   stickerAuthor: string;
   disabledCommands: string[];
+  excludeCommands?: string[];
   menuHeaderTemplate: string;
   menuFooterTemplate: string;
   query?: string;
@@ -1339,6 +1340,7 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
     (opts.ownerNumber || OFFICIAL_OWNER_NUMBER).replace(/[^0-9]/g, '') ||
     OFFICIAL_OWNER_NUMBER;
   const disabledSet = new Set(opts.disabledCommands || []);
+  const excludeSet = new Set(opts.excludeCommands || []);
 
   const isSuspensionLocked = (id: string) => {
     const canonical = id === 'allmenu' ? 'menu' : id;
@@ -1346,8 +1348,14 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
     return Boolean(found?.suspensionRisk);
   };
 
+  const isExcluded = (id: string) => {
+    const canonical = id === 'allmenu' ? 'menu' : id;
+    return excludeSet.has(canonical);
+  };
+
   const isEnabled = (id: string) => {
     const canonical = id === 'allmenu' ? 'menu' : id;
+    if (isExcluded(canonical)) return false;
     if (isSuspensionLocked(canonical)) return false;
     return !disabledSet.has(canonical);
   };
@@ -1366,15 +1374,29 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
     normalizedAlias === 'allmenu' ||
     ['all', 'semua', 'lengkap', 'full', 'allmenu'].includes(normalizedQuery);
 
+  // Helper to filter out excluded commands from compact row definitions
+  const filterRows = (
+    rows: Array<{ ids: string[]; argHint?: string; summary: string }>
+  ) => {
+    return rows
+      .map((row) => {
+        const remaining = row.ids.filter((id) => !isExcluded(id));
+        return remaining.length > 0 ? { ...row, ids: remaining } : null;
+      })
+      .filter((r): r is { ids: string[]; argHint?: string; summary: string } => r !== null);
+  };
+
   // 1. Full detailed catalog (.allmenu / .menu all)
   if (wantsFullList) {
     const lines: string[] = [];
     for (let i = 0; i < MENU_SECTIONS.length; i++) {
       const sec = MENU_SECTIONS[i];
+      const visibleRows = filterRows(sec.compactRows);
+      if (visibleRows.length === 0) continue;
       lines.push(MENU_DIVIDER);
       lines.push(`${sec.emoji} *${sec.code} · ${sec.title}*`);
       lines.push(MENU_DIVIDER);
-      for (const row of sec.compactRows) {
+      for (const row of visibleRows) {
         const cmdLabels = row.ids.map((id) => `*${p}${id}*`).join(' / ');
         const argPart = row.argHint ? ` ${row.argHint}` : '';
         lines.push(`• ${cmdLabels}${argPart} — ${row.summary}`);
@@ -1398,12 +1420,13 @@ export function buildBotMenuText(opts: BuildBotMenuOptions): string {
   );
 
   if (matchedSection && (normalizedQuery || normalizedAlias !== 'menu')) {
+    const visibleRows = filterRows(matchedSection.compactRows);
     const lines: string[] = [
       MENU_DIVIDER,
       `${matchedSection.emoji} *${matchedSection.code} · ${matchedSection.title}*`,
       MENU_DIVIDER,
     ];
-    for (const row of matchedSection.compactRows) {
+    for (const row of visibleRows) {
       const cmdLabels = row.ids.map((id) => `*${p}${id}*`).join(' / ');
       const argPart = row.argHint ? ` ${row.argHint}` : '';
       lines.push(`• ${cmdLabels}${argPart} — ${row.summary}`);
