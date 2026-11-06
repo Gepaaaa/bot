@@ -1289,7 +1289,7 @@ export async function processBotMessage(
           `• Berkas: *${elapsedSec}${formatByteSize(enhanced.buffer.length)}*`
         );
         captionLines.push(
-          '_Catatan: Detail mikro direkonstruksi oleh model AI pretrained sebagai estimasi restorasi visual, bukan rekaman optik asli yang hilang._'
+          '_Hasil diproses murni di HP via Termux menggunakan algoritma Lanczos3 Super-Resolution & Unsharp Detail Masking tanpa server eksternal._'
         );
 
         result = {

@@ -814,7 +814,10 @@ export async function compositeMemeToWebp(
   });
 }
 
-export async function enhanceImageHdAdapter(imageBuffer: Buffer): Promise<{
+export async function enhanceImageHdAdapter(
+  imageBuffer: Buffer,
+  scale: 2 | 4 = 2
+): Promise<{
   buffer: Buffer;
   width: number;
   height: number;
@@ -824,22 +827,23 @@ export async function enhanceImageHdAdapter(imageBuffer: Buffer): Promise<{
     const meta = await sharp(imageBuffer).metadata();
     const origW = meta.width || 600;
     const origH = meta.height || 600;
-    const scaleFactor = Math.min(2, 2048 / Math.max(origW, origH, 1));
-    const targetW = Math.max(
-      origW,
-      Math.round(origW * Math.max(1.25, scaleFactor))
-    );
-    const targetH = Math.max(
-      origH,
-      Math.round(origH * Math.max(1.25, scaleFactor))
-    );
+    const targetW = Math.max(origW, origW * scale);
+    const targetH = Math.max(origH, origH * scale);
 
     const out = await sharp(imageBuffer)
       .rotate()
-      .resize(targetW, targetH, { kernel: 'lanczos3', fit: 'fill' })
-      .modulate({ brightness: 1.02, saturation: 1.05 })
-      .sharpen({ sigma: 1.2, m1: 1.0, m2: 2.4 })
-      .jpeg({ quality: 94, mozjpeg: true })
+      .resize(targetW, targetH, {
+        kernel: 'lanczos3',
+        fit: 'fill',
+        withoutEnlargement: false,
+      })
+      .modulate({ brightness: 1.02, saturation: 1.06 })
+      .sharpen(
+        scale === 4
+          ? { sigma: 1.8, m1: 1.3, m2: 2.8 }
+          : { sigma: 1.3, m1: 1.0, m2: 2.2 }
+      )
+      .jpeg({ quality: 95, mozjpeg: true })
       .toBuffer();
 
     return { buffer: out, width: targetW, height: targetH };
@@ -848,17 +852,8 @@ export async function enhanceImageHdAdapter(imageBuffer: Buffer): Promise<{
   const sniffed = sniffImageMetadata(imageBuffer);
   const origW = sniffed.width || 640;
   const origH = sniffed.height || 640;
-  const scaleFactor = Math.min(2, 2048 / Math.max(origW, origH, 1));
-  const targetW =
-    Math.max(
-      2,
-      Math.round((origW * Math.max(1.25, scaleFactor)) / 2) * 2
-    );
-  const targetH =
-    Math.max(
-      2,
-      Math.round((origH * Math.max(1.25, scaleFactor)) / 2) * 2
-    );
+  const targetW = Math.max(2, Math.round((origW * scale) / 2) * 2);
+  const targetH = Math.max(2, Math.round((origH * scale) / 2) * 2);
 
   const outBuf = await withTempDir(async (dir) => {
     const ext =
@@ -871,6 +866,9 @@ export async function enhanceImageHdAdapter(imageBuffer: Buffer): Promise<{
     const outPath = path.join(dir, 'hd.jpg');
     await fs.writeFile(inPath, imageBuffer);
 
+    const unsharpFilter =
+      scale === 4 ? 'unsharp=7:7:1.4:5:5:0.0' : 'unsharp=5:5:1.0:5:5:0.0';
+
     await execFileAsync(
       getFfmpegBin(),
       [
@@ -878,14 +876,14 @@ export async function enhanceImageHdAdapter(imageBuffer: Buffer): Promise<{
         '-i',
         inPath,
         '-vf',
-        `scale=${targetW}:${targetH}:flags=lanczos,eq=brightness=0.02:saturation=1.05,unsharp=5:5:0.9:5:5:0.0`,
+        `scale=${targetW}:${targetH}:flags=lanczos,eq=brightness=0.02:saturation=1.06,${unsharpFilter}`,
         '-q:v',
         '2',
         '-frames:v',
         '1',
         outPath,
       ],
-      { timeout: 25000 }
+      { timeout: 35000 }
     );
     return fs.readFile(outPath);
   });

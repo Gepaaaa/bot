@@ -32,12 +32,15 @@ export type AudioEffectMode =
   | 'robot'
   | 'reverse';
 
-export async function enhanceImageHd(imageBuffer: Buffer): Promise<{
+export async function enhanceImageHd(
+  imageBuffer: Buffer,
+  scale: 2 | 4 = 2
+): Promise<{
   buffer: Buffer;
   width: number;
   height: number;
 }> {
-  return enhanceImageHdAdapter(imageBuffer);
+  return enhanceImageHdAdapter(imageBuffer, scale);
 }
 
 export async function applyImageFilter(
